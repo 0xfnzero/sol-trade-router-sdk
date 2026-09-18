@@ -1,0 +1,9 @@
+/target
+**/*.so
+.DS_Store
+Cargo.lock
+keys/
+*.keypair.json
+*-keypair.json
+.env
+.env.*

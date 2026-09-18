@@ -1,0 +1,23 @@
+[package]
+name = "sol-trade-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pinocchio on-chain multi-hop swap router with platform fee"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "sol_trade_router"
+
+[features]
+default = []
+bpf-entrypoint = []
+no-entrypoint = []
+
+[dependencies]
+pinocchio = { workspace = true }
+pinocchio-system = { workspace = true }
+pinocchio-token = { workspace = true }
+# Host `cargo check` needs PDA derivation without Solana syscalls.
+solana-address = { version = "2.7", default-features = false, features = ["curve25519", "sha2"] }
