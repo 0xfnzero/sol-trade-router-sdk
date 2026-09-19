@@ -6,42 +6,47 @@
 //!   rolls back and leaves no empty ATA. Default buy path sets `create_meme = true`.
 //! - Closes are always opt-in (default off).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey, system_instruction};
-use spl_associated_token_account::get_associated_token_address_with_program_id;
-use spl_associated_token_account::instruction::create_associated_token_account_idempotent;
-use spl_token::instruction::{close_account, sync_native};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+};
+use solana_system_interface::instruction as system_instruction;
 
-use crate::constants::{TOKEN_PROGRAM, WSOL_MINT};
+use crate::constants::{ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WSOL_MINT};
 
 type AtaKey = (Pubkey, Pubkey, Pubkey); // owner, mint, token_program
 
-fn ata_cache() -> &'static Mutex<HashMap<AtaKey, Pubkey>> {
-    static CACHE: OnceLock<Mutex<HashMap<AtaKey, Pubkey>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::with_capacity(256)))
+thread_local! {
+    /// Per-thread ATA cache — no Mutex on the hot path.
+    static ATA_CACHE: RefCell<HashMap<AtaKey, Pubkey>> =
+        RefCell::new(HashMap::with_capacity(64));
 }
 
 /// Cached ATA derivation (hot path — avoids repeated `find_program_address`).
 #[inline]
 pub fn ata(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
     let key = (*owner, *mint, *token_program);
-    if let Ok(guard) = ata_cache().lock() {
-        if let Some(cached) = guard.get(&key) {
+    ATA_CACHE.with(|cache| {
+        let mut map = cache.borrow_mut();
+        if let Some(cached) = map.get(&key) {
             return *cached;
         }
-    }
-    let addr = get_associated_token_address_with_program_id(owner, mint, token_program);
-    if let Ok(mut guard) = ata_cache().lock() {
-        if guard.len() < 4096 {
-            guard.insert(key, addr);
+        let addr = Pubkey::find_program_address(
+            &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
+            &ASSOCIATED_TOKEN_PROGRAM,
+        )
+        .0;
+        if map.len() < 4096 {
+            map.insert(key, addr);
         }
-    }
-    addr
+        addr
+    })
 }
 
-/// Warm ATA cache for a payer (call once on bot start).
+/// Warm ATA cache for a payer (call once on bot start / per thread).
 pub fn warm_ata_cache(owner: &Pubkey, mints: &[(Pubkey, Pubkey)]) {
     for (mint, tp) in mints {
         let _ = ata(owner, mint, tp);
@@ -49,7 +54,7 @@ pub fn warm_ata_cache(owner: &Pubkey, mints: &[(Pubkey, Pubkey)]) {
     let _ = ata(owner, &WSOL_MINT, &TOKEN_PROGRAM);
 }
 
-/// Idempotent create ATA.
+/// Idempotent create ATA (Associated Token Program ix = 1).
 #[inline]
 pub fn create_ata(
     payer: &Pubkey,
@@ -57,7 +62,19 @@ pub fn create_ata(
     mint: &Pubkey,
     token_program: &Pubkey,
 ) -> Instruction {
-    create_associated_token_account_idempotent(payer, owner, mint, token_program)
+    let associated = ata(owner, mint, token_program);
+    Instruction {
+        program_id: ASSOCIATED_TOKEN_PROGRAM,
+        accounts: vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(associated, false),
+            AccountMeta::new_readonly(*owner, false),
+            AccountMeta::new_readonly(*mint, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+            AccountMeta::new_readonly(*token_program, false),
+        ],
+        data: vec![1],
+    }
 }
 
 #[inline]
@@ -75,6 +92,7 @@ pub fn create_wsol_ata(payer: &Pubkey) -> Instruction {
     create_ata(payer, payer, &WSOL_MINT, &TOKEN_PROGRAM)
 }
 
+/// SPL Token `CloseAccount` (ix = 9).
 pub fn close_ata(
     owner: &Pubkey,
     mint: &Pubkey,
@@ -82,7 +100,15 @@ pub fn close_ata(
     destination: &Pubkey,
 ) -> Instruction {
     let token_ata = ata(owner, mint, token_program);
-    close_account(token_program, &token_ata, destination, owner, &[]).expect("close_account")
+    Instruction {
+        program_id: *token_program,
+        accounts: vec![
+            AccountMeta::new(token_ata, false),
+            AccountMeta::new(*destination, false),
+            AccountMeta::new_readonly(*owner, true),
+        ],
+        data: vec![9],
+    }
 }
 
 #[inline]
@@ -90,19 +116,14 @@ pub fn close_wsol_ata(owner: &Pubkey) -> Instruction {
     close_ata(owner, &WSOL_MINT, &TOKEN_PROGRAM, owner)
 }
 
+/// SPL Token `SyncNative` (ix = 17).
 #[inline]
-pub fn close_wsol(owner: &Pubkey) -> Instruction {
-    close_wsol_ata(owner)
-}
-
-#[inline]
-pub fn close_token_ata(
-    owner: &Pubkey,
-    mint: &Pubkey,
-    token_program: &Pubkey,
-    destination: &Pubkey,
-) -> Instruction {
-    close_ata(owner, mint, token_program, destination)
+fn sync_native(token_program: &Pubkey, account: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: *token_program,
+        accounts: vec![AccountMeta::new(*account, false)],
+        data: vec![17],
+    }
 }
 
 /// Wrap native SOL into an **existing** WSOL ATA (no create).
@@ -121,7 +142,7 @@ pub fn wrap_sol_with_options(
         ixs.push(create_wsol_ata(payer));
     }
     ixs.push(system_instruction::transfer(payer, &wsol_ata, lamports));
-    ixs.push(sync_native(&TOKEN_PROGRAM, &wsol_ata).expect("sync_native"));
+    ixs.push(sync_native(&TOKEN_PROGRAM, &wsol_ata));
     ixs
 }
 

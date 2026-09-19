@@ -3,12 +3,21 @@ name = "sol-trade-router-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Client SDK for sol-trade-router — simple multi-hop buys/sells with no RPC on the hot path"
+description = "Client SDK for sol-trade-router-sdk — simple multi-hop buys/sells with no RPC on the hot path"
 publish = false
 
 [dependencies]
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 solana-sdk = { workspace = true }
-spl-associated-token-account = { workspace = true }
-spl-token = { workspace = true }
+solana-system-interface = { workspace = true }
+sol-parser-sdk = { workspace = true }
+sol-trade-sdk = { workspace = true }
+tokio = { workspace = true }
+solana-hash = { workspace = true }
+solana-message = { workspace = true }
+
+[dev-dependencies]
+solana-client = "=4.2.2"
+solana-commitment-config = "3"
+solana-transaction-status = "=4.2.2"

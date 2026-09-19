@@ -1,121 +1,254 @@
-# sol-trade-router
+<div align="center">
+    <h1>🔀 Sol Trade Router SDK</h1>
+    <h3><em>Pinocchio on-chain multi-hop router + zero-RPC hot-path client SDK</em></h3>
+</div>
 
-Pinocchio 链上多跳 Router + 热路径零 RPC 的客户端 SDK。
+<p align="center">
+    <strong>A Solana monorepo with a Pinocchio router program and a Rust client SDK for fee-aware, multi-hop DEX swaps. Pool snapshots come from <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> events / local cache — no RPC on the hot path.</strong>
+</p>
 
-| 市场 | 类型 | 说明 |
-|------|------|------|
-| StonkFun / LaunchLab | **内盘** | bonding curve，任意 quote（含 CARDS） |
-| StonkFun 毕业池 | **外盘** | Raydium CPMM |
-| PumpFun | **内盘** | SOL bonding curve（单跳） |
+<p align="center">
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/LICENSE">
+        <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+    </a>
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk">
+        <img src="https://img.shields.io/github/stars/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub stars">
+    </a>
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/network">
+        <img src="https://img.shields.io/github/forks/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub forks">
+    </a>
+</p>
 
-## 命名规范
+<p align="center">
+    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
+    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
+    <img src="https://img.shields.io/badge/Pinocchio-0A7B83?style=for-the-badge&logo=solana&logoColor=white" alt="Pinocchio">
+    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Trading">
+</p>
 
-| 资产 | 买入 | 卖出 |
-|------|------|------|
-| 原生 SOL | `buy_with_sol` | `sell_to_sol` |
+<p align="center">
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README_CN.md">中文</a> |
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README.md">English</a> |
+    <a href="https://fnzero.dev/">Website</a> |
+    <a href="https://t.me/fnzero_group">Telegram</a> |
+    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
+</p>
+
+## 📋 Table of Contents
+
+- [✨ Features](#-features)
+- [📦 Workspace](#-workspace)
+- [🔖 Program ID](#-program-id)
+- [🛠️ Usage](#️-usage)
+- [📁 Project Structure](#-project-structure)
+- [🔨 Build](#-build)
+- [📄 License](#-license)
+- [💬 Contact](#-contact)
+- [⚠️ Important Notes](#️-important-notes)
+
+---
+
+## ✨ Features
+
+1. **On-chain multi-hop router**: Pinocchio program takes platform fee then CPI into DEX legs
+2. **Zero-RPC hot path**: `market_from_dex_event` builds pools from [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) events
+3. **Full DexType parity with sol-trade-sdk**: PumpFun, PumpSwap, LaunchLab/StonkFun/Bonk, Raydium CPMM / AMM V4 / CLMM, Orca Whirlpool, Meteora DLMM / DAMM V2
+4. **Symmetric API**: `buy_with_{sol|wsol|token}` / `sell_to_{sol|wsol|token}`
+5. **ATA policy**: WSOL / stock prepared on the cold path; meme ATA created in the same buy tx
+6. **Fee integrity**: On-chain check that `fee_source` spends ≥ `amount_in` (fee + swap)
+7. **Pool guard**: optional PDA / allowlist checks via `market_from_dex_event_checked`
+
+## 📦 Workspace
+
+| Path | Crate | Description |
+|------|-------|-------------|
+| `programs/sol-trade-router` | `sol-trade-router` | On-chain program: fee + multi-hop `route` CPI |
+| `crates/sdk` | `sol-trade-router-sdk` | Client SDK: offline instruction building |
+
+### Supported markets
+
+Aligned with [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) `DexType` coverage (Router CPI version):
+
+| Market | Type | Notes |
+|--------|------|-------|
+| PumpFun | Inner curve | SOL / quote bonding curve (V1 / V2) |
+| PumpSwap | Outer AMM | Graduated PumpFun pools (`pAMM`) |
+| LaunchLab / Bonk / StonkFun | Inner curve | Bonding curve, arbitrary quote (incl. CARDS) |
+| StonkFun graduated / Raydium CPMM | Outer CPMM | Raydium CPMM |
+| Raydium AMM V4 | AMM | `SwapBaseInV2` |
+| Raydium CLMM | CLMM | `swap_v2` + tick arrays |
+| Orca Whirlpool | CLMM | `swap_v2` + tick arrays |
+| Meteora DLMM | DLMM | `swap2` + bin arrays |
+| Meteora DAMM V2 | Dynamic AMM | `swap2` exact-in |
+
+Snapshots are built from [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) `DexEvent` via `market_from_dex_event`.
+
+## 🔖 Program ID
+
+```text
+CMrrMgrEvXW3oo6RtxnneDf5D5TeujfbqveFiKuvqrYg
+```
+
+Must match `declare_id!` in the program and `PROGRAM_ID` in the SDK. Local deploy keypair lives under `keys/` (gitignored) — see [keys/README.md](./keys/README.md).
+
+## 🛠️ Usage
+
+### Naming
+
+| Asset | Buy | Sell |
+|-------|-----|------|
+| Native SOL | `buy_with_sol` | `sell_to_sol` |
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
-| stock/quote | `buy_with_token` | `sell_to_token` |
-| 自定义 | `buy_with_opts` | `sell_with_opts` |
+| Stock / quote | `buy_with_token` | `sell_to_token` |
+| Custom | `buy_with_opts` | `sell_with_opts` |
 
-## ATA 策略
+### ATA strategy
 
-| 类型 | 提前单独创建 | 交易同笔创建 | 关闭 |
-|------|-------------|-------------|------|
-| **WSOL / 股票(quote)** | ✅ 推荐冷路径 | 默认否（可 opt-in） | 默认否 |
-| **meme** | ❌ 不要提前建 | ✅ 买入默认同笔创建 | 默认否 |
+| Kind | Create ahead | Create in trade | Close |
+|------|--------------|-----------------|-------|
+| **WSOL / stock (quote)** | ✅ cold path | opt-in | default off |
+| **meme** | ❌ | ✅ default on buy | default off |
 
-Meme 不提前建：买失败整笔回滚，不会留下空 ATA 浪费 rent。WSOL / stock 可复用，适合冷路径准备。
-
-启动时可预热 ATA 缓存（避免热路径反复 `find_program_address`）：
+Meme ATAs are not pre-created: a failed buy rolls back and leaves no empty rent-paying ATA.
 
 ```rust
 warm_ata_cache(&payer, &[(stock_mint, token_program)]);
 ```
 
-### 报价对齐（sol-trade-sdk）
-
-| 协议 | 要点 |
-|------|------|
-| LaunchLab | `virtual_base - real_base`；Token-2022 transfer fee；毕业 `total_base_sell` 夹取 |
-| CPMM | trade + creator fee（合并向上取整）；transfer fee；`creator_fee_on` |
-| PumpFun | 费率 95(+30) bps；买入费用**外加**；cashback sell 含 `user_volume_accumulator` |
-
-填充 `CpmmPool` 时：`base_reserve` / `quote_reserve` 需已扣除 vault 内 protocol/fund/creator fees。
-
-### 1) 冷路径：只准备可复用 ATA
+### Cold path — reusable ATAs only
 
 ```rust
-// 不含 meme
 let prep = client.prepare_buy_atas(&market, BuyWith::Sol);
-// 或细粒度：
 client.create_wsol_ata();
-client.create_quote_ata(&market); // stock 对需要时
-// meme 需要时用 create_meme_ata，但买入场景请走交易同笔 create_meme
+client.create_quote_ata(&market);
 ```
 
-### 2) 热路径买入（默认创建 meme ATA）
+### Hot path — buy (creates meme ATA by default)
 
 ```rust
-// buy_with_* 默认 create_meme = true；WSOL/stock 假设已 prepare
 let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
 ```
 
-### 3) 交易里顺带创建 / 关闭（显式）
+### Explicit create / close in the same tx
 
 ```rust
 client.buy_with_opts(
     amount,
     &market,
     TradeOpts::default()
-        .buy_with_sol()           // 已打开 create_meme
-        .create_wsol(true)        // 同笔建 WSOL（未 prepare 时）
-        .create_quote(true)       // 同笔建 stock
-        .close_wsol(true),        // 卖回 SOL 时 unwrap
+        .buy_with_sol()
+        .create_wsol(true)
+        .create_quote(true)
+        .close_wsol(true),
 )?;
-
-// 或一次全开（无冷路径准备）
-.with_ata(AtaPolicy::create_all_in_trade())
 ```
 
-| 策略 | meme | WSOL/quote | close |
-|------|------|------------|-------|
+| Policy | meme | WSOL/quote | close |
+|--------|------|------------|-------|
 | `AtaPolicy::default()` | ❌ | ❌ | ❌ |
 | `buy_with_*` | ✅ | ❌ | ❌ |
-| `sell_to_sol` | ❌ | ❌ | WSOL ✅（unwrap） |
+| `sell_to_sol` | ❌ | ❌ | WSOL ✅ (unwrap) |
 | `AtaPolicy::create_all_in_trade()` | ✅ | ✅ | ❌ |
-| `.create_wsol/quote/meme(true).close_*(true)` | 自选 | 自选 | 自选 |
 
-`sell_to_sol` 默认 `.close_wsol(true)`，收到原生 SOL；若要保留 WSOL 用 `sell_to_wsol`。
+`sell_to_sol` defaults to `.close_wsol(true)`; use `sell_to_wsol` to keep WSOL.
 
-## 手续费完整性（链上）
+### Quote alignment (sol-trade-sdk)
 
-- `amount_in` = **手续费 + 实际 swap 花费**（同一 `fee_source`）
-- 非 PumpFun 的 `buy_with_sol`：先 wrap 全部 `amount_in` 到 WSOL，再从 WSOL 扣费并 swap
-- PumpFun：从原生 SOL 扣费 + 花费，链上校验 `fee_source` 余额减少 ≥ `amount_in`
-- SPL 手续费校验收款 ATA 的 owner / mint，且 `fee_program` 必须是 Token / Token-2022
+| Protocol | Notes |
+|----------|-------|
+| LaunchLab | `virtual_base - real_base`; Token-2022 transfer fee; graduate clamp on `total_base_sell` |
+| CPMM | trade + creator fee (ceil combined); transfer fee; `creator_fee_on` |
+| PumpFun | 95(+30) bps; buy fee **on top**; cashback sell includes `user_volume_accumulator` |
 
-## 最简热路径
+When filling `CpmmPool`, `base_reserve` / `quote_reserve` must already exclude protocol/fund/creator fees sitting in vaults.
+
+### On-chain fee integrity
+
+- `amount_in` = **fee + swap spend** (same `fee_source`)
+- Non-PumpFun `buy_with_sol`: wrap full `amount_in` to WSOL, then fee + swap from WSOL
+- PumpFun: fee + spend from native SOL; on-chain asserts `fee_source` delta ≥ `amount_in`
+- SPL fee checks recipient ATA owner/mint; `fee_program` must be Token or Token-2022
+
+### Minimal hot path
 
 ```rust
-// 冷：prepare_buy_atas（WSOL + stock + fee recipient，不含 meme）
-// 热：
+// cold: prepare_buy_atas (WSOL + stock + fee recipient; no meme)
 let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
-let ixs = client.sell_to_sol(amount, &market)?.into_instructions(); // 默认 unwrap WSOL
+let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
 ```
 
-## 安全注意
+## 📁 Project Structure
 
-- `keys/` 含程序 keypair，**勿提交**（已在 `.gitignore`）
-- 部署后请尽快 `initialize`，避免他人抢占 authority
-
-## 仓库 / 构建
-
+```text
+sol-trade-router-sdk/
+├── programs/
+│   └── sol-trade-router/   # On-chain Pinocchio program
+│       ├── Cargo.toml
+│       └── src/
+│           ├── lib.rs
+│           ├── state.rs
+│           ├── error.rs
+│           └── instructions/
+│               ├── initialize.rs
+│               ├── update_config.rs
+│               └── route.rs
+├── crates/
+│   └── sdk/                # Client SDK (sol-trade-router-sdk)
+│       ├── Cargo.toml
+│       └── src/
+│           ├── trade.rs
+│           ├── legs.rs             # DEX swap legs (all DexTypes)
+│           ├── parser.rs           # DexEvent → Market (sol-parser-sdk)
+│           ├── market.rs / quote.rs / ata.rs / pool_guard.rs / ...
+│           └── ...
+├── scripts/
+│   ├── check.sh
+│   └── build-program.sh
+├── keys/
+│   └── README.md           # local keypair docs (*.json not committed)
+├── LICENSE
+├── Cargo.toml
+├── README.md
+└── README_CN.md
 ```
-programs/router/   # Pinocchio
-crates/sdk/        # sol-trade-router-sdk
-```
+
+## 🔨 Build
+
+Requires a sibling checkout of [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) at `../Solana-SDK-Projects/sol-parser-sdk` (same layout as [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk)).
 
 ```bash
+# Host compile check (SDK + program)
+./scripts/check.sh
+# or
 cargo check -p sol-trade-router-sdk
-cargo build-sbf --manifest-path programs/router/Cargo.toml --features bpf-entrypoint
+cargo check -p sol-trade-router
+
+# Offline unit tests (no RPC)
+cargo test -p sol-trade-router-sdk --lib offline_ -- --nocapture
+
+# Mainnet simulateTransaction suite (creates ephemeral wallets, virtually funds them)
+RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_sim -- --nocapture --test-threads=1
+# optional: SOLANA_RPC_URL=https://...
+
+# On-chain SBF build (requires Solana platform-tools / cargo-build-sbf)
+./scripts/build-program.sh
 ```
+
+## 📄 License
+
+MIT License
+
+## 💬 Contact
+
+- Official Website: https://fnzero.dev/
+- Project Repository: https://github.com/0xfnzero/sol-trade-router-sdk
+- Telegram Group: https://t.me/fnzero_group
+- Discord: https://discord.gg/vuazbGkqQE
+
+## ⚠️ Important Notes
+
+1. Test thoroughly before using on mainnet
+2. Never commit `keys/*.json` deploy keypairs
+3. Call `initialize` promptly after deploy so others cannot claim config authority
+4. When rotating Program ID, update both `declare_id!` and SDK `PROGRAM_ID`
+5. Comply with relevant laws and regulations

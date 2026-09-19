@@ -3,10 +3,9 @@
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    system_program,
 };
 
-use crate::config_pda;
+use crate::{config_pda, constants::SYSTEM_PROGRAM};
 
 pub const TAG_INITIALIZE: u8 = 0;
 pub const TAG_UPDATE_CONFIG: u8 = 1;
@@ -27,7 +26,7 @@ pub fn initialize_config(
             AccountMeta::new(*authority, true),
             AccountMeta::new(config, false),
             AccountMeta::new_readonly(*fee_recipient, false),
-            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
         ],
         data,
     }

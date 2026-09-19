@@ -20,4 +20,5 @@ pinocchio = { workspace = true }
 pinocchio-system = { workspace = true }
 pinocchio-token = { workspace = true }
 # Host `cargo check` needs PDA derivation without Solana syscalls.
-solana-address = { version = "2.7", default-features = false, features = ["curve25519", "sha2"] }
+# Pin to 2.6.x — sol-parser-sdk / solana-entry require `<2.7.0`.
+solana-address = { version = "=2.6.1", default-features = false, features = ["curve25519", "sha2"] }

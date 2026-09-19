@@ -3,7 +3,10 @@
 use anyhow::{anyhow, Result};
 
 use crate::{
-    market::{CpmmPool, LaunchLabPool, PumpFunPool},
+    market::{
+        CpmmPool, LaunchLabPool, MeteoraDammV2Pool, MeteoraDlmmPool, PumpFunPool, PumpSwapPool,
+        RaydiumAmmV4Pool, RaydiumClmmPool, WhirlpoolPool,
+    },
     transfer_fee::TokenTransferFee,
 };
 
@@ -99,13 +102,17 @@ pub fn launchlab_buy_quote(
         return Err(anyhow!("quote_in is zero"));
     }
     if pool.curve_type != 0 {
-        return Err(anyhow!("unsupported LaunchLab curve_type {}", pool.curve_type));
+        return Err(anyhow!(
+            "unsupported LaunchLab curve_type {}",
+            pool.curve_type
+        ));
     }
     let total_fee_rate = launchlab_total_fee_rate(pool, share_fee_rate)?;
     let quote_xfer = pool.quote_transfer_fee.calculate(amount_in);
     let vault_input = amount_in
         .checked_sub(quote_xfer)
-        .ok_or_else(|| anyhow!("LaunchLab quote transfer fee exceeds input"))? as u128;
+        .ok_or_else(|| anyhow!("LaunchLab quote transfer fee exceeds input"))?
+        as u128;
     let fee = fee_ceil(vault_input, total_fee_rate);
     let curve_input = vault_input
         .checked_sub(fee)
@@ -176,12 +183,16 @@ pub fn launchlab_sell_quote_out(pool: &LaunchLabPool, base_in: u64) -> Result<u6
         return Err(anyhow!("base_in is zero"));
     }
     if pool.curve_type != 0 {
-        return Err(anyhow!("unsupported LaunchLab curve_type {}", pool.curve_type));
+        return Err(anyhow!(
+            "unsupported LaunchLab curve_type {}",
+            pool.curve_type
+        ));
     }
     let base_xfer = pool.base_transfer_fee.calculate(base_in);
     let curve_input = base_in
         .checked_sub(base_xfer)
-        .ok_or_else(|| anyhow!("LaunchLab base transfer fee exceeds input"))? as u128;
+        .ok_or_else(|| anyhow!("LaunchLab base transfer fee exceeds input"))?
+        as u128;
     let input_reserve = pool
         .virtual_base
         .checked_sub(pool.real_base)
@@ -220,7 +231,10 @@ mod tests {
 
     #[test]
     fn slippage_clamped_to_9999() {
-        assert_eq!(apply_slippage_min_out(1_000_000, 10_000), apply_slippage_min_out(1_000_000, 9_999));
+        assert_eq!(
+            apply_slippage_min_out(1_000_000, 10_000),
+            apply_slippage_min_out(1_000_000, 9_999)
+        );
         assert_ne!(apply_slippage_min_out(1_000_000, 9_999), 0);
     }
 
@@ -240,10 +254,14 @@ mod tests {
         let pool = PumpFunPool {
             mint: dummy_pubkey(1),
             mint_token_program: dummy_pubkey(2),
+            quote_mint: crate::constants::WSOL_MINT,
+            quote_token_program: crate::constants::TOKEN_PROGRAM,
+            use_v2: false,
             bonding_curve: dummy_pubkey(3),
             associated_bonding_curve: dummy_pubkey(4),
             creator_vault: dummy_pubkey(5),
             fee_recipient: dummy_pubkey(6),
+            buyback_fee_recipient: crate::constants::PUMPFUN_BUYBACK_FEE_RECIPIENT,
             global: dummy_pubkey(7),
             event_authority: dummy_pubkey(8),
             global_volume_accumulator: dummy_pubkey(9),
@@ -296,8 +314,101 @@ mod tests {
         let expected = (2_000_000u128 * 99) / (1_000_000 + 99);
         assert_eq!(out as u128, expected);
     }
-}
 
+    #[test]
+    fn cpmm_in_for_out_round_trips() {
+        let pool = CpmmPool {
+            pool_state: dummy_pubkey(1),
+            amm_config: dummy_pubkey(2),
+            observation_state: dummy_pubkey(3),
+            base_mint: dummy_pubkey(4),
+            quote_mint: dummy_pubkey(5),
+            base_vault: dummy_pubkey(6),
+            quote_vault: dummy_pubkey(7),
+            base_token_program: dummy_pubkey(8),
+            quote_token_program: dummy_pubkey(9),
+            base_reserve: 1_000_000_000,
+            quote_reserve: 2_000_000_000,
+            trade_fee_rate: 2_500,
+            creator_fee_rate: 0,
+            creator_fee_on: 0,
+            enable_creator_fee: false,
+            base_transfer_fee: TokenTransferFee::none(),
+            quote_transfer_fee: TokenTransferFee::none(),
+        };
+        let want_out = 1_000_000u64;
+        let amount_in = cpmm_in_for_out(&pool, want_out, true).unwrap();
+        let got = cpmm_out(&pool, amount_in, true).unwrap();
+        assert!(got >= want_out, "got {got} < want {want_out}");
+        if amount_in > 1 {
+            let under = cpmm_out(&pool, amount_in - 1, true).unwrap();
+            assert!(under < want_out, "amount_in-1 still yields >= want");
+        }
+    }
+
+    #[test]
+    fn pumpswap_quotes_match_reference_integer_math() {
+        let pool = PumpSwapPool {
+            pool: dummy_pubkey(1),
+            base_mint: dummy_pubkey(2),
+            quote_mint: dummy_pubkey(3),
+            pool_base_token_account: dummy_pubkey(4),
+            pool_quote_token_account: dummy_pubkey(5),
+            base_token_program: dummy_pubkey(6),
+            quote_token_program: dummy_pubkey(7),
+            coin_creator_vault_ata: dummy_pubkey(8),
+            coin_creator_vault_authority: dummy_pubkey(9),
+            coin_creator: dummy_pubkey(10),
+            base_reserve: 800_000_000_000_000,
+            quote_reserve: 100_000_000_000,
+            virtual_quote_reserves: 5_000_000_000,
+            lp_fee_bps: 20,
+            protocol_fee_bps: 5,
+            creator_fee_bps: 30,
+            is_cashback_coin: false,
+            protocol_fee_recipient: crate::constants::PUMPSWAP_PROTOCOL_FEE_RECIPIENT,
+            buyback_fee_recipient: crate::constants::PUMPSWAP_BUYBACK_FEE_RECIPIENT,
+        };
+        assert_eq!(
+            pumpswap_buy_base_out(&pool, 1_500_000_000).unwrap(),
+            11_206_836_149_304
+        );
+        assert_eq!(
+            pumpswap_sell_quote_out(&pool, 123_456_789_000).unwrap(),
+            16_112_095
+        );
+    }
+
+    #[test]
+    fn meteora_damm_v2_prefers_reserve_quote_over_stale_expected_out() {
+        let pool = MeteoraDammV2Pool {
+            pool: dummy_pubkey(1),
+            token_a_vault: dummy_pubkey(2),
+            token_b_vault: dummy_pubkey(3),
+            token_a_mint: dummy_pubkey(4),
+            token_b_mint: dummy_pubkey(5),
+            token_a_program: crate::constants::TOKEN_PROGRAM,
+            token_b_program: crate::constants::TOKEN_PROGRAM,
+            token_a_reserve: 1_000_000,
+            token_b_reserve: 2_000_000,
+            fee_bps: 0,
+            quoted_amount_in: None,
+            expected_out: Some(1),
+            swap_mode: 0,
+            referral_token_account: None,
+            include_rate_limiter_sysvar: false,
+        };
+        let out = meteora_damm_v2_out(&pool, 100_000, true).unwrap();
+        assert!(out > 1, "reserve quote must beat stale expected_out, got {out}");
+    }
+
+    #[test]
+    fn fee_amount_matches_on_chain_floor() {
+        assert_eq!(fee_amount(1_000_000, 100), 10_000);
+        assert_eq!(fee_amount(999, 100), 9);
+        assert_eq!(fee_amount(1, 1), 0);
+    }
+}
 
 // ── CPMM ───────────────────────────────────────────────────────────────────
 
@@ -318,22 +429,26 @@ pub fn cpmm_out(pool: &CpmmPool, amount_in: u64, input_is_base: bool) -> Result<
     if amount_in == 0 {
         return Err(anyhow!("amount_in is zero"));
     }
-    let (input_reserve, output_reserve, in_fee, out_fee): (u64, u64, TokenTransferFee, TokenTransferFee) =
-        if input_is_base {
-            (
-                pool.base_reserve,
-                pool.quote_reserve,
-                pool.base_transfer_fee,
-                pool.quote_transfer_fee,
-            )
-        } else {
-            (
-                pool.quote_reserve,
-                pool.base_reserve,
-                pool.quote_transfer_fee,
-                pool.base_transfer_fee,
-            )
-        };
+    let (input_reserve, output_reserve, in_fee, out_fee): (
+        u64,
+        u64,
+        TokenTransferFee,
+        TokenTransferFee,
+    ) = if input_is_base {
+        (
+            pool.base_reserve,
+            pool.quote_reserve,
+            pool.base_transfer_fee,
+            pool.quote_transfer_fee,
+        )
+    } else {
+        (
+            pool.quote_reserve,
+            pool.base_reserve,
+            pool.quote_transfer_fee,
+            pool.base_transfer_fee,
+        )
+    };
     if input_reserve == 0 || output_reserve == 0 {
         return Err(anyhow!("empty cpmm reserves"));
     }
@@ -346,7 +461,7 @@ pub fn cpmm_out(pool: &CpmmPool, amount_in: u64, input_is_base: bool) -> Result<
         0
     };
 
-    let (input_less_fees, output_swapped) = if on_input {
+    let (_, output_swapped) = if on_input {
         let total_rate = pool.trade_fee_rate.saturating_add(creator_rate);
         let total_fee = cpmm_trade_fee(actual_in, total_rate);
         let input_less = actual_in.saturating_sub(total_fee);
@@ -357,13 +472,53 @@ pub fn cpmm_out(pool: &CpmmPool, amount_in: u64, input_is_base: bool) -> Result<
         let trade_fee = cpmm_trade_fee(actual_in, pool.trade_fee_rate);
         let input_less = actual_in.saturating_sub(trade_fee);
         let out_swapped = ((output_reserve as u128).saturating_mul(input_less as u128)
-            / (input_reserve as u128).saturating_add(input_less as u128)) as u64;
+            / (input_reserve as u128).saturating_add(input_less as u128))
+            as u64;
         let creator_fee = cpmm_trade_fee(out_swapped, creator_rate);
         (input_less, out_swapped.saturating_sub(creator_fee))
     };
 
-    let _ = input_less_fees;
     Ok(output_swapped.saturating_sub(out_fee.calculate(output_swapped)))
+}
+
+/// Exact-out inverse of [`cpmm_out`] (binary search; includes pool fees).
+pub fn cpmm_in_for_out(pool: &CpmmPool, amount_out: u64, input_is_base: bool) -> Result<u64> {
+    if amount_out == 0 {
+        return Ok(0);
+    }
+    let output_reserve = if input_is_base {
+        pool.quote_reserve
+    } else {
+        pool.base_reserve
+    };
+    if amount_out >= output_reserve {
+        return Err(anyhow!("cpmm amount_out exceeds reserve"));
+    }
+    let input_reserve = if input_is_base {
+        pool.base_reserve
+    } else {
+        pool.quote_reserve
+    };
+    let naive = (amount_out as u128)
+        .saturating_mul(input_reserve as u128)
+        .div_ceil((output_reserve - amount_out) as u128);
+    let mut lo = (naive as u64).max(1);
+    let mut hi = lo.saturating_mul(2).saturating_add(10_000);
+    while cpmm_out(pool, hi, input_is_base).unwrap_or(0) < amount_out {
+        if hi == u64::MAX {
+            return Err(anyhow!("cpmm_in_for_out overflow"));
+        }
+        hi = hi.saturating_mul(2).max(hi.saturating_add(1));
+    }
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if cpmm_out(pool, mid, input_is_base).unwrap_or(0) >= amount_out {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    Ok(lo)
 }
 
 // ── PumpFun ────────────────────────────────────────────────────────────────
@@ -375,6 +530,8 @@ pub fn pumpfun_total_fee_bps(has_creator: bool) -> u64 {
 }
 
 /// PumpFun buy — fee is **additive** (`amount * 10000 / (10000 + fee_bps)`).
+/// `lamports_in` / `virtual_sol_reserves` are in **quote mint units** (WSOL lamports
+/// or e.g. USDC micro-units for V2 non-WSOL curves).
 pub fn pumpfun_buy_token_out(pool: &PumpFunPool, lamports_in: u64) -> u64 {
     if lamports_in == 0 || pool.virtual_token_reserves == 0 {
         return 0;
@@ -388,16 +545,18 @@ pub fn pumpfun_buy_token_out(pool: &PumpFunPool, lamports_in: u64) -> u64 {
         .saturating_mul(10_000)
         .checked_div(fee_bps + 10_000)
         .unwrap_or(0);
-    if input == 0 {
+    // Official buy_exact_sol_in: tokens_out uses (net_sol - 1) in the constant-product.
+    let curve_in = input.saturating_sub(1);
+    if curve_in == 0 {
         return 0;
     }
     let vtok = pool.virtual_token_reserves as u128;
     let vsol = pool.virtual_sol_reserves as u128;
-    let denom = vsol.saturating_add(input);
+    let denom = vsol.saturating_add(curve_in);
     if denom == 0 {
         return 0;
     }
-    let tokens = input
+    let tokens = curve_in
         .saturating_mul(vtok)
         .checked_div(denom)
         .unwrap_or(0)
@@ -424,4 +583,169 @@ pub fn pumpfun_sell_sol_out(pool: &PumpFunPool, token_in: u64) -> u64 {
     } as u128;
     let fee = compute_fee_bps(sol_cost, fee_bps);
     sol_cost.saturating_sub(fee).min(u64::MAX as u128) as u64
+}
+
+fn pumpswap_effective_quote(pool: &PumpSwapPool) -> Result<u64> {
+    let effective = (pool.quote_reserve as i128)
+        .checked_add(pool.virtual_quote_reserves)
+        .ok_or_else(|| anyhow!("PumpSwap effective quote reserve overflow"))?;
+    u64::try_from(effective)
+        .ok()
+        .filter(|reserve| *reserve > 0)
+        .ok_or_else(|| anyhow!("invalid PumpSwap effective quote reserve"))
+}
+
+pub fn pumpswap_buy_base_out(pool: &PumpSwapPool, quote_in: u64) -> Result<u64> {
+    if quote_in == 0 || pool.base_reserve == 0 || pool.quote_reserve == 0 {
+        return Err(anyhow!("invalid PumpSwap input or reserves"));
+    }
+    let total_fee_bps = pool
+        .lp_fee_bps
+        .checked_add(pool.protocol_fee_bps)
+        .and_then(|v| v.checked_add(pool.creator_fee_bps))
+        .ok_or_else(|| anyhow!("PumpSwap fee bps overflow"))?;
+    let denominator = 10_000u64
+        .checked_add(total_fee_bps)
+        .ok_or_else(|| anyhow!("PumpSwap fee denominator overflow"))?;
+    let mut effective_in = (quote_in as u128).saturating_mul(10_000) / denominator as u128;
+    let total_with_fees = effective_in
+        .saturating_add(compute_fee_bps(effective_in, pool.lp_fee_bps as u128))
+        .saturating_add(compute_fee_bps(effective_in, pool.protocol_fee_bps as u128))
+        .saturating_add(compute_fee_bps(effective_in, pool.creator_fee_bps as u128));
+    if total_with_fees > quote_in as u128 {
+        effective_in = effective_in.saturating_sub(total_with_fees - quote_in as u128);
+    }
+    let curve_in = effective_in
+        .checked_sub(1)
+        .ok_or_else(|| anyhow!("PumpSwap quote input is too small after fees"))?;
+    let effective_quote = pumpswap_effective_quote(pool)? as u128;
+    Ok(((pool.base_reserve as u128).saturating_mul(curve_in)
+        / effective_quote.saturating_add(curve_in))
+    .min(u64::MAX as u128) as u64)
+}
+
+pub fn pumpswap_sell_quote_out(pool: &PumpSwapPool, base_in: u64) -> Result<u64> {
+    if base_in == 0 || pool.base_reserve == 0 || pool.quote_reserve == 0 {
+        return Err(anyhow!("invalid PumpSwap input or reserves"));
+    }
+    let gross = (pumpswap_effective_quote(pool)? as u128).saturating_mul(base_in as u128)
+        / (pool.base_reserve as u128).saturating_add(base_in as u128);
+    let fees = compute_fee_bps(gross, pool.lp_fee_bps as u128)
+        .saturating_add(compute_fee_bps(gross, pool.protocol_fee_bps as u128))
+        .saturating_add(compute_fee_bps(gross, pool.creator_fee_bps as u128));
+    let out = gross.saturating_sub(fees).min(u64::MAX as u128) as u64;
+    if gross.saturating_sub(compute_fee_bps(gross, pool.lp_fee_bps as u128))
+        > pool.quote_reserve as u128
+    {
+        return Err(anyhow!("PumpSwap real quote reserve cannot cover output"));
+    }
+    Ok(out)
+}
+
+pub fn raydium_amm_v4_out(
+    pool: &RaydiumAmmV4Pool,
+    amount_in: u64,
+    input_is_coin: bool,
+) -> Result<u64> {
+    if amount_in == 0 {
+        return Err(anyhow!("amount_in is zero"));
+    }
+    let (input_reserve, output_reserve) = if input_is_coin {
+        (pool.coin_reserve, pool.pc_reserve)
+    } else {
+        (pool.pc_reserve, pool.coin_reserve)
+    };
+    if input_reserve == 0 || output_reserve == 0 {
+        return Err(anyhow!("empty Raydium AMM V4 reserves"));
+    }
+    // Matches sol-trade-sdk input trade fee; output is pure CP after net input
+    // (do not subtract input-denominated swap_fee from output units).
+    // Streamers must populate AmmInfo trade_fee_numerator (typical 25); 0 means 0.
+    let trade_num = pool.trade_fee_numerator;
+    let trade_fee = (amount_in as u128)
+        .saturating_mul(trade_num as u128)
+        .div_ceil(10_000) as u64;
+    let net_in = amount_in.saturating_sub(trade_fee);
+    let swapped = (output_reserve as u128).saturating_mul(net_in as u128)
+        / (input_reserve as u128).saturating_add(net_in as u128);
+    Ok(swapped.min(u64::MAX as u128) as u64)
+}
+
+pub fn meteora_damm_v2_out(
+    pool: &MeteoraDammV2Pool,
+    amount_in: u64,
+    input_is_a: bool,
+) -> Result<u64> {
+    let (input_reserve, output_reserve) = if input_is_a {
+        (pool.token_a_reserve, pool.token_b_reserve)
+    } else {
+        (pool.token_b_reserve, pool.token_a_reserve)
+    };
+    // Prefer amount-aware CP quote. When fee_bps is unknown (0) but streamer
+    // provided a matching expected_out, use that — zero-fee CP would overstate.
+    if amount_in > 0 && input_reserve > 0 && output_reserve > 0 {
+        if pool.fee_bps == 0 {
+            if let Some(expected) = pool.expected_out {
+                if pool.quoted_amount_in == Some(amount_in) {
+                    return Ok(expected);
+                }
+            }
+        }
+        let net_in = (amount_in as u128)
+            .saturating_mul(10_000u128.saturating_sub(pool.fee_bps.min(10_000) as u128))
+            / 10_000;
+        return Ok(((output_reserve as u128).saturating_mul(net_in)
+            / (input_reserve as u128).saturating_add(net_in))
+        .min(u64::MAX as u128) as u64);
+    }
+    if let Some(expected) = pool.expected_out {
+        match pool.quoted_amount_in {
+            Some(qin) if qin == amount_in => return Ok(expected),
+            Some(qin) => {
+                return Err(anyhow!(
+                    "Meteora DAMM V2 expected_out quoted for {qin}, got amount_in {amount_in}"
+                ));
+            }
+            None => {
+                return Err(anyhow!(
+                    "Meteora DAMM V2 expected_out fallback needs quoted_amount_in"
+                ));
+            }
+        }
+    }
+    Err(anyhow!(
+        "Meteora DAMM V2 needs expected_out or non-zero reserves"
+    ))
+}
+
+fn snapshot_expected_out(
+    expected_out: Option<u64>,
+    quoted_amount_in: Option<u64>,
+    amount_in: u64,
+    dex: &str,
+) -> Result<u64> {
+    let expected = expected_out.ok_or_else(|| {
+        anyhow!("{dex} snapshot has no expected_out; provide TradeOpts::with_min_out")
+    })?;
+    match quoted_amount_in {
+        Some(qin) if qin == amount_in => Ok(expected),
+        Some(qin) => Err(anyhow!(
+            "{dex} expected_out quoted for {qin}, got amount_in {amount_in}"
+        )),
+        None => Err(anyhow!(
+            "{dex} snapshot missing quoted_amount_in; provide TradeOpts::with_min_out"
+        )),
+    }
+}
+
+pub fn raydium_clmm_out(pool: &RaydiumClmmPool, amount_in: u64) -> Result<u64> {
+    snapshot_expected_out(pool.expected_out, pool.quoted_amount_in, amount_in, "Raydium CLMM")
+}
+
+pub fn whirlpool_out(pool: &WhirlpoolPool, amount_in: u64) -> Result<u64> {
+    snapshot_expected_out(pool.expected_out, pool.quoted_amount_in, amount_in, "Orca Whirlpool")
+}
+
+pub fn meteora_dlmm_out(pool: &MeteoraDlmmPool, amount_in: u64) -> Result<u64> {
+    snapshot_expected_out(pool.expected_out, pool.quoted_amount_in, amount_in, "Meteora DLMM")
 }

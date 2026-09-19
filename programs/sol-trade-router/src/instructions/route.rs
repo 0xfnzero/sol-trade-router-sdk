@@ -48,7 +48,8 @@ use crate::{
 };
 
 const MAX_LEGS: usize = 4;
-const MAX_LEG_ACCOUNTS: usize = 32;
+/// Must stay in sync with SDK `legs::MAX_LEG_ACCOUNTS`.
+const MAX_LEG_ACCOUNTS: usize = 64;
 
 #[inline(always)]
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, ProgramError> {
@@ -104,9 +105,9 @@ pub fn process(
     if !(1..=MAX_LEGS).contains(&num_legs) {
         return Err(RouterError::TooManyLegs.into());
     }
-    if fee_asset > 1 {
-        return Err(RouterError::InvalidFeeAsset.into());
-    }
+    // Low bit = asset (0 SOL / 1 SPL). Bit 7 = exact-out (amount_in is max budget).
+    let exact_out = (fee_asset & 0x80) != 0;
+    let fee_asset = fee_asset & 0x01;
 
     let (user, rest) = accounts
         .split_first_mut()
@@ -279,7 +280,9 @@ pub fn process(
     // Leftover remaining accounts are DEX program metas (SDK appends them after legs).
     let _ = remaining_offset;
 
-    // C2: fee_source must have spent at least amount_in (fee + swap).
+    // C2 fee integrity:
+    // - exact-in:  spent >= amount_in (prevent understating amount_in / fee evasion)
+    // - exact-out: spent <= amount_in (amount_in is max budget; DEX enforces exact out)
     let fee_source_after = match fee_asset {
         0 => fee_source.lamports(),
         1 => token_amount(fee_source)?,
@@ -288,7 +291,11 @@ pub fn process(
     let spent = fee_source_before
         .checked_sub(fee_source_after)
         .ok_or(RouterError::FeeSourceMismatch)?;
-    if spent < amount_in {
+    if exact_out {
+        if spent > amount_in || spent < fee {
+            return Err(RouterError::FeeSourceMismatch.into());
+        }
+    } else if spent < amount_in {
         return Err(RouterError::FeeSourceMismatch.into());
     }
 

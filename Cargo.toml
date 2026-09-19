@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "programs/router",
+    "programs/sol-trade-router",
     "crates/sdk",
 ]
 default-members = ["crates/sdk"]
@@ -10,8 +10,10 @@ default-members = ["crates/sdk"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-authors = ["fnzero"]
-repository = "https://github.com/0xfnzero/sol-trade-router"
+authors = ["0xfnzero"]
+repository = "https://github.com/0xfnzero/sol-trade-router-sdk"
+homepage = "https://github.com/0xfnzero/sol-trade-router-sdk"
+documentation = "https://docs.rs/sol-trade-router-sdk"
 
 [workspace.dependencies]
 pinocchio = { version = "0.11", features = ["cpi"] }
@@ -19,6 +21,11 @@ pinocchio-system = "0.6"
 pinocchio-token = "0.7"
 anyhow = "1"
 thiserror = "2"
-solana-sdk = "2.2"
-spl-associated-token-account = "6"
-spl-token = "7"
+# Must match sol-parser-sdk (Pubkey / Instruction types).
+solana-sdk = "4.0.1"
+solana-system-interface = { version = "3.0.0", features = ["bincode"] }
+sol-parser-sdk = { version = "=0.7.5", path = "../Solana-SDK-Projects/sol-parser-sdk", default-features = false, features = ["parse-borsh"] }
+sol-trade-sdk = { version = "=5.0.4", path = "../Solana-SDK-Projects/sol-trade-sdk", default-features = false }
+tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
+solana-hash = "4.4.0"
+solana-message = "4.4.0"

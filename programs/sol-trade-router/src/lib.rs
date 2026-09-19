@@ -8,7 +8,7 @@ pub use error::RouterError;
 pub use state::{RouterConfig, CONFIG_SEED};
 
 pinocchio::address::declare_id!("CMrrMgrEvXW3oo6RtxnneDf5D5TeujfbqveFiKuvqrYg");
-// Program ID matches keys/router-keypair.json
+// Program ID must match the pubkey of keys/router-keypair.json (local only).
 
 /// Instruction tags.
 pub mod tag {
