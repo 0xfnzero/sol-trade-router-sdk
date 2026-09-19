@@ -105,7 +105,20 @@ sol-parser-sdk = "0.7.6"
 | 事件流 | sol-parser-sdk | 相同 |
 | 链上程序 | 无 | 需部署并 `initialize` 本 Router |
 
-迁移：保留 `TradeBuyParams` / `DexParamEnum` / SWQoS；改用 `sol_trade_router_sdk::TradingClient` + `RouterTradeConfig`（增加 `fee_recipient`、`fee_bps`）。
+迁移：保留 `TradeBuyParams` / `DexParamEnum` / SWQoS；改用 `sol_trade_router_sdk::TradingClient` + `RouterTradeConfig`（增加可选的 `fee_recipient`、`fee_bps`）。
+
+### 平台手续费（可选 / 可预留）
+
+自部署 Router 时**不必收手续费**：
+
+| 字段 | 作用 | 自部署建议 |
+|------|------|------------|
+| `fee_bps` | 平台费率（万分比） | **`0` = 不扣费**（链上跳过转账） |
+| `fee_recipient` | 收款地址（config 里常驻） | 可填自己的钱包作占位；以后要用再 `update_config` |
+
+- 链上：`fee_bps == 0` 时 `Route` **不转任何平台费**，也不校验收款账户。
+- SDK / 示例：未设 `FEE_BPS` 时默认 `0`；未设 `FEE_RECIPIENT` 时默认用 payer。
+- 你以后自己部署并想收费：`initialize` 时仍可先 `fee_bps = 0`，之后用 `update_config` 改成例如 `50`（0.50%）并指定收款地址。
 
 ## 🛠️ 如何使用 SDK
 
@@ -117,12 +130,12 @@ use sol_trade_router_sdk::{
     keypair, RouterTradeConfig, SwqosConfig, TradeConfig, TradingClient,
 };
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
 
 let payer = Arc::new(keypair::load_keypair_from_env("PRIVATE_KEY")?);
 let rpc = std::env::var("RPC_URL")?;
-let fee_recipient: Pubkey = /* 手续费收款地址 */;
-let fee_bps: u16 = 50; // 0.50%
+// 自部署默认：不收平台费。收款地址预留为自己即可。
+let fee_recipient = payer.pubkey();
+let fee_bps: u16 = 0; // 0 = 不扣费；以后收费再改链上 config + 这里
 
 let trade = TradeConfig::builder(
     rpc.clone(),
@@ -212,10 +225,12 @@ client.prepare_buy_atas(&market, BuyWith::Sol);
 ```rust
 use sol_trade_router_sdk::{initialize_config, update_config, PROGRAM_ID};
 
-let ix = initialize_config(&PROGRAM_ID, &authority, &fee_recipient, fee_bps);
+// 自部署：fee_bps=0 不收费；fee_recipient 填自己作预留
+let ix = initialize_config(&PROGRAM_ID, &authority, &authority, 0);
 // 仅发送一次；authority 签名并支付 config PDA rent
 
-let ix = update_config(&PROGRAM_ID, &authority, fee_bps, false, None);
+// 以后若要收费：改费率 + 可选新收款地址
+let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 ```
 
 ## 🚀 部署 Router 合约
@@ -267,25 +282,29 @@ solana program deploy \
 
 ```rust
 use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
-// 构造并发送 initialize_config(&PROGRAM_ID, &authority_pubkey, &fee_recipient, fee_bps)
+// 自部署不收费：fee_bps=0，fee_recipient 用自己的公钥预留即可
+// initialize_config(&PROGRAM_ID, &authority_pubkey, &authority_pubkey, 0)
 ```
 
-之后改费率 / 暂停 / 收款地址用 `update_config`。
+- `fee_bps = 0` → 交易不收平台费  
+- `fee_recipient` 仍写入 config（预留）；以后收费用 `update_config` 改 `fee_bps` / 收款地址  
 
 ### 步骤 5 — Bot 指向该程序
 
 `TradingClient` / `RouterClient` 默认使用 `PROGRAM_ID`。若轮换 ID：
 
 ```rust
-RouterTradeConfig::new(trade, fee_recipient, fee_bps).with_program_id(your_id)
+RouterTradeConfig::new(trade, fee_recipient, 0).with_program_id(your_id)
 ```
+
+Bot 的 `fee_bps` / `fee_recipient` 应与链上 config **意图一致**（自部署两边都写 `0` + 自己的地址即可）。
 
 ### 检查清单
 
 - [ ] 已生成 keypair；`declare_id!` 与 `PROGRAM_ID` 一致
 - [ ] `.so` 已编译并部署
 - [ ] 已发送 `initialize`（你拥有 config authority）
-- [ ] Bot 的 `fee_recipient` / `fee_bps` 与链上意图一致
+- [ ] 自部署：`fee_bps = 0`（或不收费）；若收费则 Bot 与链上费率/收款一致
 - [ ] 交易 payer 已准备 durable nonce 账户（[NONCE_CACHE_CN.md](docs/NONCE_CACHE_CN.md)）
 
 ## 📚 示例

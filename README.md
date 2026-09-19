@@ -105,7 +105,20 @@ Do **not** add `sol-trade-sdk` to your `Cargo.toml` unless you need a symbol tha
 | Streaming | Use sol-parser-sdk | Same |
 | On-chain | None | Deploy + `initialize` this router |
 
-Migration: keep `TradeBuyParams` / `DexParamEnum` / SWQoS config; construct `sol_trade_router_sdk::TradingClient` with `RouterTradeConfig` (adds `fee_recipient` + `fee_bps`).
+Migration: keep `TradeBuyParams` / `DexParamEnum` / SWQoS config; construct `sol_trade_router_sdk::TradingClient` with `RouterTradeConfig` (optional `fee_recipient` + `fee_bps`).
+
+### Platform fee (optional / reserved)
+
+If you deploy the Router yourself, you **do not have to charge a platform fee**:
+
+| Field | Role | Self-deploy suggestion |
+|-------|------|------------------------|
+| `fee_bps` | Platform fee in basis points | **`0` = no fee** (on-chain skips transfer) |
+| `fee_recipient` | Always stored in config | Use your own wallet as a placeholder; enable later via `update_config` |
+
+- On-chain: when `fee_bps == 0`, `Route` takes **no** platform fee and does not validate the fee destination.
+- SDK / examples: unset `FEE_BPS` defaults to `0`; unset `FEE_RECIPIENT` defaults to the payer.
+- Later, if you want to charge: keep the reserved recipient (or change it) and set e.g. `fee_bps = 50` (0.50%) with `update_config`.
 
 ## 🛠️ Use the SDK
 
@@ -117,12 +130,12 @@ use sol_trade_router_sdk::{
     keypair, RouterTradeConfig, SwqosConfig, TradeConfig, TradingClient,
 };
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
 
 let payer = Arc::new(keypair::load_keypair_from_env("PRIVATE_KEY")?);
 let rpc = std::env::var("RPC_URL")?;
-let fee_recipient: Pubkey = /* your fee wallet */;
-let fee_bps: u16 = 50; // 0.50%
+// Self-deploy default: no platform fee. Recipient reserved as yourself.
+let fee_recipient = payer.pubkey();
+let fee_bps: u16 = 0; // 0 = no fee; raise later on-chain + here if needed
 
 let trade = TradeConfig::builder(
     rpc.clone(),
@@ -214,10 +227,12 @@ client.prepare_buy_atas(&market, BuyWith::Sol);
 ```rust
 use sol_trade_router_sdk::{initialize_config, update_config, PROGRAM_ID};
 
-let ix = initialize_config(&PROGRAM_ID, &authority, &fee_recipient, fee_bps);
+// Self-deploy: fee_bps=0 (no charge); fee_recipient = yourself as placeholder
+let ix = initialize_config(&PROGRAM_ID, &authority, &authority, 0);
 // send once as config authority (payer)
 
-let ix = update_config(&PROGRAM_ID, &authority, fee_bps, false, None);
+// Later, if you want to charge: set bps + optional new recipient
+let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 ```
 
 ## 🚀 Deploy the Router program
@@ -269,26 +284,30 @@ The first caller of `initialize` becomes **config authority**. Call it immediate
 
 ```rust
 use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
-// Build + send initialize_config(&PROGRAM_ID, &authority_pubkey, &fee_recipient, fee_bps)
+// Self-deploy, no fee: fee_bps=0, reserve fee_recipient as yourself
+// initialize_config(&PROGRAM_ID, &authority_pubkey, &authority_pubkey, 0)
 // authority must sign; pays for config PDA rent
 ```
 
-Later fee / pause / recipient changes: `update_config`.
+- `fee_bps = 0` → no platform fee on trades  
+- `fee_recipient` is still stored (reserved); enable charging later with `update_config`  
 
 ### Step 5 — Point the bot at the program
 
 `TradingClient` / `RouterClient` default to `PROGRAM_ID`. If you rotate IDs:
 
 ```rust
-RouterTradeConfig::new(trade, fee_recipient, fee_bps).with_program_id(your_id)
+RouterTradeConfig::new(trade, fee_recipient, 0).with_program_id(your_id)
 ```
+
+Bot `fee_bps` / `fee_recipient` should match on-chain intent (for self-deploy: both sides `0` + your pubkey is fine).
 
 ### Checklist
 
 - [ ] Keypair generated; `declare_id!` + `PROGRAM_ID` match
 - [ ] `.so` built and deployed
 - [ ] `initialize` sent (you own config authority)
-- [ ] Bot `fee_recipient` / `fee_bps` match on-chain intent
+- [ ] Self-deploy: `fee_bps = 0` (or intentional fee); if charging, bot matches on-chain rate/recipient
 - [ ] Durable nonce accounts created for the trading payer ([NONCE_CACHE.md](docs/NONCE_CACHE.md))
 
 ## 📚 Examples
