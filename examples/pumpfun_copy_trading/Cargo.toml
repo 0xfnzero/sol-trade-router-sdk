@@ -1,0 +1,13 @@
+[package]
+name = "pumpfun_copy_trading"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sol-trade-router-sdk = { path = "../../crates/sdk" }
+router_examples_common = { path = "../common" }
+sol-parser-sdk = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }

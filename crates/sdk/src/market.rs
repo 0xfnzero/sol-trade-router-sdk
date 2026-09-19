@@ -3,7 +3,7 @@
 use solana_sdk::pubkey::Pubkey;
 
 use crate::{
-    constants::{TOKEN_PROGRAM, USDC_MINT, WSOL_MINT},
+    constants::{USDC_MINT, WSOL_MINT},
     transfer_fee::TokenTransferFee,
 };
 
@@ -217,6 +217,8 @@ pub struct RaydiumAmmV4Pool {
     pub pc_mint: Pubkey,
     pub token_coin: Pubkey,
     pub token_pc: Pubkey,
+    /// SPL Token or Token-2022 — must match vault owners (SwapBaseInV2 account 0).
+    pub token_program: Pubkey,
     pub amm_open_orders: Pubkey,
     pub amm_target_orders: Pubkey,
     pub serum_program: Pubkey,
@@ -317,7 +319,62 @@ pub struct MeteoraDlmmPool {
 }
 
 /// SOL↔quote bridge when the meme market does not quote SOL.
-pub type BridgePool = CpmmPool;
+///
+/// Matches sol-trade-sdk `StonkFunSolHop`: CPMM **or** Raydium AMM V4.
+#[derive(Clone, Debug)]
+pub enum BridgePool {
+    Cpmm(CpmmPool),
+    AmmV4(RaydiumAmmV4Pool),
+}
+
+impl From<CpmmPool> for BridgePool {
+    fn from(pool: CpmmPool) -> Self {
+        Self::Cpmm(pool)
+    }
+}
+
+impl From<RaydiumAmmV4Pool> for BridgePool {
+    fn from(pool: RaydiumAmmV4Pool) -> Self {
+        Self::AmmV4(pool)
+    }
+}
+
+impl BridgePool {
+    #[inline]
+    pub fn mints(&self) -> (Pubkey, Pubkey) {
+        match self {
+            Self::Cpmm(p) => (p.base_mint, p.quote_mint),
+            Self::AmmV4(p) => (p.coin_mint, p.pc_mint),
+        }
+    }
+
+    #[inline]
+    pub fn contains_mint(&self, mint: &Pubkey) -> bool {
+        let (a, b) = self.mints();
+        *mint == a || *mint == b
+    }
+
+    #[inline]
+    pub fn other_mint(&self, mint: &Pubkey) -> Option<Pubkey> {
+        let (a, b) = self.mints();
+        if *mint == a {
+            Some(b)
+        } else if *mint == b {
+            Some(a)
+        } else {
+            None
+        }
+    }
+
+    /// Pool address used for PoolGuard allowlists.
+    #[inline]
+    pub fn pool_key(&self) -> Pubkey {
+        match self {
+            Self::Cpmm(p) => p.pool_state,
+            Self::AmmV4(p) => p.amm,
+        }
+    }
+}
 
 /// Target market (inner or outer).
 #[derive(Clone, Debug)]
@@ -415,7 +472,7 @@ impl Market {
             }
             Self::PumpFunInner(p) => p.mint_token_program,
             Self::PumpSwapOuter(p) => p.base_token_program,
-            Self::RaydiumAmmV4(_) => TOKEN_PROGRAM,
+            Self::RaydiumAmmV4(p) => p.token_program,
             Self::MeteoraDammV2(p) => {
                 if self.base_mint() == p.token_a_mint {
                     p.token_a_program
@@ -457,7 +514,7 @@ impl Market {
             }
             Self::PumpFunInner(p) => p.quote_token_program,
             Self::PumpSwapOuter(p) => p.quote_token_program,
-            Self::RaydiumAmmV4(_) => TOKEN_PROGRAM,
+            Self::RaydiumAmmV4(p) => p.token_program,
             Self::MeteoraDammV2(p) => {
                 if self.quote_mint() == p.token_a_mint {
                     p.token_a_program
@@ -504,10 +561,10 @@ impl RoutedMarket {
         }
     }
 
-    pub fn with_bridge(market: Market, bridge: BridgePool) -> Self {
+    pub fn with_bridge(market: Market, bridge: impl Into<BridgePool>) -> Self {
         Self {
             market,
-            bridge: Some(bridge),
+            bridge: Some(bridge.into()),
         }
     }
 
@@ -560,7 +617,7 @@ impl RoutedMarket {
     pub fn meme_mint(&self) -> Pubkey {
         match (&self.market, &self.bridge) {
             (Market::CpmmOuter(pool), Some(bridge)) if self.market.needs_sol_bridge() => {
-                match shared_mint(pool, bridge) {
+                match shared_mint_with_bridge(pool, bridge) {
                     Some(stock) => pool.other_mint(&stock).unwrap_or(pool.meme_mint()),
                     None => pool.meme_mint(),
                 }
@@ -614,6 +671,22 @@ fn shared_mint(pool: &CpmmPool, bridge: &CpmmPool) -> Option<Pubkey> {
         Some(pool.base_mint)
     } else {
         None
+    }
+}
+
+fn shared_mint_with_bridge(pool: &CpmmPool, bridge: &BridgePool) -> Option<Pubkey> {
+    match bridge {
+        BridgePool::Cpmm(b) => shared_mint(pool, b),
+        BridgePool::AmmV4(b) => {
+            let pair = [b.coin_mint, b.pc_mint];
+            if pair.contains(&pool.quote_mint) {
+                Some(pool.quote_mint)
+            } else if pair.contains(&pool.base_mint) {
+                Some(pool.base_mint)
+            } else {
+                None
+            }
+        }
     }
 }
 

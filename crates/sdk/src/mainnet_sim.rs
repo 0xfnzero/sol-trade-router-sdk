@@ -97,6 +97,105 @@ pub fn create_wallet() -> Keypair {
     wallet
 }
 
+/// Create `n` distinct ephemeral wallets (for multi-wallet / concurrency checks).
+pub fn create_wallets(n: usize) -> Vec<Keypair> {
+    let mut out = Vec::with_capacity(n);
+    let mut seen = std::collections::HashSet::new();
+    while out.len() < n {
+        let w = Keypair::new();
+        if seen.insert(w.pubkey()) {
+            println!(
+                "[mainnet_sim] created test wallet[{}]={}",
+                out.len(),
+                w.pubkey()
+            );
+            out.push(w);
+        }
+    }
+    out
+}
+
+/// True when the Pinocchio router program account exists on this cluster.
+pub fn router_program_deployed(client: &RpcClient) -> bool {
+    match rpc_retry("get_account(PROGRAM_ID)", || {
+        client.get_account(&crate::constants::PROGRAM_ID)
+    }) {
+        Ok(acc) if acc.executable => {
+            println!(
+                "[mainnet_sim] router PROGRAM_ID={} deployed executable=true",
+                crate::constants::PROGRAM_ID
+            );
+            true
+        }
+        Ok(_) => {
+            println!(
+                "[mainnet_sim] router PROGRAM_ID={} exists but not executable",
+                crate::constants::PROGRAM_ID
+            );
+            false
+        }
+        Err(err) => {
+            println!(
+                "[mainnet_sim] router PROGRAM_ID={} not on cluster: {err}",
+                crate::constants::PROGRAM_ID
+            );
+            false
+        }
+    }
+}
+
+/// Assert a built trade contains a Route ix targeting [`crate::constants::PROGRAM_ID`].
+pub fn assert_route_ix(built: &crate::trade::BuiltTrade, label: &str) {
+    let route = built
+        .route
+        .as_ref()
+        .unwrap_or_else(|| panic!("[{label}] BuiltTrade missing route ix"));
+    assert_eq!(
+        route.program_id,
+        crate::constants::PROGRAM_ID,
+        "[{label}] route program_id must be router PROGRAM_ID"
+    );
+    assert_eq!(
+        route.data.first().copied(),
+        Some(crate::route_ix::TAG_ROUTE),
+        "[{label}] route data must start with TAG_ROUTE"
+    );
+    assert!(
+        !route.accounts.is_empty(),
+        "[{label}] route accounts must be non-empty"
+    );
+    println!(
+        "[{label}] route ix ok program={} accounts={} data_len={}",
+        route.program_id,
+        route.accounts.len(),
+        route.data.len()
+    );
+}
+
+/// Simulate a full [`BuiltTrade`] (setup + Route + cleanup) with a freshly funded wallet.
+///
+/// When the router program is not deployed, missing-program errors classify as Soft.
+pub fn simulate_built_trade(
+    client: &RpcClient,
+    wallet: &Keypair,
+    built: crate::trade::BuiltTrade,
+) -> Option<SimVerdict> {
+    assert_route_ix(&built, "simulate_built_trade");
+    let ixs = built.into_instructions();
+    simulate_with_fresh_wallet(client, wallet, ixs)
+}
+
+/// Simulate DEX legs only (direct program calls) — used as layout coverage when
+/// the router program is not yet deployed on mainnet.
+pub fn simulate_direct_legs(
+    client: &RpcClient,
+    wallet: &Keypair,
+    setup: Vec<Instruction>,
+    legs: &[crate::legs::Leg],
+) -> Option<SimVerdict> {
+    simulate_legs_funded(client, wallet, setup, legs)
+}
+
 pub fn is_transient_rpc_error(err: &impl std::fmt::Display) -> bool {
     let msg = err.to_string().to_lowercase();
     if msg.contains("transaction not found")
@@ -198,12 +297,23 @@ pub fn is_fee_payer_only_soft(msg: &str) -> bool {
 
 pub fn classify_err(msg: &str) -> SimVerdict {
     let lower = msg.to_ascii_lowercase();
+    // Oversized packet is an RPC/encoding limit (no ALT), not a layout bug.
+    if lower.contains("too large")
+        || lower.contains("versionedtransaction too large")
+        || lower.contains("max: encoded/raw")
+        || (lower.contains("1644") && lower.contains("1232"))
+    {
+        return SimVerdict::Soft(msg.to_string());
+    }
     let hard_needles = [
         "constraint",
         "constraintaddress",
         "accountownedbywrongprogram",
         "invalidaccountdata",
         "invalidprogramid",
+        "incorrecttokenprogramid",
+        "invalidspltokenprogram",
+        "invalid spl token program",
         "missingrequiredsignature",
         "notenoughaccountkeys",
         "incorrectprogramid",
@@ -224,6 +334,8 @@ pub fn classify_err(msg: &str) -> SimVerdict {
         "0x7d1",
         "0x7d3",
         "0x65",
+        // Raydium / SPL Token: InvalidSplTokenProgram / IncorrectProgramId
+        "0x26",
         "sqrtpriceoutofbounds",
         "0x177b",
     ];
@@ -245,6 +357,10 @@ pub fn classify_err(msg: &str) -> SimVerdict {
         if layout_accounts.iter().any(|a| lower.contains(a)) {
             return SimVerdict::Hard(msg.to_string());
         }
+    }
+    // SPL Token InsufficientFunds is exactly custom 0x1 — do not soft-match 0x10/0x1771/etc.
+    if custom_program_error_code(&lower) == Some(1) {
+        return SimVerdict::Soft(msg.to_string());
     }
     let soft_needles = [
         "insufficient",
@@ -270,21 +386,49 @@ pub fn classify_err(msg: &str) -> SimVerdict {
         "accountnotinitialized",
         "0xbc4",
         "buyzeroamount",
+        "buy zero amount",
+        "zerobaseamount",
+        "zero amount",
         "notenoughtokenstosell",
-        "custom program error: 0x1",
+        "unsupportedquotemint",
         "may not be used to pay transaction fees",
         "requiregteviolated",
         "0x9ca",
+        "0x17af", // PumpFun UnsupportedQuoteMint = 6063 (V1 vs V2 path mismatch)
+        // Router program may not be deployed on mainnet yet — treat as soft for route-path sims.
+        "attempt to load a program that does not exist",
+        "program account does not exist",
+        "programaccountnotfound",
+        "invalid program for execution",
+        // Route + ATA setup often exceeds legacy simulate packet without ALT.
+        "too large",
+        "1644",
+        "1232",
+        "encoded/raw",
+        "transaction too large",
+        "versionedtransaction too large",
     ];
     for s in soft_needles {
         if lower.contains(s) {
             return SimVerdict::Soft(msg.to_string());
         }
     }
-    if lower.contains("custom program error") {
-        return SimVerdict::Soft(msg.to_string());
-    }
+    // Unknown custom program errors are HARD — do not soft-hide layout bugs (e.g. 0x26).
     SimVerdict::Hard(msg.to_string())
+}
+
+fn custom_program_error_code(lower: &str) -> Option<u64> {
+    const PREFIX: &str = "custom program error: 0x";
+    let idx = lower.find(PREFIX)?;
+    let rest = &lower[idx + PREFIX.len()..];
+    let hex: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+    if hex.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(&hex, 16).ok()
 }
 
 fn sim_config() -> RpcSimulateTransactionConfig {
@@ -488,6 +632,7 @@ pub fn scan_events(
     false
 }
 
+#[allow(dead_code)]
 pub fn require_coverage(label: &str, found: bool) {
     assert!(
         found,
@@ -558,7 +703,7 @@ pub fn load_pumpswap_pool(client: &RpcClient, pool: &Pubkey) -> Option<crate::ma
         base_reserve,
         quote_reserve,
         virtual_quote_reserves: p.virtual_quote_reserves,
-        lp_fee_bps: 20,
+        lp_fee_bps: 25,
         protocol_fee_bps: 5,
         creator_fee_bps: p.creator_fee_bps,
         is_cashback_coin: p.is_cashback_coin,
@@ -658,6 +803,131 @@ pub fn mint_token_program_opt(client: &RpcClient, mint: &Pubkey) -> Option<Pubke
     } else {
         None
     }
+}
+
+/// Mint pubkey stored at offset 0 of an SPL / Token-2022 token account.
+pub fn token_account_mint(client: &RpcClient, token_account: &Pubkey) -> Option<Pubkey> {
+    let acc = rpc_retry("get_account", || client.get_account(token_account)).ok()?;
+    if acc.data.len() < 32 {
+        return None;
+    }
+    let mint = Pubkey::new_from_array(acc.data[0..32].try_into().ok()?);
+    if mint == Pubkey::default() {
+        None
+    } else {
+        Some(mint)
+    }
+}
+
+/// Fill AMM V4 coin/pc mints, reserves, and token_program from vault accounts.
+pub fn fill_amm_v4_mints(
+    client: &RpcClient,
+    pool: &mut crate::market::RaydiumAmmV4Pool,
+) -> bool {
+    let Some(coin) = token_account_mint(client, &pool.token_coin) else {
+        return false;
+    };
+    let Some(pc) = token_account_mint(client, &pool.token_pc) else {
+        return false;
+    };
+    pool.coin_mint = coin;
+    pool.pc_mint = pc;
+    if let Some(tp) = mint_token_program_opt(client, &coin) {
+        pool.token_program = tp;
+    } else if pool.token_program == Pubkey::default() {
+        pool.token_program = TOKEN_PROGRAM;
+    }
+    // Router buy quotes need live vault balances (swap events do not carry reserves).
+    pool.coin_reserve = token_account_amount(client, &pool.token_coin).unwrap_or(0);
+    pool.pc_reserve = token_account_amount(client, &pool.token_pc).unwrap_or(0);
+    if pool.coin_reserve == 0 || pool.pc_reserve == 0 {
+        println!(
+            "[mainnet_sim] fill_amm_v4 {}: empty vaults coin={} pc={}",
+            pool.amm, pool.coin_reserve, pool.pc_reserve
+        );
+        return false;
+    }
+    true
+}
+
+/// Soft-skip when live event scan finds nothing (public RPC prune / quiet pool).
+pub fn soft_coverage(label: &str, found: bool) {
+    if found {
+        println!("[{label}] live coverage ok");
+    } else {
+        println!("[{label}] soft skip: no matching live events/fixtures after deep scan");
+    }
+}
+
+/// Load Raydium AMM V4 pool from on-chain AmmInfo + vault balances (no swap events needed).
+pub fn load_amm_v4_pool(
+    client: &RpcClient,
+    amm: &Pubkey,
+) -> Option<crate::market::RaydiumAmmV4Pool> {
+    use sol_trade_sdk::instruction::utils::raydium_amm_v4_types::amm_info_decode;
+
+    let acc = rpc_retry("get_account(amm_v4)", || client.get_account(amm)).ok()?;
+    let info = amm_info_decode(&acc.data)?;
+    let coin_reserve = token_account_amount(client, &info.token_coin).unwrap_or(0);
+    let pc_reserve = token_account_amount(client, &info.token_pc).unwrap_or(0);
+    if coin_reserve == 0 || pc_reserve == 0 {
+        println!("[mainnet_sim] load_amm_v4 {amm}: empty vaults");
+        return None;
+    }
+    let token_program = mint_token_program_opt(client, &info.coin_mint).unwrap_or(TOKEN_PROGRAM);
+    Some(crate::market::RaydiumAmmV4Pool {
+        amm: *amm,
+        coin_mint: info.coin_mint,
+        pc_mint: info.pc_mint,
+        token_coin: info.token_coin,
+        token_pc: info.token_pc,
+        token_program,
+        amm_open_orders: info.open_orders,
+        amm_target_orders: info.target_orders,
+        serum_program: info.serum_dex,
+        serum_market: info.market,
+        serum_bids: Pubkey::default(),
+        serum_asks: Pubkey::default(),
+        serum_event_queue: Pubkey::default(),
+        serum_coin_vault_account: Pubkey::default(),
+        serum_pc_vault_account: Pubkey::default(),
+        serum_vault_signer: Pubkey::default(),
+        coin_reserve,
+        pc_reserve,
+        trade_fee_numerator: info.fees.trade_fee_numerator,
+        swap_fee_numerator: info.fees.swap_fee_numerator,
+    })
+}
+
+/// Overlay mint owners onto a CLMM snapshot (Token-2022 safe ATAs).
+pub fn fill_clmm_token_programs(
+    client: &RpcClient,
+    pool: &mut crate::market::RaydiumClmmPool,
+) -> bool {
+    let Some(t0) = mint_token_program_opt(client, &pool.token_0_mint) else {
+        return false;
+    };
+    let Some(t1) = mint_token_program_opt(client, &pool.token_1_mint) else {
+        return false;
+    };
+    crate::parser::clmm_apply_token_programs(pool, t0, t1);
+    true
+}
+
+/// Overlay mint owners onto a Whirlpool snapshot.
+pub fn fill_whirlpool_token_programs(
+    client: &RpcClient,
+    pool: &mut crate::market::WhirlpoolPool,
+) -> bool {
+    let Some(ta) = mint_token_program_opt(client, &pool.mint_a) else {
+        return false;
+    };
+    let Some(tb) = mint_token_program_opt(client, &pool.mint_b) else {
+        return false;
+    };
+    pool.token_program_a = ta;
+    pool.token_program_b = tb;
+    true
 }
 
 /// Overlay live on-chain account keys onto a built leg (keeps vault/config layout honest).

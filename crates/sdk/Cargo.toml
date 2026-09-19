@@ -16,6 +16,7 @@ sol-trade-sdk = { workspace = true }
 tokio = { workspace = true }
 solana-hash = { workspace = true }
 solana-message = { workspace = true }
+core_affinity = { workspace = true }
 
 [dev-dependencies]
 solana-client = "=4.2.2"

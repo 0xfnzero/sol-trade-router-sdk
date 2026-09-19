@@ -299,6 +299,25 @@ pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
     }
 }
 
+/// Best-effort token program for a known mint without RPC.
+/// Classic quote mints are always SPL Token; others default SPL until overlay.
+#[inline]
+pub fn known_mint_token_program(mint: Pubkey) -> Pubkey {
+    let _ = mint; // reserved for future known Token-2022 allowlists
+    TOKEN_PROGRAM
+}
+
+/// Overlay Token-2022 / SPL programs onto a CLMM snapshot (call after mint owners are known).
+#[inline]
+pub fn clmm_apply_token_programs(
+    pool: &mut RaydiumClmmPool,
+    token_0_program: Pubkey,
+    token_1_program: Pubkey,
+) {
+    pool.token_0_program = tp_or_spl(token_0_program);
+    pool.token_1_program = tp_or_spl(token_1_program);
+}
+
 pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
     if e.pool_state == Pubkey::default() || e.tick_arrays.is_empty() {
         return None;
@@ -310,6 +329,19 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
     };
     let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
     let amount_out = if e.zero_for_one { e.amount_1 } else { e.amount_0 };
+    // CLMM swap events do not carry per-mint token programs. Heuristic: a non-zero
+    // transfer_fee on a side strongly implies Token-2022 for that mint; otherwise
+    // default SPL. Bots with mint-owner cache should call [`clmm_apply_token_programs`].
+    let token_0_program = if e.transfer_fee_0 > 0 {
+        crate::constants::TOKEN_2022_PROGRAM
+    } else {
+        known_mint_token_program(token_0_mint)
+    };
+    let token_1_program = if e.transfer_fee_1 > 0 {
+        crate::constants::TOKEN_2022_PROGRAM
+    } else {
+        known_mint_token_program(token_1_mint)
+    };
     Some(RaydiumClmmPool {
         amm_config: e.amm_config,
         pool_state: e.pool_state,
@@ -318,8 +350,8 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
         token_1_mint,
         token_0_vault,
         token_1_vault,
-        token_0_program: TOKEN_PROGRAM,
-        token_1_program: TOKEN_PROGRAM,
+        token_0_program,
+        token_1_program,
         tick_arrays: e.tick_arrays.clone(),
         tick_array_bitmap_extension: e.tick_array_bitmap_extension,
         quoted_amount_in: Some(amount_in).filter(|&a| a > 0),
@@ -338,8 +370,8 @@ pub fn clmm_from_pool_state(e: &RaydiumClmmPoolStateAccountEvent) -> RaydiumClmm
         token_1_mint: s.token_mint_1,
         token_0_vault: s.token_vault_0,
         token_1_vault: s.token_vault_1,
-        token_0_program: TOKEN_PROGRAM,
-        token_1_program: TOKEN_PROGRAM,
+        token_0_program: known_mint_token_program(s.token_mint_0),
+        token_1_program: known_mint_token_program(s.token_mint_1),
         tick_arrays: Vec::new(),
         tick_array_bitmap_extension: None,
         quoted_amount_in: None,
@@ -482,10 +514,12 @@ pub fn amm_v4_from_swap(e: &RaydiumAmmV4SwapEvent) -> Option<RaydiumAmmV4Pool> {
     }
     Some(RaydiumAmmV4Pool {
         amm: e.amm,
-        coin_mint: Pubkey::default(), // fill from vault mint / cache when available
+        // SwapBaseInV2 ix has no mint accounts — fill from vault mints / AmmInfo cache.
+        coin_mint: Pubkey::default(),
         pc_mint: Pubkey::default(),
         token_coin: e.pool_coin_token_account,
         token_pc: e.pool_pc_token_account,
+        token_program: tp_or_spl(e.token_program),
         amm_open_orders: e.amm_open_orders,
         amm_target_orders: e.amm_target_orders.unwrap_or_default(),
         serum_program: e.serum_program,

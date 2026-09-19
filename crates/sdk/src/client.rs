@@ -121,6 +121,7 @@ impl TradingClient {
         fee_bps: u16,
         use_seed_optimize: bool,
     ) -> Self {
+        sol_trade_sdk::common::fast_fn::fast_init(&payer.pubkey());
         let router = RouterClient::new(payer.pubkey(), fee_recipient, fee_bps);
         Self {
             max_sender_concurrency: infrastructure.max_sender_concurrency,
@@ -139,16 +140,43 @@ impl TradingClient {
         }
     }
 
+    /// Same as [`Self::from_infrastructure`] plus optional background WSOL ATA creation
+    /// (does not block bot startup — mirrors sol-trade-sdk).
+    pub async fn from_infrastructure_with_wsol_setup(
+        payer: Arc<Keypair>,
+        infrastructure: Arc<TradingInfrastructure>,
+        fee_recipient: Pubkey,
+        fee_bps: u16,
+        use_seed_optimize: bool,
+        create_wsol_ata: bool,
+    ) -> Self {
+        // Delegate WSOL warm to trade-sdk (same infrastructure type).
+        if create_wsol_ata {
+            let _ = sol_trade_sdk::TradingClient::from_infrastructure_with_wsol_setup(
+                payer.clone(),
+                infrastructure.clone(),
+                use_seed_optimize,
+                true,
+            )
+            .await;
+        }
+        Self::from_infrastructure(payer, infrastructure, fee_recipient, fee_bps, use_seed_optimize)
+    }
+
     pub async fn new(payer: Arc<Keypair>, config: RouterTradeConfig) -> Self {
+        // Warm monotonic clock before subscribe (same as sol-trade-sdk).
+        let _ = sol_trade_sdk::common::clock::now_micros();
         let infra_config = InfrastructureConfig::from_trade_config(&config.trade);
-        let infra = TradingInfrastructure::new(infra_config).await;
-        let mut client = Self::from_infrastructure(
+        let infra = Arc::new(TradingInfrastructure::new(infra_config).await);
+        let mut client = Self::from_infrastructure_with_wsol_setup(
             payer,
-            Arc::new(infra),
+            infra,
             config.fee_recipient,
             config.fee_bps,
             config.trade.use_seed_optimize,
-        );
+            config.trade.create_wsol_ata_on_startup,
+        )
+        .await;
         client.router = client
             .router
             .with_program_id(config.program_id)
@@ -174,10 +202,61 @@ impl TradingClient {
         self
     }
 
-    pub fn with_dedicated_sender_threads(mut self, cores: Option<Vec<usize>>) -> Self {
-        self.use_dedicated_sender_threads = true;
-        self.sender_thread_cores = cores.map(Arc::new);
+    pub fn with_transaction_version(mut self, version: TradeTransactionVersion) -> Self {
+        self.transaction_version = version;
         self
+    }
+
+    /// Enable dedicated SWQoS sender threads (and warm the pool immediately).
+    ///
+    /// - `None`: shared tokio pool
+    /// - `Some(vec![])`: dedicated threads, no core pin
+    /// - `Some(indices)`: pin to those cores (trimmed to `max_sender_concurrency`)
+    pub fn with_dedicated_sender_threads(mut self, core_indices: Option<Vec<usize>>) -> Self {
+        match core_indices {
+            None => {
+                self.use_dedicated_sender_threads = false;
+                self.sender_thread_cores = None;
+            }
+            Some(v) if v.is_empty() => {
+                self.use_dedicated_sender_threads = true;
+                self.sender_thread_cores = None;
+            }
+            Some(v) => {
+                self.use_dedicated_sender_threads = true;
+                let cap = v.len().min(self.max_sender_concurrency);
+                self.sender_thread_cores =
+                    Some(Arc::new(if cap < v.len() { v[..cap].to_vec() } else { v }));
+            }
+        }
+        if self.use_dedicated_sender_threads {
+            sol_trade_sdk::trading::core::async_executor::warm_dedicated_sender_pool(
+                self.sender_thread_cores.as_ref().map(|v| v.as_slice()),
+                self.max_sender_concurrency,
+            );
+        }
+        self
+    }
+
+    pub fn get_rpc(&self) -> &Arc<sol_trade_sdk::common::SolanaRpcClient> {
+        &self.infrastructure.rpc
+    }
+
+    pub fn get_payer(&self) -> &Keypair {
+        self.payer.as_ref()
+    }
+
+    pub fn get_payer_pubkey(&self) -> Pubkey {
+        self.payer.pubkey()
+    }
+
+    /// Cold-path: reusable ATA create instructions (WSOL / stock), not meme.
+    pub fn prepare_buy_atas(&self, market: &RoutedMarket, buy_with: BuyWith) -> Vec<Instruction> {
+        self.router.prepare_buy_atas(market, buy_with)
+    }
+
+    pub fn create_wsol_ata(&self) -> Instruction {
+        self.router.create_wsol_ata()
     }
 
     /// Build Route instructions without submitting (simulate / custom send).
@@ -217,20 +296,40 @@ impl TradingClient {
                 "Must provide either recent_blockhash or durable_nonce for buy"
             ));
         }
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!(
+                "Invalid protocol params for Trade (dex={:?})",
+                params.dex_type
+            ));
+        }
         if let Some(gate) = self.risk_gate.as_deref() {
             gate.check_buy(&params)?;
         }
+        let timing_start_us = if self.log_enabled {
+            Some(
+                params
+                    .grpc_recv_us
+                    .unwrap_or_else(sol_trade_sdk::common::clock::now_micros),
+            )
+        } else {
+            None
+        };
         let instructions = self.build_buy_instructions(&params)?;
+        let build_end_us = (self.log_enabled && sol_trade_sdk::common::sdk_log::sdk_log_enabled())
+            .then(sol_trade_sdk::common::clock::now_micros);
         self.submit(
             instructions,
             params.address_lookup_table_accounts,
             params.recent_blockhash,
             params.durable_nonce,
             true,
+            true, // buy always tips SWQoS lanes (parity with trade-sdk)
             params.wait_tx_confirmed,
             params.wait_for_all_submits,
             params.gas_fee_strategy,
             params.simulate,
+            timing_start_us,
+            build_end_us,
         )
         .await
     }
@@ -253,17 +352,37 @@ impl TradingClient {
                 "Must provide either recent_blockhash or durable_nonce for sell"
             ));
         }
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!(
+                "Invalid protocol params for Trade (dex={:?})",
+                params.dex_type
+            ));
+        }
+        let timing_start_us = if self.log_enabled {
+            Some(
+                params
+                    .grpc_recv_us
+                    .unwrap_or_else(sol_trade_sdk::common::clock::now_micros),
+            )
+        } else {
+            None
+        };
         let instructions = self.build_sell_instructions(&params)?;
+        let build_end_us = (self.log_enabled && sol_trade_sdk::common::sdk_log::sdk_log_enabled())
+            .then(sol_trade_sdk::common::clock::now_micros);
         self.submit(
             instructions,
             params.address_lookup_table_accounts,
             params.recent_blockhash,
             params.durable_nonce,
             false,
+            params.with_tip,
             params.wait_tx_confirmed,
             params.wait_for_all_submits,
             params.gas_fee_strategy,
             params.simulate,
+            timing_start_us,
+            build_end_us,
         )
         .await
     }
@@ -294,6 +413,40 @@ impl TradingClient {
         self.router.sell_with_opts(amount_in, market, opts)
     }
 
+    /// Query payer token balance with the same ATA derivation used on the trade path
+    /// (including seed-optimized ATAs when enabled). Prefer cold-path / post-confirm use only.
+    pub async fn get_payer_token_balance_with_program(
+        &self,
+        mint: &Pubkey,
+        token_program: &Pubkey,
+    ) -> Result<u64> {
+        Ok(sol_trade_sdk::trading::common::utils::get_token_balance_with_options(
+            &self.infrastructure.rpc,
+            &self.payer.pubkey(),
+            mint,
+            token_program,
+            self.use_seed_optimize,
+        )
+        .await?)
+    }
+
+    pub async fn get_payer_sol_balance(&self) -> Result<u64> {
+        Ok(sol_trade_sdk::trading::common::utils::get_sol_balance(
+            &self.infrastructure.rpc,
+            &self.payer.pubkey(),
+        )
+        .await?)
+    }
+
+    pub async fn get_payer_token_balance(&self, mint: &Pubkey) -> Result<u64> {
+        Ok(sol_trade_sdk::trading::common::utils::get_token_balance(
+            &self.infrastructure.rpc,
+            &self.payer.pubkey(),
+            mint,
+        )
+        .await?)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn submit(
         &self,
@@ -302,15 +455,31 @@ impl TradingClient {
         recent_blockhash: Option<Hash>,
         durable_nonce: Option<DurableNonceInfo>,
         is_buy: bool,
+        with_tip: bool,
         wait_tx_confirmed: bool,
         wait_for_all_submits: bool,
         gas_fee_strategy: GasFeeStrategy,
         simulate: bool,
+        timing_start_us: Option<i64>,
+        build_end_us: Option<i64>,
     ) -> Result<(bool, Vec<Signature>, Option<TradeError>, Vec<(sol_trade_sdk::swqos::SwqosType, i64)>)>
     {
         if simulate {
+            if self.log_enabled && sol_trade_sdk::common::sdk_log::sdk_log_enabled() {
+                let before_submit_us = sol_trade_sdk::common::clock::now_micros();
+                sol_trade_sdk::common::sdk_log::print_sdk_timing_block(
+                    if is_buy { "Buy" } else { "Sell" },
+                    timing_start_us,
+                    build_end_us,
+                    Some(before_submit_us),
+                    &[],
+                    None,
+                );
+            }
             return Ok((true, Vec::new(), None, Vec::new()));
         }
+        let before_submit_us = (self.log_enabled && sol_trade_sdk::common::sdk_log::sdk_log_enabled())
+            .then(sol_trade_sdk::common::clock::now_micros);
         let sender_config = SenderConcurrencyConfig {
             sender_thread_cores: self.sender_thread_cores.clone(),
             effective_core_ids: self.effective_core_ids.clone(),
@@ -328,7 +497,7 @@ impl TradingClient {
             is_buy,
             wait_tx_confirmed,
             wait_for_all_submits,
-            true,
+            with_tip,
             gas_fee_strategy,
             self.use_dedicated_sender_threads,
             sender_config,
@@ -336,6 +505,17 @@ impl TradingClient {
             self.transaction_version,
         )
         .await?;
+        if self.log_enabled && sol_trade_sdk::common::sdk_log::sdk_log_enabled() {
+            let confirm_us = wait_tx_confirmed.then(sol_trade_sdk::common::clock::now_micros);
+            sol_trade_sdk::common::sdk_log::print_sdk_timing_block(
+                if is_buy { "Buy" } else { "Sell" },
+                timing_start_us,
+                build_end_us,
+                before_submit_us,
+                &timings,
+                confirm_us,
+            );
+        }
         let legacy = timings
             .into_iter()
             .map(|t| (t.swqos_type, t.submit_done_us))
@@ -437,13 +617,6 @@ fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
     }
     Ok(opts)
 }
-
-pub use sol_trade_sdk::{
-    BuyAmount, SellAmount, StonkFunMemeLeg, StonkFunParams, StonkFunSolHop, StonkFunSwapParams,
-    StonkFunViaSolParams, AccountPolicy,
-};
-
-pub use crate::adapter::{load_routed_market_by_rpc, to_routed_market, LoadMarketRequest};
 
 /// Validate that `dex_type` matches `extension_params` (mirrors trade-sdk).
 pub fn validate_protocol_params(dex_type: DexType, params: &DexParamEnum) -> bool {

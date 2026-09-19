@@ -89,19 +89,19 @@ pub async fn load_routed_market_by_rpc(
             DexParamEnum::PumpSwap(PumpSwapParams::from_mint_by_rpc(rpc, mint).await?)
         }
         LoadMarketRequest::LaunchLab { mint } => {
-            DexParamEnum::LaunchLab(BonkParams::from_mint_by_rpc(rpc, mint).await?)
+            DexParamEnum::LaunchLab(BonkParams::from_mint_by_rpc(rpc, mint, false).await?)
         }
         LoadMarketRequest::Bonk { mint } => {
-            DexParamEnum::Bonk(BonkParams::from_mint_by_rpc(rpc, mint).await?)
+            DexParamEnum::Bonk(BonkParams::from_mint_by_rpc(rpc, mint, false).await?)
         }
         LoadMarketRequest::StonkFun { mint } => {
-            DexParamEnum::StonkFun(BonkParams::from_mint_by_rpc(rpc, mint).await?)
+            DexParamEnum::StonkFun(BonkParams::from_mint_by_rpc(rpc, mint, false).await?)
         }
         LoadMarketRequest::RaydiumCpmm { pool } => {
             DexParamEnum::RaydiumCpmm(RaydiumCpmmParams::from_pool_address_by_rpc(rpc, pool).await?)
         }
         LoadMarketRequest::RaydiumAmmV4 { amm } => DexParamEnum::RaydiumAmmV4(
-            RaydiumAmmV4Params::from_amm_address_by_rpc(rpc, amm).await?,
+            RaydiumAmmV4Params::from_amm_address_by_rpc(rpc, *amm).await?,
         ),
         LoadMarketRequest::MeteoraDammV2 { pool } => DexParamEnum::MeteoraDammV2(
             MeteoraDammV2Params::from_pool_address_by_rpc(rpc, pool).await?,

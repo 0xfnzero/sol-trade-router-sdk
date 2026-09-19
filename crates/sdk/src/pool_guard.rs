@@ -340,7 +340,12 @@ pub fn assert_market_ok(market: &Market, policy: &PoolGuardPolicy) -> Result<()>
 pub fn assert_routed_market_ok(routed: &RoutedMarket, policy: &PoolGuardPolicy) -> Result<()> {
     assert_market_ok(&routed.market, policy)?;
     if let Some(bridge) = &routed.bridge {
-        assert_cpmm_ok(bridge, policy)?;
+        match bridge {
+            crate::market::BridgePool::Cpmm(p) => assert_cpmm_ok(p, policy)?,
+            crate::market::BridgePool::AmmV4(p) => {
+                assert_amm_listed(policy, &p.amm, "Raydium AmmV4 bridge")?
+            }
+        }
     }
     Ok(())
 }

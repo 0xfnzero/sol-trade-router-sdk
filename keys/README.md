@@ -1,24 +1,32 @@
-# Deploy keys（本地专用，勿提交）
+# Deploy keys (local only — never commit)
 
-本目录用于存放程序升级权限相关的 keypair，**不会也不应进入 Git**。
+Store the program upgrade-authority keypair here. `*.json` must stay out of Git.
 
-## 生成新的程序 keypair
+## Generate a program keypair
 
 ```bash
-# 需要 Solana CLI
 solana-keygen new --outfile keys/router-keypair.json --no-bip39-passphrase
-
-# 查看对应 Program ID
 solana-keygen pubkey keys/router-keypair.json
 ```
 
-生成后请同步修改：
+Then sync the pubkey into:
 
-1. `programs/sol-trade-router/src/lib.rs` 中的 `declare_id!(...)`
-2. `crates/sdk/src/constants.rs` 中的 `PROGRAM_ID`
+1. `programs/sol-trade-router/src/lib.rs` → `declare_id!(...)`
+2. `crates/sdk/src/constants.rs` → `PROGRAM_ID`
 
-## 安全提示
+## Full deploy steps
 
-- 切勿将 `*.json` keypair 推送到公开仓库
-- 生产环境建议使用硬件钱包 / 多签管理 upgrade authority
-- 首次部署后尽快调用 `initialize`，避免他人抢占 config authority
+See the root README:
+
+- [English — Deploy the Router program](../README.md#-deploy-the-router-program)
+- [中文 — 部署 Router 合约](../README_CN.md#-部署-router-合约)
+
+Build: `./scripts/build-program.sh`  
+Deploy: `solana program deploy --program-id keys/router-keypair.json <path-to.so>`  
+Then immediately send `initialize_config` so you own config authority.
+
+## Security
+
+- Never push `*.json` keypairs to a public repo
+- Prefer hardware wallet / multisig for production upgrade authority
+- Call `initialize` right after the first deploy

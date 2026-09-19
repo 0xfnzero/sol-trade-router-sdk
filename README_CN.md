@@ -1,10 +1,10 @@
 <div align="center">
     <h1>🔀 Sol Trade Router SDK</h1>
-    <h3><em>Pinocchio 链上多跳 Router + 热路径零 RPC 客户端 SDK</em></h3>
+    <h3><em>Pinocchio 链上多跳 Router + 超低延迟客户端 SDK</em></h3>
 </div>
 
 <p align="center">
-    <strong>包含 Pinocchio 路由合约与 Rust 客户端 SDK 的 Solana monorepo。支持带平台费的多跳 DEX 交易；池子快照来自 <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> 事件 / 本地缓存，热路径无 RPC。</strong>
+    <strong>交易能力对齐 <a href="https://github.com/0xfnzero/sol-trade-sdk">sol-trade-sdk</a>（SWQoS、durable nonce、SimpleBuy/Sell、ViaSol），但每笔成交经本仓库 Pinocchio <code>Route</code> CPI（平台费 + 多跳）。池子快照来自 <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> 事件 / 本地缓存：<em>热路径无 RPC</em>。</strong>
 </p>
 
 <p align="center">
@@ -37,11 +37,16 @@
 ## 📋 目录
 
 - [✨ 项目特性](#-项目特性)
-- [📦 Workspace](#-workspace)
-- [🔖 Program ID](#-program-id)
-- [🛠️ 使用说明](#️-使用说明)
+- [📚 文档](#-文档)
+- [📦 安装](#-安装)
+- [🆚 与 sol-trade-sdk 的差异](#-与-sol-trade-sdk-的差异)
+- [🛠️ 如何使用 SDK](#️-如何使用-sdk)
+- [🚀 部署 Router 合约](#-部署-router-合约)
+- [📚 示例](#-示例)
+- [⚡ 低延迟](#-低延迟)
+- [📦 Workspace 与市场](#-workspace-与市场)
 - [📁 项目结构](#-项目结构)
-- [🔨 构建](#-构建)
+- [🔨 构建与测试](#-构建与测试)
 - [📄 许可证](#-许可证)
 - [💬 联系方式](#-联系方式)
 - [⚠️ 重要注意事项](#️-重要注意事项)
@@ -50,205 +55,336 @@
 
 ## ✨ 项目特性
 
-1. **链上多跳 Router**：Pinocchio 程序先扣平台费，再 CPI 到各 DEX leg
-2. **热路径零 RPC**：`market_from_dex_event` 从 [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) 事件构建池子快照
-3. **与 sol-trade-sdk DexType 对齐**：PumpFun、PumpSwap、LaunchLab/StonkFun/Bonk、Raydium CPMM / AMM V4 / CLMM、Orca Whirlpool、Meteora DLMM / DAMM V2
-4. **对称 API**：`buy_with_{sol|wsol|token}` / `sell_to_{sol|wsol|token}`
-5. **ATA 策略**：WSOL / stock 冷路径准备；meme ATA 在买入同笔创建
-6. **手续费完整性**：链上校验 `fee_source` 花费 ≥ `amount_in`（手续费 + swap）
-7. **Pool guard**：可选 PDA / 白名单校验（`market_from_dex_event_checked`）
+1. **能力对齐 sol-trade-sdk，执行走 Route CPI** — `TradingClient`、SimpleBuy/Sell、SWQoS、durable nonce、ALT、middleware、RiskGate、exact-out、ViaSol
+2. **链上多跳 Router** — Pinocchio 先扣平台费，再 CPI 到各 DEX leg
+3. **超低延迟** — 订阅前预热；优先 **durable nonce**；热路径禁止取 blockhash / 查余额 / 搜池
+4. **DexType 全覆盖** — PumpFun、PumpSwap、LaunchLab/StonkFun/Bonk、Raydium CPMM / AMM V4 / CLMM、Orca Whirlpool、Meteora DLMM / DAMM V2
+5. **热路径零 RPC 池快照** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
+6. **ATA 策略** — WSOL / quote 冷路径准备；meme ATA 买入同笔创建
+7. **手续费完整性** — 链上校验 `fee_source` 花费 ≥ `amount_in`
+8. **Pool guard** — 可选 PDA / 白名单 / `stonk_strict`
 
-## 📦 Workspace
+## 📚 文档
 
-| 路径 | Crate | 说明 |
-|------|-------|------|
-| `programs/sol-trade-router` | `sol-trade-router` | 链上程序：扣费 + 多跳 `route` CPI |
-| `crates/sdk` | `sol-trade-router-sdk` | 客户端 SDK：离线组交易指令 |
+| 指南 | 用途 |
+|------|------|
+| [低延迟 Bot 接入](docs/LOW_LATENCY_BOTS_CN.md) | 冷/热路径、RiskGate、提交计时 |
+| [Durable Nonce](docs/NONCE_CACHE_CN.md) | 多 SWQoS / MEV 推荐时钟 |
+| [examples/README_CN.md](examples/README_CN.md) | gRPC / Shred 狙击与跟单模板 |
+| [keys/README.md](keys/README.md) | 本地部署 keypair（勿提交） |
 
-### 支持市场
+相关：[sol-trade-sdk 文档](https://github.com/0xfnzero/sol-trade-sdk)（Trading Parameters、Gas Fee、ALT、SWQoS）同样适用，仅成交指令程序不同。
 
-与 [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) 的 `DexType` 覆盖对齐（Router CPI 版本）：
+## 📦 安装
 
-| 市场 | 类型 | 说明 |
-|------|------|------|
-| PumpFun | 内盘 | SOL / quote bonding curve（V1 / V2） |
-| PumpSwap | 外盘 AMM | PumpFun 毕业池（`pAMM`） |
-| LaunchLab / Bonk / StonkFun | 内盘 | bonding curve，任意 quote（含 CARDS） |
-| StonkFun 毕业 / Raydium CPMM | 外盘 CPMM | Raydium CPMM |
-| Raydium AMM V4 | AMM | `SwapBaseInV2` |
-| Raydium CLMM | CLMM | `swap_v2` + tick arrays |
-| Orca Whirlpool | CLMM | `swap_v2` + tick arrays |
-| Meteora DLMM | DLMM | `swap2` + bin arrays |
-| Meteora DAMM V2 | Dynamic AMM | `swap2` exact-in |
+客户端 crate 当前为 **`publish = false`**，请用 git / path 依赖：
 
-池子快照由 [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) 的 `DexEvent` 经 `market_from_dex_event` 转换。
-
-## 🔖 Program ID
-
-```text
-CMrrMgrEvXW3oo6RtxnneDf5D5TeujfbqveFiKuvqrYg
+```toml
+[dependencies]
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
+# 仅在代码里 `use sol_parser_sdk::...`（订 gRPC/Shred）时再声明：
+sol-parser-sdk = "0.7.6"
 ```
 
-须与程序内 `declare_id!`、SDK `PROGRAM_ID` 一致。本地部署 keypair 放在 `keys/`（不入库），见 [keys/README.md](./keys/README.md)。
+间接依赖（crates.io，自动拉取）：
 
-## 🛠️ 使用说明
+| Crate | 版本 | 作用 |
+|-------|------|------|
+| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS 提交、参数、基础设施（已 re-export） |
+| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred 事件（只有订阅时才需直接依赖） |
 
-### 命名规范
+一般**不必**再写 `sol-trade-sdk`：交易相关类型从 `sol_trade_router_sdk::*` 即可导入。
+
+## 🆚 与 sol-trade-sdk 的差异
+
+| | sol-trade-sdk | sol-trade-router-sdk |
+|--|---------------|----------------------|
+| 客户端 API | `TradingClient` / SimpleBuy\|Sell | 同名同参 |
+| 成交指令 | 直调 DEX | Pinocchio **Route** CPI + 平台费 |
+| 热路径 | durable nonce / blockhash，无 RPC | 相同 |
+| 事件流 | sol-parser-sdk | 相同 |
+| 链上程序 | 无 | 需部署并 `initialize` 本 Router |
+
+迁移：保留 `TradeBuyParams` / `DexParamEnum` / SWQoS；改用 `sol_trade_router_sdk::TradingClient` + `RouterTradeConfig`（增加 `fee_recipient`、`fee_bps`）。
+
+## 🛠️ 如何使用 SDK
+
+### 1. 创建 `TradingClient`
+
+```rust
+use std::sync::Arc;
+use sol_trade_router_sdk::{
+    keypair, RouterTradeConfig, SwqosConfig, TradeConfig, TradingClient,
+};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::pubkey::Pubkey;
+
+let payer = Arc::new(keypair::load_keypair_from_env("PRIVATE_KEY")?);
+let rpc = std::env::var("RPC_URL")?;
+let fee_recipient: Pubkey = /* 手续费收款地址 */;
+let fee_bps: u16 = 50; // 0.50%
+
+let trade = TradeConfig::builder(
+    rpc.clone(),
+    vec![SwqosConfig::Default(rpc)],
+    CommitmentConfig::confirmed(),
+)
+.create_wsol_ata_on_startup(true)
+.build();
+
+let client = TradingClient::new(
+    payer,
+    RouterTradeConfig::new(trade, fee_recipient, fee_bps),
+)
+.await
+.with_dedicated_sender_threads(Some(vec![])); // 可选：专用 SWQoS 发送线程
+```
+
+多钱包共享：`TradingInfrastructure::new` → `TradingClient::from_infrastructure(...)`。
+
+### 2. 买入 / 卖出（对齐 sol-trade-sdk）
+
+推荐高层参数（与 trade-sdk 相同）：
+
+```rust
+use sol_trade_router_sdk::{
+    fetch_nonce_info, AccountPolicy, BuyAmount, DexParamEnum, DexType, GasFeeStrategy,
+    SimpleBuyParams, TradeTokenType,
+};
+
+// 生产：durable nonce（多 SWQoS）。见 docs/NONCE_CACHE_CN.md
+let nonce = fetch_nonce_info(client.get_rpc(), nonce_account).await.unwrap();
+let gas = GasFeeStrategy::new();
+gas.set_global_fee_strategy(150_000, 150_000, 500_000, 500_000, 0.001, 0.001);
+
+let buy = SimpleBuyParams::with_durable_nonce(
+    DexType::PumpFun,
+    TradeTokenType::SOL,
+    mint,
+    BuyAmount::ExactInput(100_000),
+    DexParamEnum::PumpFun(params), // 来自事件 / from_trade / from_dev_trade
+    nonce,
+    gas,
+)
+.account_policy(AccountPolicy::HotPathMinimal)
+.grpc_recv_us(event_recv_us)
+.wait_tx_confirmed(false);
+
+client.buy_simple(buy).await?;
+```
+
+或仅组 Route 指令（离线）：
+
+```rust
+let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
+let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
+```
 
 | 资产 | 买入 | 卖出 |
 |------|------|------|
 | 原生 SOL | `buy_with_sol` | `sell_to_sol` |
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
-| stock/quote | `buy_with_token` | `sell_to_token` |
-| 自定义 | `buy_with_opts` | `sell_with_opts` |
+| quote | `buy_with_token` | `sell_to_token` |
 
-### ATA 策略
-
-| 类型 | 提前单独创建 | 交易同笔创建 | 关闭 |
-|------|-------------|-------------|------|
-| **WSOL / 股票(quote)** | ✅ 推荐冷路径 | 默认否（可 opt-in） | 默认否 |
-| **meme** | ❌ 不要提前建 | ✅ 买入默认同笔创建 | 默认否 |
-
-Meme 不提前建：买失败整笔回滚，不会留下空 ATA 浪费 rent。
+### 3. 从事件 / 参数构建市场
 
 ```rust
-warm_ata_cache(&payer, &[(stock_mint, token_program)]);
+use sol_trade_router_sdk::{market_from_dex_event, to_routed_market};
+
+if let Some(market) = market_from_dex_event(&event) { /* ... */ }
+
+let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```
 
-### 1) 冷路径：只准备可复用 ATA
+### 4. ATA 策略
+
+| 类型 | 冷路径 | 交易内 | 关闭 |
+|------|--------|--------|------|
+| WSOL / quote | ✅ `prepare_buy_atas` | 可选 | 默认否 |
+| meme | ❌ | ✅ 买入时 | 默认否 |
 
 ```rust
-let prep = client.prepare_buy_atas(&market, BuyWith::Sol);
-client.create_wsol_ata();
-client.create_quote_ata(&market); // stock 对需要时
+client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
 
-### 2) 热路径买入（默认创建 meme ATA）
+### 5. 管理指令（部署后）
 
 ```rust
-let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
+use sol_trade_router_sdk::{initialize_config, update_config, PROGRAM_ID};
+
+let ix = initialize_config(&PROGRAM_ID, &authority, &fee_recipient, fee_bps);
+// 仅发送一次；authority 签名并支付 config PDA rent
+
+let ix = update_config(&PROGRAM_ID, &authority, fee_bps, false, None);
 ```
 
-### 3) 交易里顺带创建 / 关闭（显式）
+## 🚀 部署 Router 合约
+
+上线 Route 交易前，必须部署链上程序并调用 `initialize`。仅有客户端 SDK 不够。
+
+### 前置条件
+
+- [Solana CLI](https://docs.solana.com/cli/install)（`solana`、`solana-keygen`）
+- `cargo-build-sbf` / Solana platform-tools
+- 有足够 SOL 的部署者 keypair
+
+### 步骤 1 — 程序 keypair 与 Program ID
+
+```bash
+# 只生成一次。切勿提交 keys/*.json
+solana-keygen new --outfile keys/router-keypair.json --no-bip39-passphrase
+solana-keygen pubkey keys/router-keypair.json
+```
+
+将打印的公钥同步到：
+
+1. `programs/sol-trade-router/src/lib.rs` → `declare_id!("...")`
+2. `crates/sdk/src/constants.rs` → `PROGRAM_ID`
+
+详见 [keys/README.md](./keys/README.md)。
+
+### 步骤 2 — 编译 SBF `.so`
+
+```bash
+./scripts/build-program.sh
+# → target/deploy/sol_trade_router.so（或以脚本打印路径为准）
+```
+
+### 步骤 3 — 部署
+
+```bash
+solana config set --url https://api.mainnet-beta.solana.com   # 或你的 RPC / devnet
+solana program deploy \
+  --program-id keys/router-keypair.json \
+  target/deploy/sol_trade_router.so
+```
+
+确认链上 Program ID 与 SDK `PROGRAM_ID` 一致。
+
+### 步骤 4 — 初始化配置（关键）
+
+谁先调用 `initialize`，谁就是 **config authority**。部署后请立刻执行：
 
 ```rust
-client.buy_with_opts(
-    amount,
-    &market,
-    TradeOpts::default()
-        .buy_with_sol()
-        .create_wsol(true)
-        .create_quote(true)
-        .close_wsol(true),
-)?;
+use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
+// 构造并发送 initialize_config(&PROGRAM_ID, &authority_pubkey, &fee_recipient, fee_bps)
 ```
 
-| 策略 | meme | WSOL/quote | close |
-|------|------|------------|-------|
-| `AtaPolicy::default()` | ❌ | ❌ | ❌ |
-| `buy_with_*` | ✅ | ❌ | ❌ |
-| `sell_to_sol` | ❌ | ❌ | WSOL ✅（unwrap） |
-| `AtaPolicy::create_all_in_trade()` | ✅ | ✅ | ❌ |
+之后改费率 / 暂停 / 收款地址用 `update_config`。
 
-`sell_to_sol` 默认 `.close_wsol(true)`；若要保留 WSOL 用 `sell_to_wsol`。
+### 步骤 5 — Bot 指向该程序
 
-### 报价对齐（sol-trade-sdk）
+`TradingClient` / `RouterClient` 默认使用 `PROGRAM_ID`。若轮换 ID：
 
-| 协议 | 要点 |
+```rust
+RouterTradeConfig::new(trade, fee_recipient, fee_bps).with_program_id(your_id)
+```
+
+### 检查清单
+
+- [ ] 已生成 keypair；`declare_id!` 与 `PROGRAM_ID` 一致
+- [ ] `.so` 已编译并部署
+- [ ] 已发送 `initialize`（你拥有 config authority）
+- [ ] Bot 的 `fee_recipient` / `fee_bps` 与链上意图一致
+- [ ] 交易 payer 已准备 durable nonce 账户（[NONCE_CACHE_CN.md](docs/NONCE_CACHE_CN.md)）
+
+## 📚 示例
+
+| Package | 数据源 | 行为 |
+|---------|--------|------|
+| `grpc_event_listen` | Yellowstone gRPC | 监听 + `market_from_dex_event`（不发交易） |
+| `pumpfun_sniper_trading` | gRPC | 创建者首买狙击 → Route |
+| `pumpfun_copy_trading` | gRPC | 跟单首笔 PumpFun → Route |
+| `pumpfun_shred_sniper` | ShredStream | 创建者首买狙击 → Route |
+
+```bash
+# 仅监听（安全）
+export GRPC_ENDPOINT=https://your-yellowstone.example
+cargo run -p grpc_event_listen
+
+# 实盘（真实主网交易）
+export PRIVATE_KEY=...
+export RPC_URL=https://your-rpc.example
+export GRPC_ENDPOINT=https://your-yellowstone.example
+export NONCE_ACCOUNT=<nonce_pubkey>[,...]   # 推荐
+cargo run -p pumpfun_sniper_trading
+```
+
+预热辅助：`examples/common`（`warm_router_client` + `take_tx_clock`）。详见 [examples/README_CN.md](./examples/README_CN.md)。
+
+## ⚡ 低延迟
+
+```text
+预热 client + nonce 池 + ATA  →  订阅
+热路径：过滤 → 映射事件 → take_tx_clock → buy/sell → 提交
+```
+
+- 多 SWQoS 优先 **`NONCE_ACCOUNT`**，不要默认走 blockhash
+- 事件回调内禁止建 client / 取 blockhash / 查余额
+- 示例默认 `wait_tx_confirmed=false`
+
+→ [docs/LOW_LATENCY_BOTS_CN.md](./docs/LOW_LATENCY_BOTS_CN.md) · [docs/NONCE_CACHE_CN.md](./docs/NONCE_CACHE_CN.md)
+
+## 📦 Workspace 与市场
+
+| 路径 | Crate | 说明 |
+|------|-------|------|
+| `programs/sol-trade-router` | `sol-trade-router` | 链上扣费 + 多跳 `route` |
+| `crates/sdk` | `sol-trade-router-sdk` | 客户端 SDK |
+
+| 市场 | 说明 |
 |------|------|
-| LaunchLab | `virtual_base - real_base`；Token-2022 transfer fee；毕业 `total_base_sell` 夹取 |
-| CPMM | trade + creator fee（合并向上取整）；transfer fee；`creator_fee_on` |
-| PumpFun | 费率 95(+30) bps；买入费用**外加**；cashback sell 含 `user_volume_accumulator` |
-
-填充 `CpmmPool` 时：`base_reserve` / `quote_reserve` 需已扣除 vault 内 protocol/fund/creator fees。
-
-### 手续费完整性（链上）
-
-- `amount_in` = **手续费 + 实际 swap 花费**（同一 `fee_source`）
-- 非 PumpFun 的 `buy_with_sol`：先 wrap 全部 `amount_in` 到 WSOL，再从 WSOL 扣费并 swap
-- PumpFun：从原生 SOL 扣费 + 花费，链上校验 `fee_source` 余额减少 ≥ `amount_in`
-- SPL 手续费校验收款 ATA 的 owner / mint，且 `fee_program` 必须是 Token / Token-2022
-
-### 最简热路径
-
-```rust
-// 冷：prepare_buy_atas（WSOL + stock + fee recipient，不含 meme）
-let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
-let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
-```
+| PumpFun | Bonding curve V1 / V2 |
+| PumpSwap | 毕业 `pAMM` |
+| LaunchLab / Bonk / StonkFun | 曲线 + 毕业 CPMM / ViaSol |
+| Raydium CPMM / AMM V4 / CLMM | |
+| Orca Whirlpool | |
+| Meteora DLMM / DAMM V2 | |
 
 ## 📁 项目结构
 
 ```text
 sol-trade-router-sdk/
-├── programs/
-│   └── sol-trade-router/   # 链上智能合约（Pinocchio）
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs
-│           ├── state.rs
-│           ├── error.rs
-│           └── instructions/
-│               ├── initialize.rs
-│               ├── update_config.rs
-│               └── route.rs
-├── crates/
-│   └── sdk/                # 客户端 SDK
-│       ├── Cargo.toml
-│       └── src/
-│           ├── trade.rs
-│           ├── legs.rs             # 各 DEX swap leg（全协议）
-│           ├── parser.rs           # DexEvent → Market（sol-parser-sdk）
-│           ├── market.rs / quote.rs / ata.rs / pool_guard.rs / ...
-│           └── ...
-├── scripts/
-│   ├── check.sh
-│   └── build-program.sh
-├── keys/
-│   └── README.md           # 本地 keypair 说明（*.json 不入库）
-├── LICENSE
-├── Cargo.toml
+├── programs/sol-trade-router/     # Pinocchio 链上程序
+├── crates/sdk/                    # sol-trade-router-sdk 客户端
+├── docs/                          # 低延迟 + Nonce 指南
+├── examples/                      # gRPC / Shred bot + 公共预热
+├── scripts/check.sh
+├── scripts/build-program.sh
+├── keys/                          # 部署 keypair（不入库）
 ├── README.md
 └── README_CN.md
 ```
 
-## 🔨 构建
-
-需要同级目录检出 [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) 到 `../Solana-SDK-Projects/sol-parser-sdk`（与 [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) 布局一致）。
+## 🔨 构建与测试
 
 ```bash
-# Host 编译检查（SDK + 程序）
 ./scripts/check.sh
-# 或
 cargo check -p sol-trade-router-sdk
-cargo check -p sol-trade-router
-
-# 离线单元测试（不访问 RPC）
 cargo test -p sol-trade-router-sdk --lib offline_ -- --nocapture
 
-# 主网 simulateTransaction 套件（每次自动 Keypair::new 建钱包并虚拟注资）
-RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_sim -- --nocapture --test-threads=1
-# 可选: SOLANA_RPC_URL=https://...
+# 可选主网 simulate（临时钱包；Router 未部署时 Soft）
+RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_ -- --nocapture --test-threads=1
 
-# 链上程序 SBF 构建
 ./scripts/build-program.sh
 ```
 
 ## 📄 许可证
 
-MIT 许可证
+MIT License
 
 ## 💬 联系方式
 
-- 官方网站: https://fnzero.dev/
-- 项目仓库: https://github.com/0xfnzero/sol-trade-router-sdk
-- Telegram 群组: https://t.me/fnzero_group
-- Discord: https://discord.gg/vuazbGkqQE
+- 官网：https://fnzero.dev/
+- 仓库：https://github.com/0xfnzero/sol-trade-router-sdk
+- Telegram：https://t.me/fnzero_group
+- Discord：https://discord.gg/vuazbGkqQE
 
 ## ⚠️ 重要注意事项
 
-1. 在主网使用前请充分测试
-2. 切勿提交 `keys/*.json` 部署密钥
-3. 部署后请尽快调用 `initialize`，避免他人抢占 config authority
-4. 更换 Program ID 时同步修改 `declare_id!` 与 SDK `PROGRAM_ID`
-5. 遵循相关法律法规
+1. 主网大资金前先在 devnet / simulate 验证
+2. 切勿提交 `keys/*.json`
+3. 部署后立刻调用 `initialize`
+4. 保持 `declare_id!` 与 SDK `PROGRAM_ID` 同步
+5. Durable nonce ≠ 报价有效期 — 池状态仍要从事件刷新
+6. 请遵守当地法律法规

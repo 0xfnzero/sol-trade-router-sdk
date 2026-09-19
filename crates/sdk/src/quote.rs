@@ -671,6 +671,49 @@ pub fn raydium_amm_v4_out(
     Ok(swapped.min(u64::MAX as u128) as u64)
 }
 
+/// Inverse of [`raydium_amm_v4_out`]: gross input needed for at least `amount_out`.
+pub fn raydium_amm_v4_in_for_out(
+    pool: &RaydiumAmmV4Pool,
+    amount_out: u64,
+    input_is_coin: bool,
+) -> Result<u64> {
+    if amount_out == 0 {
+        return Err(anyhow!("amount_out is zero"));
+    }
+    let (input_reserve, output_reserve) = if input_is_coin {
+        (pool.coin_reserve, pool.pc_reserve)
+    } else {
+        (pool.pc_reserve, pool.coin_reserve)
+    };
+    if input_reserve == 0 || output_reserve == 0 {
+        return Err(anyhow!("empty Raydium AMM V4 reserves"));
+    }
+    if amount_out >= output_reserve {
+        return Err(anyhow!("Raydium AMM V4 amount_out exceeds output reserve"));
+    }
+    let denom = (output_reserve - amount_out) as u128;
+    let net_in = (amount_out as u128)
+        .saturating_mul(input_reserve as u128)
+        .div_ceil(denom);
+    let trade_num = pool.trade_fee_numerator as u128;
+    if trade_num >= 10_000 {
+        return Err(anyhow!("invalid Raydium AMM V4 trade fee numerator"));
+    }
+    // amount_in - ceil(amount_in * trade_num / 10000) >= net_in
+    let amount_in = if trade_num == 0 {
+        net_in
+    } else {
+        net_in.saturating_mul(10_000).div_ceil(10_000 - trade_num)
+    };
+    let amount_in = amount_in.min(u64::MAX as u128) as u64;
+    // Bump once if floor/ceil rounding left us short.
+    if raydium_amm_v4_out(pool, amount_in, input_is_coin)? < amount_out {
+        Ok(amount_in.saturating_add(1))
+    } else {
+        Ok(amount_in)
+    }
+}
+
 pub fn meteora_damm_v2_out(
     pool: &MeteoraDammV2Pool,
     amount_in: u64,

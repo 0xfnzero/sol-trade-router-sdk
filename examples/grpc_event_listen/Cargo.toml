@@ -1,0 +1,13 @@
+[package]
+name = "grpc_event_listen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sol-trade-router-sdk = { path = "../../crates/sdk" }
+sol-parser-sdk = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }

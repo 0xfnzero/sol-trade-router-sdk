@@ -190,6 +190,7 @@ pub fn raydium_amm_v4_from_params(p: &RaydiumAmmV4Params) -> RaydiumAmmV4Pool {
         pc_mint: p.pc_mint,
         token_coin: p.token_coin,
         token_pc: p.token_pc,
+        token_program: TOKEN_PROGRAM,
         amm_open_orders: p.amm_open_orders,
         amm_target_orders: p.amm_target_orders,
         serum_program: p.serum_program,
@@ -282,11 +283,9 @@ pub fn dlmm_from_params(p: &MeteoraDlmmParams) -> MeteoraDlmmPool {
 
 fn via_sol_to_routed(via: &StonkFunViaSolParams, mint: Pubkey) -> Result<RoutedMarket> {
     let bridge = match &via.sol_hop {
-        StonkFunSolHop::RaydiumCpmm(p) => cpmm_from_params(p),
-        StonkFunSolHop::RaydiumAmmV4(_) => {
-            return Err(anyhow!(
-                "StonkFunViaSol AMM v4 SOL hop is not supported as router bridge yet; use CPMM hop"
-            ));
+        StonkFunSolHop::RaydiumCpmm(p) => crate::market::BridgePool::Cpmm(cpmm_from_params(p)),
+        StonkFunSolHop::RaydiumAmmV4(p) => {
+            crate::market::BridgePool::AmmV4(raydium_amm_v4_from_params(p))
         }
     };
     let market = match &via.meme_leg {
@@ -330,7 +329,7 @@ pub fn to_routed_market_for_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sol_trade_sdk::trading::core::params::RaydiumCpmmParams;
+    use sol_trade_sdk::trading::core::params::{RaydiumAmmV4Params, RaydiumCpmmParams};
 
     #[test]
     fn cpmm_params_round_trip_fields() {
@@ -394,7 +393,44 @@ mod tests {
         };
         let via = StonkFunViaSolParams::curve_with_cpmm(curve, hop);
         let routed = to_routed_market(&DexParamEnum::StonkFunViaSol(via), meme).unwrap();
-        assert!(routed.bridge.is_some());
+        assert!(matches!(routed.bridge, Some(crate::market::BridgePool::Cpmm(_))));
+        assert!(matches!(routed.market, Market::LaunchLabInner(_)));
+    }
+
+    #[test]
+    fn via_sol_amm_v4_hop_builds_bridge() {
+        let meme = Pubkey::new_unique();
+        let stock = Pubkey::new_unique();
+        let curve = BonkParams {
+            pool_state: Pubkey::new_unique(),
+            quote_mint: stock,
+            ..Default::default()
+        };
+        let hop = RaydiumAmmV4Params {
+            amm: Pubkey::new_unique(),
+            coin_mint: WSOL_MINT,
+            pc_mint: stock,
+            token_coin: Pubkey::new_unique(),
+            token_pc: Pubkey::new_unique(),
+            amm_open_orders: Pubkey::default(),
+            amm_target_orders: Pubkey::default(),
+            serum_program: Pubkey::default(),
+            serum_market: Pubkey::default(),
+            serum_bids: Pubkey::default(),
+            serum_asks: Pubkey::default(),
+            serum_event_queue: Pubkey::default(),
+            serum_coin_vault_account: Pubkey::default(),
+            serum_pc_vault_account: Pubkey::default(),
+            serum_vault_signer: Pubkey::default(),
+            coin_reserve: 1_000_000_000,
+            pc_reserve: 2_000_000_000,
+        };
+        let via = StonkFunViaSolParams::curve_with_amm_v4(curve, hop);
+        let routed = to_routed_market(&DexParamEnum::StonkFunViaSol(via), meme).unwrap();
+        assert!(matches!(
+            routed.bridge,
+            Some(crate::market::BridgePool::AmmV4(_))
+        ));
         assert!(matches!(routed.market, Market::LaunchLabInner(_)));
     }
 }

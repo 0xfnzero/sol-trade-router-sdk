@@ -1,0 +1,15 @@
+[package]
+name = "router_examples_common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sol-trade-router-sdk = { path = "../../crates/sdk" }
+sol-trade-sdk = { workspace = true }
+solana-sdk = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-hash = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }

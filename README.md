@@ -1,10 +1,10 @@
 <div align="center">
     <h1>🔀 Sol Trade Router SDK</h1>
-    <h3><em>Pinocchio on-chain multi-hop router + zero-RPC hot-path client SDK</em></h3>
+    <h3><em>Pinocchio on-chain multi-hop router + ultra-low-latency client SDK</em></h3>
 </div>
 
 <p align="center">
-    <strong>A Solana monorepo with a Pinocchio router program and a Rust client SDK for fee-aware, multi-hop DEX swaps. Pool snapshots come from <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> events / local cache — no RPC on the hot path.</strong>
+    <strong>Same trading surface as <a href="https://github.com/0xfnzero/sol-trade-sdk">sol-trade-sdk</a> — SWQoS, durable nonce, SimpleBuy/Sell, ViaSol — but every swap is packed through this repo’s Pinocchio <code>Route</code> CPI (platform fee + multi-hop). Pool snapshots come from <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> events / local cache: <em>no RPC on the hot path</em>.</strong>
 </p>
 
 <p align="center">
@@ -37,11 +37,16 @@
 ## 📋 Table of Contents
 
 - [✨ Features](#-features)
-- [📦 Workspace](#-workspace)
-- [🔖 Program ID](#-program-id)
-- [🛠️ Usage](#️-usage)
+- [📚 Documentation](#-documentation)
+- [📦 Installation](#-installation)
+- [🆚 vs sol-trade-sdk](#-vs-sol-trade-sdk)
+- [🛠️ Use the SDK](#️-use-the-sdk)
+- [🚀 Deploy the Router program](#-deploy-the-router-program)
+- [📚 Examples](#-examples)
+- [⚡ Low latency](#-low-latency)
+- [📦 Workspace & markets](#-workspace--markets)
 - [📁 Project Structure](#-project-structure)
-- [🔨 Build](#-build)
+- [🔨 Build & test](#-build--test)
 - [📄 License](#-license)
 - [💬 Contact](#-contact)
 - [⚠️ Important Notes](#️-important-notes)
@@ -50,187 +55,320 @@
 
 ## ✨ Features
 
-1. **On-chain multi-hop router**: Pinocchio program takes platform fee then CPI into DEX legs
-2. **Zero-RPC hot path**: `market_from_dex_event` builds pools from [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) events
-3. **Full DexType parity with sol-trade-sdk**: PumpFun, PumpSwap, LaunchLab/StonkFun/Bonk, Raydium CPMM / AMM V4 / CLMM, Orca Whirlpool, Meteora DLMM / DAMM V2
-4. **Symmetric API**: `buy_with_{sol|wsol|token}` / `sell_to_{sol|wsol|token}`
-5. **ATA policy**: WSOL / stock prepared on the cold path; meme ATA created in the same buy tx
-6. **Fee integrity**: On-chain check that `fee_source` spends ≥ `amount_in` (fee + swap)
-7. **Pool guard**: optional PDA / allowlist checks via `market_from_dex_event_checked`
+1. **Capability = sol-trade-sdk; execution = Route CPI** — `TradingClient`, SimpleBuy/Sell, SWQoS, durable nonce, ALT, middleware, RiskGate, exact-out, ViaSol
+2. **On-chain multi-hop router** — Pinocchio program takes platform fee, then CPI into DEX legs
+3. **Ultra-low latency** — warm before subscribe; prefer **durable nonce**; hot path never fetches blockhash / balances / pools
+4. **Full DexType parity** — PumpFun, PumpSwap, LaunchLab/StonkFun/Bonk, Raydium CPMM / AMM V4 / CLMM, Orca Whirlpool, Meteora DLMM / DAMM V2
+5. **Zero-RPC pool snapshots** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
+6. **ATA policy** — WSOL / quote on the cold path; meme ATA in the buy tx
+7. **Fee integrity** — on-chain `fee_source` spend ≥ `amount_in` (fee + swap)
+8. **Pool guard** — optional PDA / allowlist / `stonk_strict`
 
-## 📦 Workspace
+## 📚 Documentation
 
-| Path | Crate | Description |
-|------|-------|-------------|
-| `programs/sol-trade-router` | `sol-trade-router` | On-chain program: fee + multi-hop `route` CPI |
-| `crates/sdk` | `sol-trade-router-sdk` | Client SDK: offline instruction building |
+| Guide | Purpose |
+|-------|---------|
+| [Low-Latency Bot Integration](docs/LOW_LATENCY_BOTS.md) | Warm / hot path, RiskGate, submit timing |
+| [Durable Nonce](docs/NONCE_CACHE.md) | Preferred clock for multi-SWQoS / MEV |
+| [examples/README.md](examples/README.md) | gRPC / Shred sniper & copy templates |
+| [keys/README.md](keys/README.md) | Local deploy keypair (never commit) |
 
-### Supported markets
+Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Trading Parameters, Gas Fee, ALT, SWQoS) apply the same way — only the swap instruction program changes.
 
-Aligned with [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) `DexType` coverage (Router CPI version):
+## 📦 Installation
 
-| Market | Type | Notes |
-|--------|------|-------|
-| PumpFun | Inner curve | SOL / quote bonding curve (V1 / V2) |
-| PumpSwap | Outer AMM | Graduated PumpFun pools (`pAMM`) |
-| LaunchLab / Bonk / StonkFun | Inner curve | Bonding curve, arbitrary quote (incl. CARDS) |
-| StonkFun graduated / Raydium CPMM | Outer CPMM | Raydium CPMM |
-| Raydium AMM V4 | AMM | `SwapBaseInV2` |
-| Raydium CLMM | CLMM | `swap_v2` + tick arrays |
-| Orca Whirlpool | CLMM | `swap_v2` + tick arrays |
-| Meteora DLMM | DLMM | `swap2` + bin arrays |
-| Meteora DAMM V2 | Dynamic AMM | `swap2` exact-in |
+This workspace client crate is currently **`publish = false`**. Depend on a git checkout (or path):
 
-Snapshots are built from [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) `DexEvent` via `market_from_dex_event`.
-
-## 🔖 Program ID
-
-```text
-CMrrMgrEvXW3oo6RtxnneDf5D5TeujfbqveFiKuvqrYg
+```toml
+[dependencies]
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
+# Streaming bots only — declare if you `use sol_parser_sdk::...`:
+sol-parser-sdk = "0.7.6"
 ```
 
-Must match `declare_id!` in the program and `PROGRAM_ID` in the SDK. Local deploy keypair lives under `keys/` (gitignored) — see [keys/README.md](./keys/README.md).
+Transitive crates.io deps (pulled automatically):
 
-## 🛠️ Usage
+| Crate | Version | Role |
+|-------|---------|------|
+| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS submit, params, infra (re-exported) |
+| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred events (direct dep only if you subscribe) |
 
-### Naming
+Do **not** add `sol-trade-sdk` to your `Cargo.toml` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
+
+## 🆚 vs sol-trade-sdk
+
+| | sol-trade-sdk | sol-trade-router-sdk |
+|--|---------------|----------------------|
+| Client API | `TradingClient` / SimpleBuy\|Sell | Same names & params |
+| Swap ix | Direct DEX program | Pinocchio **Route** CPI + platform fee |
+| Hot path | Durable nonce / blockhash, no RPC | Same |
+| Streaming | Use sol-parser-sdk | Same |
+| On-chain | None | Deploy + `initialize` this router |
+
+Migration: keep `TradeBuyParams` / `DexParamEnum` / SWQoS config; construct `sol_trade_router_sdk::TradingClient` with `RouterTradeConfig` (adds `fee_recipient` + `fee_bps`).
+
+## 🛠️ Use the SDK
+
+### 1. Create `TradingClient`
+
+```rust
+use std::sync::Arc;
+use sol_trade_router_sdk::{
+    keypair, RouterTradeConfig, SwqosConfig, TradeConfig, TradingClient,
+};
+use solana_commitment_config::CommitmentConfig;
+use solana_sdk::pubkey::Pubkey;
+
+let payer = Arc::new(keypair::load_keypair_from_env("PRIVATE_KEY")?);
+let rpc = std::env::var("RPC_URL")?;
+let fee_recipient: Pubkey = /* your fee wallet */;
+let fee_bps: u16 = 50; // 0.50%
+
+let trade = TradeConfig::builder(
+    rpc.clone(),
+    vec![SwqosConfig::Default(rpc)],
+    CommitmentConfig::confirmed(),
+)
+.create_wsol_ata_on_startup(true)
+.build();
+
+let client = TradingClient::new(
+    payer,
+    RouterTradeConfig::new(trade, fee_recipient, fee_bps),
+)
+.await
+.with_dedicated_sender_threads(Some(vec![])); // optional SWQoS threads
+```
+
+Shared infra across wallets: `TradingInfrastructure::new` → `TradingClient::from_infrastructure(...)`.
+
+### 2. Buy / sell (parity with sol-trade-sdk)
+
+Prefer high-level params (same as trade-sdk):
+
+```rust
+use sol_trade_router_sdk::{
+    fetch_nonce_info, AccountPolicy, BuyAmount, DexParamEnum, DexType, GasFeeStrategy,
+    SimpleBuyParams, TradeTokenType,
+};
+
+// Production: durable nonce (multi-SWQoS). See docs/NONCE_CACHE.md
+let nonce = fetch_nonce_info(client.get_rpc(), nonce_account).await.unwrap();
+let gas = GasFeeStrategy::new();
+gas.set_global_fee_strategy(150_000, 150_000, 500_000, 500_000, 0.001, 0.001);
+
+let buy = SimpleBuyParams::with_durable_nonce(
+    DexType::PumpFun,
+    TradeTokenType::SOL,
+    mint,
+    BuyAmount::ExactInput(100_000),
+    DexParamEnum::PumpFun(params), // from event / from_trade / from_dev_trade
+    nonce,
+    gas,
+)
+.account_policy(AccountPolicy::HotPathMinimal)
+.grpc_recv_us(event_recv_us)
+.wait_tx_confirmed(false);
+
+client.buy_simple(buy).await?;
+```
+
+Or low-level Route builders (offline ix only):
+
+```rust
+let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
+let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
+```
 
 | Asset | Buy | Sell |
 |-------|-----|------|
 | Native SOL | `buy_with_sol` | `sell_to_sol` |
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
-| Stock / quote | `buy_with_token` | `sell_to_token` |
-| Custom | `buy_with_opts` | `sell_with_opts` |
+| Quote token | `buy_with_token` | `sell_to_token` |
 
-### ATA strategy
-
-| Kind | Create ahead | Create in trade | Close |
-|------|--------------|-----------------|-------|
-| **WSOL / stock (quote)** | ✅ cold path | opt-in | default off |
-| **meme** | ❌ | ✅ default on buy | default off |
-
-Meme ATAs are not pre-created: a failed buy rolls back and leaves no empty rent-paying ATA.
+### 3. Markets from events / params
 
 ```rust
-warm_ata_cache(&payer, &[(stock_mint, token_program)]);
+use sol_trade_router_sdk::{market_from_dex_event, to_routed_market};
+
+// From sol-parser-sdk DexEvent (gRPC / Shred)
+if let Some(market) = market_from_dex_event(&event) { /* ... */ }
+
+// From trade-sdk DexParamEnum
+let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```
 
-### Cold path — reusable ATAs only
+### 4. ATA strategy
+
+| Kind | Cold path | In trade | Close |
+|------|-----------|----------|-------|
+| WSOL / quote | ✅ `prepare_buy_atas` | opt-in | default off |
+| meme | ❌ | ✅ on buy | default off |
 
 ```rust
-let prep = client.prepare_buy_atas(&market, BuyWith::Sol);
-client.create_wsol_ata();
-client.create_quote_ata(&market);
+client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
 
-### Hot path — buy (creates meme ATA by default)
+### 5. Admin (after deploy)
 
 ```rust
-let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
+use sol_trade_router_sdk::{initialize_config, update_config, PROGRAM_ID};
+
+let ix = initialize_config(&PROGRAM_ID, &authority, &fee_recipient, fee_bps);
+// send once as config authority (payer)
+
+let ix = update_config(&PROGRAM_ID, &authority, fee_bps, false, None);
 ```
 
-### Explicit create / close in the same tx
+## 🚀 Deploy the Router program
+
+You must deploy the on-chain program and call `initialize` before live Route trades. Client SDK alone is not enough.
+
+### Prerequisites
+
+- [Solana CLI](https://docs.solana.com/cli/install) (`solana`, `solana-keygen`)
+- `cargo-build-sbf` / Solana platform-tools (same as building Pinocchio/Anchor programs)
+- Deployer keypair with SOL for rent + fees
+
+### Step 1 — Program keypair & Program ID
+
+```bash
+# Generate (once). Do NOT commit keys/*.json
+solana-keygen new --outfile keys/router-keypair.json --no-bip39-passphrase
+solana-keygen pubkey keys/router-keypair.json
+```
+
+Sync the printed pubkey into:
+
+1. `programs/sol-trade-router/src/lib.rs` → `declare_id!("...")`
+2. `crates/sdk/src/constants.rs` → `PROGRAM_ID`
+
+Details: [keys/README.md](./keys/README.md).
+
+### Step 2 — Build SBF `.so`
+
+```bash
+./scripts/build-program.sh
+# → target/deploy/sol_trade_router.so  (or sbpf release path printed by the script)
+```
+
+### Step 3 — Deploy
+
+```bash
+solana config set --url https://api.mainnet-beta.solana.com   # or your RPC / devnet
+solana program deploy \
+  --program-id keys/router-keypair.json \
+  target/deploy/sol_trade_router.so
+```
+
+Confirm the Program ID matches `PROGRAM_ID` in the SDK.
+
+### Step 4 — Initialize config (critical)
+
+The first caller of `initialize` becomes **config authority**. Call it immediately after deploy:
 
 ```rust
-client.buy_with_opts(
-    amount,
-    &market,
-    TradeOpts::default()
-        .buy_with_sol()
-        .create_wsol(true)
-        .create_quote(true)
-        .close_wsol(true),
-)?;
+use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
+// Build + send initialize_config(&PROGRAM_ID, &authority_pubkey, &fee_recipient, fee_bps)
+// authority must sign; pays for config PDA rent
 ```
 
-| Policy | meme | WSOL/quote | close |
-|--------|------|------------|-------|
-| `AtaPolicy::default()` | ❌ | ❌ | ❌ |
-| `buy_with_*` | ✅ | ❌ | ❌ |
-| `sell_to_sol` | ❌ | ❌ | WSOL ✅ (unwrap) |
-| `AtaPolicy::create_all_in_trade()` | ✅ | ✅ | ❌ |
+Later fee / pause / recipient changes: `update_config`.
 
-`sell_to_sol` defaults to `.close_wsol(true)`; use `sell_to_wsol` to keep WSOL.
+### Step 5 — Point the bot at the program
 
-### Quote alignment (sol-trade-sdk)
-
-| Protocol | Notes |
-|----------|-------|
-| LaunchLab | `virtual_base - real_base`; Token-2022 transfer fee; graduate clamp on `total_base_sell` |
-| CPMM | trade + creator fee (ceil combined); transfer fee; `creator_fee_on` |
-| PumpFun | 95(+30) bps; buy fee **on top**; cashback sell includes `user_volume_accumulator` |
-
-When filling `CpmmPool`, `base_reserve` / `quote_reserve` must already exclude protocol/fund/creator fees sitting in vaults.
-
-### On-chain fee integrity
-
-- `amount_in` = **fee + swap spend** (same `fee_source`)
-- Non-PumpFun `buy_with_sol`: wrap full `amount_in` to WSOL, then fee + swap from WSOL
-- PumpFun: fee + spend from native SOL; on-chain asserts `fee_source` delta ≥ `amount_in`
-- SPL fee checks recipient ATA owner/mint; `fee_program` must be Token or Token-2022
-
-### Minimal hot path
+`TradingClient` / `RouterClient` default to `PROGRAM_ID`. If you rotate IDs:
 
 ```rust
-// cold: prepare_buy_atas (WSOL + stock + fee recipient; no meme)
-let ixs = client.buy_with_sol(amount, &market)?.into_instructions();
-let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
+RouterTradeConfig::new(trade, fee_recipient, fee_bps).with_program_id(your_id)
 ```
+
+### Checklist
+
+- [ ] Keypair generated; `declare_id!` + `PROGRAM_ID` match
+- [ ] `.so` built and deployed
+- [ ] `initialize` sent (you own config authority)
+- [ ] Bot `fee_recipient` / `fee_bps` match on-chain intent
+- [ ] Durable nonce accounts created for the trading payer ([NONCE_CACHE.md](docs/NONCE_CACHE.md))
+
+## 📚 Examples
+
+| Package | Stream | Behavior |
+|---------|--------|----------|
+| `grpc_event_listen` | Yellowstone gRPC | Listen + `market_from_dex_event` (no submit) |
+| `pumpfun_sniper_trading` | gRPC | Creator-first buy sniper → Route |
+| `pumpfun_copy_trading` | gRPC | Copy first PumpFun trade → Route |
+| `pumpfun_shred_sniper` | ShredStream | Creator-first buy sniper → Route |
+
+```bash
+# Safe listen-only
+export GRPC_ENDPOINT=https://your-yellowstone.example
+cargo run -p grpc_event_listen
+
+# Live bots (real mainnet txs)
+export PRIVATE_KEY=...
+export RPC_URL=https://your-rpc.example
+export GRPC_ENDPOINT=https://your-yellowstone.example
+export NONCE_ACCOUNT=<nonce_pubkey>[,...]   # recommended
+cargo run -p pumpfun_sniper_trading
+```
+
+Warm helper: `examples/common` (`warm_router_client` + `take_tx_clock`). Full notes: [examples/README.md](./examples/README.md).
+
+## ⚡ Low latency
+
+```text
+warm client + nonce pool + ATAs  →  subscribe
+hot: filter → map event → take_tx_clock → buy/sell → submit
+```
+
+- Prefer **`NONCE_ACCOUNT`** over blockhash for multi-SWQoS
+- Never create the client / fetch blockhash / query balances on the event path
+- Default examples use `wait_tx_confirmed=false`
+
+→ [docs/LOW_LATENCY_BOTS.md](./docs/LOW_LATENCY_BOTS.md) · [docs/NONCE_CACHE.md](./docs/NONCE_CACHE.md)
+
+## 📦 Workspace & markets
+
+| Path | Crate | Description |
+|------|-------|-------------|
+| `programs/sol-trade-router` | `sol-trade-router` | On-chain fee + multi-hop `route` |
+| `crates/sdk` | `sol-trade-router-sdk` | Client SDK |
+
+| Market | Notes |
+|--------|-------|
+| PumpFun | Bonding curve V1 / V2 |
+| PumpSwap | Graduated `pAMM` |
+| LaunchLab / Bonk / StonkFun | Curve + graduated CPMM / ViaSol |
+| Raydium CPMM / AMM V4 / CLMM | |
+| Orca Whirlpool | |
+| Meteora DLMM / DAMM V2 | |
 
 ## 📁 Project Structure
 
 ```text
 sol-trade-router-sdk/
-├── programs/
-│   └── sol-trade-router/   # On-chain Pinocchio program
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs
-│           ├── state.rs
-│           ├── error.rs
-│           └── instructions/
-│               ├── initialize.rs
-│               ├── update_config.rs
-│               └── route.rs
-├── crates/
-│   └── sdk/                # Client SDK (sol-trade-router-sdk)
-│       ├── Cargo.toml
-│       └── src/
-│           ├── trade.rs
-│           ├── legs.rs             # DEX swap legs (all DexTypes)
-│           ├── parser.rs           # DexEvent → Market (sol-parser-sdk)
-│           ├── market.rs / quote.rs / ata.rs / pool_guard.rs / ...
-│           └── ...
-├── scripts/
-│   ├── check.sh
-│   └── build-program.sh
-├── keys/
-│   └── README.md           # local keypair docs (*.json not committed)
-├── LICENSE
-├── Cargo.toml
+├── programs/sol-trade-router/     # Pinocchio on-chain program
+├── crates/sdk/                    # sol-trade-router-sdk client
+├── docs/                          # LOW_LATENCY + NONCE guides
+├── examples/                      # gRPC / Shred bots + common warm helper
+├── scripts/check.sh
+├── scripts/build-program.sh
+├── keys/                          # deploy keypair (gitignored)
 ├── README.md
 └── README_CN.md
 ```
 
-## 🔨 Build
-
-Requires a sibling checkout of [`sol-parser-sdk`](https://github.com/0xfnzero/sol-parser-sdk) at `../Solana-SDK-Projects/sol-parser-sdk` (same layout as [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk)).
+## 🔨 Build & test
 
 ```bash
-# Host compile check (SDK + program)
 ./scripts/check.sh
-# or
 cargo check -p sol-trade-router-sdk
-cargo check -p sol-trade-router
-
-# Offline unit tests (no RPC)
 cargo test -p sol-trade-router-sdk --lib offline_ -- --nocapture
 
-# Mainnet simulateTransaction suite (creates ephemeral wallets, virtually funds them)
-RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_sim -- --nocapture --test-threads=1
-# optional: SOLANA_RPC_URL=https://...
+# Optional mainnet simulate (ephemeral wallets; Soft if router undeployed)
+RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_ -- --nocapture --test-threads=1
 
-# On-chain SBF build (requires Solana platform-tools / cargo-build-sbf)
 ./scripts/build-program.sh
 ```
 
@@ -240,15 +378,16 @@ MIT License
 
 ## 💬 Contact
 
-- Official Website: https://fnzero.dev/
-- Project Repository: https://github.com/0xfnzero/sol-trade-router-sdk
-- Telegram Group: https://t.me/fnzero_group
+- Website: https://fnzero.dev/
+- Repo: https://github.com/0xfnzero/sol-trade-router-sdk
+- Telegram: https://t.me/fnzero_group
 - Discord: https://discord.gg/vuazbGkqQE
 
 ## ⚠️ Important Notes
 
-1. Test thoroughly before using on mainnet
-2. Never commit `keys/*.json` deploy keypairs
-3. Call `initialize` promptly after deploy so others cannot claim config authority
-4. When rotating Program ID, update both `declare_id!` and SDK `PROGRAM_ID`
-5. Comply with relevant laws and regulations
+1. Test on devnet / simulate before mainnet size
+2. Never commit `keys/*.json`
+3. Call `initialize` immediately after deploy
+4. Keep `declare_id!` and SDK `PROGRAM_ID` in sync
+5. Durable nonce ≠ quote validity — refresh pool state from events
+6. Comply with applicable laws and regulations

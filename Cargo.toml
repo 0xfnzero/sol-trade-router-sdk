@@ -3,6 +3,11 @@ resolver = "2"
 members = [
     "programs/sol-trade-router",
     "crates/sdk",
+    "examples/common",
+    "examples/grpc_event_listen",
+    "examples/pumpfun_sniper_trading",
+    "examples/pumpfun_copy_trading",
+    "examples/pumpfun_shred_sniper",
 ]
 default-members = ["crates/sdk"]
 
@@ -24,8 +29,10 @@ thiserror = "2"
 # Must match sol-parser-sdk (Pubkey / Instruction types).
 solana-sdk = "4.0.1"
 solana-system-interface = { version = "3.0.0", features = ["bincode"] }
-sol-parser-sdk = { version = "=0.7.5", path = "../Solana-SDK-Projects/sol-parser-sdk", default-features = false, features = ["parse-borsh"] }
-sol-trade-sdk = { version = "=5.0.4", path = "../Solana-SDK-Projects/sol-trade-sdk", default-features = false }
+solana-commitment-config = { version = "3.1.1", features = ["serde"] }
+sol-parser-sdk = { version = "=0.7.6", default-features = false, features = ["parse-borsh"] }
+sol-trade-sdk = { version = "=5.0.5", default-features = false }
 tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
 solana-hash = "4.4.0"
 solana-message = "4.4.0"
+core_affinity = "0.8"

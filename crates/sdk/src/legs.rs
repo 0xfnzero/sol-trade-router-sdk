@@ -537,6 +537,7 @@ pub fn pumpswap_buy_leg(
     data[..8].copy_from_slice(&PUMPSWAP_BUY_EXACT_QUOTE_IN);
     data[8..16].copy_from_slice(&quote_in.to_le_bytes());
     data[16..24].copy_from_slice(&min_base_out.to_le_bytes());
+    // Match sol-trade-sdk / pump-swap-sdk: always track volume on buy.
     data[24] = 1;
     Ok(Leg {
         program_id: PUMPSWAP_PROGRAM,
@@ -581,6 +582,11 @@ pub fn raydium_amm_v4_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    if pool.coin_mint == Pubkey::default() || pool.pc_mint == Pubkey::default() {
+        return Err(anyhow!(
+            "Raydium AMM V4 coin/pc mints unset — fill from vaults or AmmInfo before building leg"
+        ));
+    }
     let output_mint = if input_mint == pool.coin_mint {
         pool.pc_mint
     } else if input_mint == pool.pc_mint {
@@ -588,16 +594,21 @@ pub fn raydium_amm_v4_swap_leg(
     } else {
         return Err(anyhow!("Raydium AMM V4 input mint does not match pool"));
     };
+    let tp = if pool.token_program == Pubkey::default() {
+        TOKEN_PROGRAM
+    } else {
+        pool.token_program
+    };
     let mut data = [0u8; 17];
     data[1..9].copy_from_slice(&amount_in.to_le_bytes());
     data[9..17].copy_from_slice(&min_out.to_le_bytes());
-    let user_src = ata(user, &input_mint, &TOKEN_PROGRAM);
-    let user_dst = ata(user, &output_mint, &TOKEN_PROGRAM);
+    let user_src = ata(user, &input_mint, &tp);
+    let user_dst = ata(user, &output_mint, &tp);
     // Official Raydium 2026-07-22: routers must use SwapBaseInV2 (tag 16).
     // raydium-sdk-V2: owner is signer-only (`isWritable: false`).
     data[0] = RAYDIUM_AMM_V4_SWAP_BASE_IN_V2;
     let accounts = vec![
-        AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+        AccountMeta::new_readonly(tp, false),
         AccountMeta::new(pool.amm, false),
         RAYDIUM_AMM_V4_AUTHORITY_META,
         AccountMeta::new(pool.token_coin, false),
@@ -621,6 +632,11 @@ pub fn raydium_amm_v4_swap_exact_out_leg(
     max_amount_in: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    if pool.coin_mint == Pubkey::default() || pool.pc_mint == Pubkey::default() {
+        return Err(anyhow!(
+            "Raydium AMM V4 coin/pc mints unset — fill from vaults or AmmInfo before building leg"
+        ));
+    }
     let output_mint = if input_mint == pool.coin_mint {
         pool.pc_mint
     } else if input_mint == pool.pc_mint {
@@ -628,14 +644,19 @@ pub fn raydium_amm_v4_swap_exact_out_leg(
     } else {
         return Err(anyhow!("Raydium AMM V4 input mint does not match pool"));
     };
+    let tp = if pool.token_program == Pubkey::default() {
+        TOKEN_PROGRAM
+    } else {
+        pool.token_program
+    };
     let mut data = [0u8; 17];
     data[0] = RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2;
     data[1..9].copy_from_slice(&max_amount_in.to_le_bytes());
     data[9..17].copy_from_slice(&amount_out.to_le_bytes());
-    let user_src = ata(user, &input_mint, &TOKEN_PROGRAM);
-    let user_dst = ata(user, &output_mint, &TOKEN_PROGRAM);
+    let user_src = ata(user, &input_mint, &tp);
+    let user_dst = ata(user, &output_mint, &tp);
     let accounts = vec![
-        AccountMeta::new_readonly(TOKEN_PROGRAM, false),
+        AccountMeta::new_readonly(tp, false),
         AccountMeta::new(pool.amm, false),
         RAYDIUM_AMM_V4_AUTHORITY_META,
         AccountMeta::new(pool.token_coin, false),
@@ -1098,6 +1119,7 @@ mod tests {
             pc_mint: WSOL_MINT,
             token_coin: key(3),
             token_pc: key(4),
+            token_program: TOKEN_PROGRAM,
             amm_open_orders: Pubkey::default(),
             amm_target_orders: Pubkey::default(),
             serum_program: Pubkey::default(),
