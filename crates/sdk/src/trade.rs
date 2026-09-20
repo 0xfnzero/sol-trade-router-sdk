@@ -200,10 +200,9 @@ pub struct RouterClient {
     pub payer: Pubkey,
     pub program_id: Pubkey,
     pub fee_recipient: Pubkey,
-    /// Must match on-chain config (used for local fee netting).
-    /// Mismatch with `cfg.fee_bps` causes `FeeSourceMismatch` on-chain.
-    /// Must match on-chain `RouterConfig.fee_bps`. Client computes spend /
+    /// Must match on-chain `RouterConfig.fee_bps`. Client nets spend /
     /// `route_amount_in` with this value; the program charges `cfg.fee_bps`.
+    /// Exact-in requires on-chain `spent == amount_in` from `fee_source`.
     pub fee_bps: u16,
     /// Reject wild / non-canonical pools before building legs.
     pub pool_guard: PoolGuardPolicy,
@@ -549,6 +548,7 @@ impl RouterClient {
             min_out,
             fee_asset,
             opts.fixed_output.is_some(),
+            &market.meme_mint(),
             &legs,
         );
 
@@ -687,8 +687,8 @@ impl RouterClient {
         let (legs, min_out, output_ata) =
             self.build_sell_legs(sell_amt, market, &opts, &mut setup, &mut touched)?;
 
-        let (_expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
-            // Native SOL credit — router checks payer lamport Δ.
+        // Native SOL out: mint = SystemProgram sentinel; output account = payer (lamport Δ).
+        let (expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
             (SellTo::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
                 (SYSTEM_PROGRAM, payer)
             }
@@ -715,6 +715,7 @@ impl RouterClient {
             min_out,
             FEE_ASSET_TOKEN,
             opts.fixed_output.is_some(),
+            &expected_output_mint,
             &legs,
         );
 

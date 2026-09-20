@@ -15,14 +15,19 @@ pub const TAG_ROUTE: u8 = 2;
 pub const FEE_ASSET_SOL: u8 = 0;
 pub const FEE_ASSET_TOKEN: u8 = 1;
 /// OR into `fee_asset`: `amount_in` is a max budget (exact-out). On-chain checks
-/// `spent <= amount_in` instead of `spent >= amount_in`.
+/// `spent <= amount_in` instead of `spent == amount_in`.
 pub const FEE_ASSET_EXACT_OUT: u8 = 0x80;
+
+/// Instruction data layout after `TAG_ROUTE` (must match on-chain `route::process`):
+/// `amount_in(8) + min_out(8) + fee_asset(1) + num_legs(1) + output_mint(32)` = 50 bytes.
+pub const ROUTE_HEADER_LEN: usize = 50;
 
 pub struct RouteAccounts {
     pub payer: Pubkey,
     pub fee_destination: Pubkey,
     pub fee_source: Pubkey,
-    /// Token account whose balance delta is checked against `min_amount_out`.
+    /// Token ATA whose balance Δ is checked against `min_amount_out`, or the payer
+    /// when [`expected_output_mint`] is [`SYSTEM_PROGRAM`] (native SOL out).
     pub output_token_account: Pubkey,
     /// System program for SOL fee, or SPL Token / Token-2022 for token fee.
     pub fee_program: Pubkey,
@@ -37,7 +42,7 @@ pub fn build_route_instruction(
     amount_in: u64,
     min_amount_out: u64,
     fee_asset: u8,
-    _expected_output_mint: &Pubkey,
+    expected_output_mint: &Pubkey,
     legs: &[Leg],
 ) -> Instruction {
     build_route_instruction_ex(
@@ -47,11 +52,12 @@ pub fn build_route_instruction(
         min_amount_out,
         fee_asset,
         false,
+        expected_output_mint,
         legs,
     )
 }
 
-/// Same as [`build_route_instruction`] with an explicit exact-out fee check flag.
+/// Same as [`build_route_instruction`] with an explicit exact-out spend-check flag.
 pub fn build_route_instruction_ex(
     program_id: &Pubkey,
     accounts: RouteAccounts,
@@ -59,6 +65,7 @@ pub fn build_route_instruction_ex(
     min_amount_out: u64,
     fee_asset: u8,
     exact_out: bool,
+    expected_output_mint: &Pubkey,
     legs: &[Leg],
 ) -> Instruction {
     let (config, _) = config_pda(program_id);
@@ -68,12 +75,13 @@ pub fn build_route_instruction_ex(
         fee_asset & 0x01
     };
 
-    let mut data = Vec::with_capacity(64 + legs.len() * 48);
+    let mut data = Vec::with_capacity(1 + ROUTE_HEADER_LEN + legs.len() * 48);
     data.push(TAG_ROUTE);
     data.extend_from_slice(&amount_in.to_le_bytes());
     data.extend_from_slice(&min_amount_out.to_le_bytes());
     data.push(fee_asset_byte);
     data.push(legs.len() as u8);
+    data.extend_from_slice(expected_output_mint.as_ref());
 
     // Account layout must match on-chain `route::process` (6 fixed + remaining).
     let mut metas = Vec::with_capacity(6 + 32);

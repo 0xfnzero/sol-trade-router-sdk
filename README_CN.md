@@ -61,7 +61,7 @@
 4. **DexType 全覆盖** — PumpFun、PumpSwap、LaunchLab/StonkFun/Bonk、Raydium CPMM / AMM V4 / CLMM、Orca Whirlpool、Meteora DLMM / DAMM V2
 5. **热路径零 RPC 池快照** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
 6. **ATA 策略** — WSOL / quote 冷路径准备；meme ATA 买入同笔创建
-7. **手续费完整性** — 链上校验 `fee_source` 花费 ≥ `amount_in`
+7. **花费 / 产出完整性** — exact-in：`fee_source` 花费 **==** `amount_in`；校验 output mint（或原生 SOL）；强制 `min_out`
 8. **Pool guard** — 可选 PDA / 白名单 / `stonk_strict`
 
 ## 📚 文档

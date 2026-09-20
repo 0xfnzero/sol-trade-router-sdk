@@ -671,6 +671,8 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         .find(|ix| ix.program_id == crate::PROGRAM_ID)
         .expect("Route ix must target router PROGRAM_ID");
     assert_eq!(route.data[0], crate::route_ix::TAG_ROUTE);
+    // Header after tag: amount(8)+min(8)+fee_asset(1)+num_legs(1)+output_mint(32)
+    assert_eq!(&route.data[19..51], meme.as_ref());
 }
 
 #[test]
@@ -698,6 +700,7 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
         100,
         crate::route_ix::FEE_ASSET_SOL,
         true,
+        &crate::constants::SYSTEM_PROGRAM,
         &[Leg {
             program_id: leg.program_id,
             accounts: vec![solana_sdk::instruction::AccountMeta::new_readonly(
@@ -706,12 +709,13 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
             data: leg.data,
         }],
     );
-    // data[0]=TAG, then amount_in(8), min_out(8), fee_asset at offset 17
+    // data[0]=TAG, amount_in(8), min_out(8), fee_asset at offset 17, num_legs at 18, mint at 19..51
     assert_eq!(ix.data[0], crate::route_ix::TAG_ROUTE);
     assert_eq!(
         ix.data[17],
         crate::route_ix::FEE_ASSET_SOL | crate::route_ix::FEE_ASSET_EXACT_OUT
     );
+    assert_eq!(&ix.data[19..51], crate::constants::SYSTEM_PROGRAM.as_ref());
 }
 
 #[test]

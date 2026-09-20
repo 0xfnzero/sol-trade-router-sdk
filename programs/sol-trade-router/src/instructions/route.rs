@@ -5,7 +5,7 @@
 //! 1. `[]` config PDA (must be this program's PDA, owned by this program)
 //! 2. `[writable]` fee_destination
 //! 3. `[writable]` fee_source (SOL: user; Token: user ATA owned by user)
-//! 4. `[writable]` user_output_token (min_out check; must be a token account)
+//! 4. `[writable]` user_output_token (min_out check; token ATA, or user for native SOL)
 //! 5. `[]` fee_program (System for SOL fee; SPL Token / Token-2022 for token fee)
 //! 6.. : remaining — concatenated per-leg AccountMetas, then optional DEX program ids
 //!
@@ -13,8 +13,9 @@
 //! ```text
 //! amount_in: u64       // total input from fee_source (fee + swap spend)
 //! min_amount_out: u64
-//! fee_asset: u8        // 0=SOL 1=SPL
+//! fee_asset: u8        // 0=SOL 1=SPL; bit7=exact-out
 //! num_legs: u8
+//! output_mint: [u8;32] // expected output mint; SystemProgram (=0) => native SOL on user
 //! for each leg:
 //!   program_id: [u8;32]
 //!   num_accounts: u8
@@ -22,11 +23,10 @@
 //!   data: [u8; data_len]
 //! ```
 //!
-//! # Fee integrity
-//! Fee = amount_in * fee_bps / 10_000 is taken from `fee_source` first.
-//! After all legs, `fee_source` balance must have decreased by **at least**
-//! `amount_in` (fee + spend share the same source). This prevents understating
-//! `amount_in` while routing a larger swap.
+//! # Spend integrity (`fee_source`)
+//! Fee = amount_in * fee_bps / 10_000 is taken from `fee_source` first (skipped if 0).
+//! - exact-in:  `spent == amount_in` (floor and ceiling — no overspend / understate)
+//! - exact-out: `fee <= spent <= amount_in` (`amount_in` is max budget)
 
 use core::mem::MaybeUninit;
 
@@ -50,6 +50,8 @@ use crate::{
 const MAX_LEGS: usize = 4;
 /// Must stay in sync with SDK `legs::MAX_LEG_ACCOUNTS`.
 const MAX_LEG_ACCOUNTS: usize = 64;
+/// Header after tag strip: amount_in(8) + min_out(8) + fee_asset(1) + num_legs(1) + mint(32).
+const ROUTE_HEADER_LEN: usize = 50;
 
 #[inline(always)]
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, ProgramError> {
@@ -85,12 +87,17 @@ fn addr_eq(a: &Address, b: &[u8; 32]) -> bool {
     a.as_array() == b
 }
 
+#[inline(always)]
+fn is_native_sol_output(mint: &[u8; 32]) -> bool {
+    *mint == SYSTEM_PROGRAM_ID
+}
+
 pub fn process(
     program_id: &Address,
     accounts: &mut [AccountView],
     data: &[u8],
 ) -> ProgramResult {
-    if data.len() < 18 {
+    if data.len() < ROUTE_HEADER_LEN {
         return Err(RouterError::InvalidInstructionData.into());
     }
 
@@ -98,6 +105,8 @@ pub fn process(
     let min_amount_out = read_u64(data, 8)?;
     let fee_asset = data[16];
     let num_legs = data[17] as usize;
+    let mut output_mint = [0u8; 32];
+    output_mint.copy_from_slice(&data[18..50]);
 
     if amount_in == 0 {
         return Err(RouterError::InvalidInstructionData.into());
@@ -146,16 +155,29 @@ pub fn process(
         return Err(RouterError::Paused.into());
     }
 
-    // Output must be a real token account (owner = Token / Token-2022).
-    if !is_token_program(user_output.owner()) {
+    let native_sol_out = is_native_sol_output(&output_mint);
+    if native_sol_out {
+        // Native SOL min_out: measure signer lamports; output account must be the user.
+        if user_output.address() != user.address() {
+            return Err(RouterError::InvalidOutputAccount.into());
+        }
+    } else if !is_token_program(user_output.owner()) {
         return Err(RouterError::InvalidOutputAccount.into());
+    } else if token_mint(user_output)?.as_array() != &output_mint {
+        return Err(RouterError::InvalidOutputMint.into());
     }
 
     let fee = checked_fee(amount_in, cfg.fee_bps)?;
 
     // Snapshot fee_source before fee + legs (C2).
     let fee_source_before = match fee_asset {
-        0 => fee_source.lamports(),
+        0 => {
+            // SOL fee_source must always be the signer (even when fee_bps == 0).
+            if fee_source.address() != user.address() {
+                return Err(RouterError::InvalidFeeAsset.into());
+            }
+            fee_source.lamports()
+        }
         1 => {
             if !is_token_program(fee_source.owner()) {
                 return Err(RouterError::InvalidFeeAsset.into());
@@ -177,10 +199,6 @@ pub fn process(
                     return Err(RouterError::InvalidProgramId.into());
                 }
                 if fee_destination.address() != &cfg.fee_recipient {
-                    return Err(RouterError::InvalidFeeAsset.into());
-                }
-                // fee_source for SOL must be the signer
-                if fee_source.address() != user.address() {
                     return Err(RouterError::InvalidFeeAsset.into());
                 }
                 SystemTransfer {
@@ -221,9 +239,13 @@ pub fn process(
         }
     }
 
-    let output_before = token_amount(user_output)?;
+    let output_before = if native_sol_out {
+        user.lamports()
+    } else {
+        token_amount(user_output)?
+    };
 
-    let mut cursor = 18usize;
+    let mut cursor = ROUTE_HEADER_LEN;
     let mut remaining_offset = 0usize;
 
     for _ in 0..num_legs {
@@ -280,9 +302,7 @@ pub fn process(
     // Leftover remaining accounts are DEX program metas (SDK appends them after legs).
     let _ = remaining_offset;
 
-    // C2 fee integrity:
-    // - exact-in:  spent >= amount_in (prevent understating amount_in / fee evasion)
-    // - exact-out: spent <= amount_in (amount_in is max budget; DEX enforces exact out)
+    // C2 spend integrity on fee_source.
     let fee_source_after = match fee_asset {
         0 => fee_source.lamports(),
         1 => token_amount(fee_source)?,
@@ -295,11 +315,16 @@ pub fn process(
         if spent > amount_in || spent < fee {
             return Err(RouterError::FeeSourceMismatch.into());
         }
-    } else if spent < amount_in {
+    } else if spent != amount_in {
+        // Exact-in: amount_in is both floor and ceiling (blocks overspend + fee understate).
         return Err(RouterError::FeeSourceMismatch.into());
     }
 
-    let output_after = token_amount(user_output)?;
+    let output_after = if native_sol_out {
+        user.lamports()
+    } else {
+        token_amount(user_output)?
+    };
     let received = output_after.saturating_sub(output_before);
     if received < min_amount_out {
         return Err(RouterError::SlippageExceeded.into());

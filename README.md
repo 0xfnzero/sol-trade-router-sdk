@@ -61,7 +61,7 @@
 4. **Full DexType parity** — PumpFun, PumpSwap, LaunchLab/StonkFun/Bonk, Raydium CPMM / AMM V4 / CLMM, Orca Whirlpool, Meteora DLMM / DAMM V2
 5. **Zero-RPC pool snapshots** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
 6. **ATA policy** — WSOL / quote on the cold path; meme ATA in the buy tx
-7. **Fee integrity** — on-chain `fee_source` spend ≥ `amount_in` (fee + swap)
+7. **Spend / output integrity** — exact-in: `fee_source` spent **==** `amount_in`; output mint (or native SOL) checked against ix data; `min_out` enforced
 8. **Pool guard** — optional PDA / allowlist / `stonk_strict`
 
 ## 📚 Documentation
