@@ -1,0 +1,18 @@
+   Compiling sol-trade-router-sdk v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/crates/sdk)
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sol-trade-router-sdk` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.64s
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router_sdk-2af14017ad655659)
+
+running 1 test
+test offline_tests::offline_routed_market_helpers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 173 filtered out; finished in 0.04s
+

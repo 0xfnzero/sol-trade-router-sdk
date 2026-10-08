@@ -660,6 +660,211 @@ fn offline_pumpswap_leg_builds() {
 
 #[test]
 fn offline_routed_market_helpers() {
+    // Real cold CPMM loading must reject enabled Hooks before returning a route.
+    // Use the existing bank mint records; pool/config/vault state is synthetic.
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use solana_sdk::account::Account;
+    use std::collections::HashMap;
+    struct MintRpc { accounts: HashMap<Pubkey, Account> }
+    #[async_trait::async_trait]
+    impl solana_client::rpc_sender::RpcSender for MintRpc {
+        async fn send(&self, request: solana_client::rpc_request::RpcRequest,
+            params: serde_json::Value) -> solana_client::client_error::Result<serde_json::Value> {
+            use solana_client::rpc_request::RpcRequest;
+            let account = |key: &serde_json::Value| {
+                let key = key.as_str().unwrap().parse::<Pubkey>().unwrap();
+                self.accounts.get(&key).map(|a| serde_json::json!({
+                    "data":[STANDARD.encode(&a.data),"base64"], "executable":false,
+                    "lamports":a.lamports,"owner":a.owner.to_string(),"rentEpoch":0,
+                    "space":a.data.len()
+                }))
+            };
+            Ok(match request {
+                RpcRequest::GetAccountInfo => serde_json::json!({
+                    "context":{"slot":1},"value":account(&params[0])}),
+                RpcRequest::GetMultipleAccounts => serde_json::json!({
+                    "context":{"slot":1},"value":params[0].as_array().unwrap()
+                        .iter().map(account).collect::<Vec<_>>()}),
+                RpcRequest::GetEpochInfo => serde_json::json!({"epoch":1,"slotIndex":1,
+                    "slotsInEpoch":432000,"absoluteSlot":432001,"blockHeight":1,
+                    "transactionCount":1}),
+                _ => panic!("unexpected cold-loader RPC {request:?}"),
+            })
+        }
+        fn get_transport_stats(&self) -> solana_client::rpc_sender::RpcTransportStats {
+            Default::default()
+        }
+        fn url(&self) -> String { "mock://router-mint-guard".into() }
+    }
+    use sol_trade_sdk::instruction::utils::raydium_cpmm_types::{
+        POOL_STATE_SIZE, POOL_STATE_DISCRIMINATOR, AMM_CONFIG_SIZE, AMM_CONFIG_DISCRIMINATOR,
+    };
+    let hook_fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../scripts/fixtures/token-hook-mints-20261008.json")).unwrap();
+    let mint_bytes = |case: &serde_json::Value| case["mint_hex"].as_str().unwrap()
+        .as_bytes().chunks_exact(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(),16).unwrap())
+        .collect::<Vec<_>>();
+    let mint_runtime = tokio::runtime::Runtime::new().unwrap();
+    for case in hook_fixture["cases"].as_array().unwrap() {
+        for hook_side in 0..2 {
+            let mut pool = dummy_cpmm();
+            // Avoid treating a synthetic Token-2022 quote as canonical WSOL.
+            pool.quote_mint = Pubkey::new_unique();
+            if hook_side == 0 { pool.base_token_program = crate::constants::TOKEN_2022_PROGRAM; }
+            else { pool.quote_token_program = crate::constants::TOKEN_2022_PROGRAM; }
+            let mut data = vec![0; 8 + POOL_STATE_SIZE];
+            data[..8].copy_from_slice(&POOL_STATE_DISCRIMINATOR);
+            for (i, key) in [pool.amm_config, Pubkey::new_unique(), pool.base_vault,
+                pool.quote_vault, Pubkey::new_unique(), pool.base_mint, pool.quote_mint,
+                pool.base_token_program, pool.quote_token_program, pool.observation_state]
+                .iter().enumerate() {
+                data[8 + i * 32..8 + (i + 1) * 32].copy_from_slice(key.as_ref());
+            }
+            let mut config = vec![0; 8 + AMM_CONFIG_SIZE];
+            config[..8].copy_from_slice(&AMM_CONFIG_DISCRIMINATOR);
+            config[12..20].copy_from_slice(&2500u64.to_le_bytes());
+            let make_account = |owner, data| Account { lamports:10_000_000, data,
+                owner, executable:false, rent_epoch:0 };
+            let mut accounts = HashMap::from([
+                (pool.pool_state, make_account(RAYDIUM_CPMM_PROGRAM, data)),
+                (pool.amm_config, make_account(RAYDIUM_CPMM_PROGRAM, config)),
+            ]);
+            let bytes = mint_bytes(case);
+            for (side, (mint, program, vault)) in [(pool.base_mint, pool.base_token_program,
+                pool.base_vault), (pool.quote_mint, pool.quote_token_program, pool.quote_vault)]
+                .into_iter().enumerate() {
+                let mut mint_data = bytes[..82].to_vec();
+                if side == hook_side { mint_data = bytes.clone(); }
+                accounts.insert(mint, make_account(program, mint_data));
+                let mut vault_data = vec![0;165];
+                vault_data[..32].copy_from_slice(mint.as_ref());
+                vault_data[64..72].copy_from_slice(&1_000_000_000u64.to_le_bytes());
+                vault_data[108] = 1;
+                accounts.insert(vault, make_account(program, vault_data));
+            }
+            let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+                MintRpc { accounts }, Default::default());
+            let loaded = mint_runtime.block_on(crate::adapter::load_routed_market_by_rpc(
+                &rpc, crate::adapter::LoadMarketRequest::RaydiumCpmm {pool:pool.pool_state},
+                &Pubkey::new_unique()));
+            let reject = case["reject_hook"].as_bool().unwrap();
+            if reject {
+                assert!(format!("{:#}", loaded.err().expect("cold CPMM returned active Hook route"))
+                    .contains("transfer hook"));
+            } else {
+                let (_, route) = loaded.unwrap();
+                assert_eq!(route.market.base_mint(), pool.base_mint);
+                assert_eq!(route.market.base_token_program(), pool.base_token_program);
+            }
+        }
+    }
+    // Exercise the shared cold guard across all seven Token-2022 route venues,
+    // both mint sides. This verifies guard wiring/metadata, not DEX execution.
+    let mut guard_cases = 0;
+    for template in [Market::LaunchLabInner(dummy_launchlab()), Market::CpmmOuter(dummy_cpmm()),
+        Market::PumpSwapOuter(dummy_pumpswap()), Market::MeteoraDammV2(dummy_damm_v2()),
+        Market::RaydiumClmm(dummy_clmm()), Market::Whirlpool(dummy_whirlpool()),
+        Market::MeteoraDlmm(dummy_dlmm())] {
+        for hook_side in 0..2 {
+            let mut market = template.clone();
+            let (a, b, ap, bp) = match &mut market {
+                Market::LaunchLabInner(p) => (&mut p.base_mint, &mut p.quote_mint,
+                    &mut p.base_token_program, &mut p.quote_token_program),
+                Market::CpmmOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
+                    &mut p.base_token_program, &mut p.quote_token_program),
+                Market::PumpSwapOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
+                    &mut p.base_token_program, &mut p.quote_token_program),
+                Market::MeteoraDammV2(p) => (&mut p.token_a_mint, &mut p.token_b_mint,
+                    &mut p.token_a_program, &mut p.token_b_program),
+                Market::RaydiumClmm(p) => (&mut p.token_0_mint, &mut p.token_1_mint,
+                    &mut p.token_0_program, &mut p.token_1_program),
+                Market::Whirlpool(p) => (&mut p.mint_a, &mut p.mint_b,
+                    &mut p.token_program_a, &mut p.token_program_b),
+                Market::MeteoraDlmm(p) => (&mut p.token_x_mint, &mut p.token_y_mint,
+                    &mut p.token_x_program, &mut p.token_y_program),
+                _ => unreachable!(),
+            };
+            *a = Pubkey::new_unique(); *b = Pubkey::new_unique();
+            *ap = if hook_side == 0 { crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
+            *bp = if hook_side == 1 { crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
+            let hook_key = if hook_side == 0 { *a } else { *b };
+            for case in hook_fixture["cases"].as_array().unwrap() {
+                let bytes = mint_bytes(case);
+                let make_accounts = || [(market.base_mint(), market.base_token_program()),
+                    (market.quote_mint(), market.quote_token_program())].into_iter()
+                    .map(|(key, owner)| (key, Account { lamports:10_000_000,
+                        data:if key == hook_key { bytes.clone() } else { bytes[..82].to_vec() },
+                        owner, executable:false, rent_epoch:0 })).collect::<HashMap<_,_>>();
+                // Valid state, missing account, wrong owner, uninitialized mint,
+                // malformed Hook length and truncated Hook payload.
+                for fault in 0..6 {
+                    let mut accounts = make_accounts();
+                    match fault {
+                        1 => { accounts.remove(&hook_key); },
+                        2 => accounts.get_mut(&hook_key).unwrap().owner = TOKEN_PROGRAM,
+                        3 => accounts.get_mut(&hook_key).unwrap().data[45] = 0,
+                        4 => accounts.get_mut(&hook_key).unwrap().data[168..170]
+                            .copy_from_slice(&63u16.to_le_bytes()),
+                        5 => { accounts.get_mut(&hook_key).unwrap().data.pop(); },
+                        _ => {},
+                    }
+                    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+                        MintRpc { accounts }, Default::default());
+                    let result = mint_runtime.block_on(crate::adapter::validate_route_mints(
+                        &rpc, &RoutedMarket::new(market.clone())));
+                    assert_eq!(result.is_err(), fault != 0 || case["reject_hook"].as_bool().unwrap(),
+                        "cold guard {:?}, side {hook_side}, {}, fault {fault}", market, case["name"]);
+                    guard_cases += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(guard_cases, 252);
+    // Pump has its own stricter target guard; a SOL bridge still needs a fresh
+    // mint check. Cover disabled/active CPMM bridge Hooks and classic AMM V4.
+    for case in hook_fixture["cases"].as_array().unwrap() {
+        let bytes = mint_bytes(case);
+        let mut target = dummy_pumpfun_v2();
+        target.quote_mint = Pubkey::new_unique();
+        target.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
+        let mut bridge = dummy_cpmm();
+        bridge.base_mint = target.quote_mint;
+        bridge.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+        let account = |owner, data| Account { lamports:10_000_000, data,
+            owner, executable:false, rent_epoch:0 };
+        let accounts = HashMap::from([
+            (bridge.base_mint, account(bridge.base_token_program, bytes.clone())),
+            (bridge.quote_mint, account(bridge.quote_token_program, bytes[..82].to_vec())),
+        ]);
+        let route = RoutedMarket { market:Market::PumpFunInner(target), bridge:Some(bridge.into()) };
+        let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+            MintRpc { accounts }, Default::default());
+        assert_eq!(mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route)).is_err(),
+            case["reject_hook"].as_bool().unwrap());
+    }
+    let bytes = mint_bytes(&hook_fixture["cases"][0]);
+    let amm = dummy_amm_v4();
+    let mut target = dummy_pumpfun_v2();
+    target.quote_mint = amm.coin_mint;
+    let accounts = [amm.coin_mint, amm.pc_mint].into_iter().map(|mint| (mint,
+        Account { lamports:10_000_000, data:bytes[..82].to_vec(), owner:TOKEN_PROGRAM,
+            executable:false, rent_epoch:0 })).collect();
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+        MintRpc { accounts }, Default::default());
+    let route = RoutedMarket { market:Market::PumpFunInner(target), bridge:Some(amm.into()) };
+    mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route)).unwrap();
+    let mut target = dummy_cpmm();
+    let mut bridge = dummy_cpmm();
+    bridge.base_mint = target.quote_mint;
+    bridge.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+    // Inconsistent shared mint programs must fail before requesting accounts.
+    target.quote_token_program = TOKEN_PROGRAM;
+    let route = RoutedMarket { market:Market::CpmmOuter(target), bridge:Some(bridge.into()) };
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+        MintRpc { accounts:HashMap::new() }, Default::default());
+    assert!(mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route))
+        .unwrap_err().to_string().contains("conflicting token programs"));
     use solana_client::{rpc_request::RpcRequest, rpc_sender::{RpcSender, RpcTransportStats}};
     use std::sync::{Arc, Mutex};
     struct BalanceRpc {

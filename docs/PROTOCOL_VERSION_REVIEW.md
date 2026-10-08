@@ -549,3 +549,53 @@ still requires tag 7, unavailable in the unchanged mainnet router.
 
 Review coverage: 10 changed/added files reviewed, zero skipped (100%), including
 all documentation, fixture bytes and logs excluded by OCR default filters.
+
+
+### Non-Pump cold mint/Hook guard — 2026-10-09
+
+The pinned trade-sdk CPMM RPC loader decodes Token-2022 transfer fees but does
+not reject active TransferHook callbacks. A mock RPC using bank-created mint
+bytes and synthetic CPMM pool/config/vault data reproduces the exported router
+cold loader returning an active-Hook route before this fix. Router legs do not
+resolve Hook callback accounts. The official Whirlpool SDK has a dedicated
+extra-account resolver; accepting the mint alone does not implement that support.
+
+After parameter conversion, cold loading now batches fresh mint reads for the
+target and any returned CPMM/AMM V4 bridge, checks owner/program agreement and
+initialized mint/extension decoding, and rejects active or malformed Hooks.
+Inactive/disabled Hooks remain allowed. Shared mint keys are deduplicated;
+conflicting expected programs, missing accounts and incomplete responses fail.
+Pump target refresh retains its stricter existing validation; its returned
+bridge is also checked. This adds a cold RPC read, not hot-path RPC. Cached or
+manually supplied market snapshots remain caller-managed. The new snapshot is
+not atomic with preceding pool/fee reads, and mint authorities can subsequently
+change extensions; this is not a guarantee of future execution or arbitrary
+Token-2022 support. Existing fee decoding/quotes and on-chain source are unchanged.
+
+Expanded the existing routed-market helper test rather than adding a new suite:
+6 cases invoke the real CPMM cold loader (three Hook records, both mint sides);
+252 shared-guard cases cover LaunchLab, CPMM, PumpSwap, DAMM V2, CLMM, Whirlpool
+and DLMM, both sides and valid/missing/wrong-owner/uninitialized/malformed-length/
+truncated state. Five bridge cases cover inactive/disabled/active CPMM Hooks,
+classic AMM V4 and conflicting shared programs. These are mocked RPC account
+checks, not executions of all DEX programs or fresh live pool bank simulations.
+All 110 offline tests pass (93 SDK, 15 program, 2 example); the existing signing/
+serialization regressions run unchanged. 81 live cases and one doctest remain
+ignored; no new live execution is claimed in this follow-up.
+
+Fresh npm registry/tarball checks found Whirlpool SDK 0.22.0 and Raydium SDK
+0.2.74-alpha, with SHA-512 package integrity verified. The latest Raydium CPMM
+instruction source is byte-identical to the previous 0.2.73-alpha capture.
+Whirlpool's published Hook resolver and the existing pinned Rust fee decoder
+were inspected. Official package URLs, integrity and source hashes are recorded
+in the evidence snapshot. The direct SPL interface dependency uses existing
+resolved version 3.1.2; trade/parser pins and sibling repositories are unchanged.
+This inspection covers Hook handling/CPMM instruction compatibility, not a new
+claim that every protocol release or deployment has been exhaustively verified.
+
+Evidence: `tools/validation/simulation-coverage-20261009/cold-mint-hook-followup/`.
+No deployment, broadcast or new program binary. Prior mainnet router/header/tag 7
+compatibility limitations still apply.
+
+Review coverage: 9 changed/added files reviewed, zero skipped (100%), including
+the manifest, official-source snapshot and all documentation/evidence logs.

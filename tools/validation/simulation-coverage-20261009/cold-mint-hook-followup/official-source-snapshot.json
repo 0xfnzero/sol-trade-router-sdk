@@ -1,0 +1,37 @@
+{
+  "captured_at": "2026-10-08T22:54:13.750959+00:00",
+  "scope": "Fresh official package lookup and Hook/CPI source inspection; no on-chain execution or full protocol audit",
+  "packages": [
+    {
+      "package": "@orca-so/whirlpools-sdk",
+      "version": "0.22.0",
+      "tarball": "https://registry.npmjs.org/@orca-so/whirlpools-sdk/-/whirlpools-sdk-0.22.0.tgz",
+      "integrity": "sha512-m2yH4QeNlj60G004SdtpSzKbzI5aEIHvSyhV5HDwnde2Sw5xXa98/JwKGPhBdCaY3Ihyo2j+0G4WnlzD+fIe9g==",
+      "integrity_verified": true,
+      "files": [
+        {
+          "package_path": "package/dist/utils/public/token-extension-util.js",
+          "local_file": "whirlpools-sdk-token-extension-util.js",
+          "sha256": "ffabd801c05c54db83913562a290d4582bfed0498569fbe3244dd3499a6d77a5"
+        }
+      ]
+    },
+    {
+      "package": "@raydium-io/raydium-sdk-v2",
+      "version": "0.2.74-alpha",
+      "tarball": "https://registry.npmjs.org/@raydium-io/raydium-sdk-v2/-/raydium-sdk-v2-0.2.74-alpha.tgz",
+      "integrity": "sha512-OD+GeNHuIYMyfsSfKzeIvrPQj/akqiKz3cKnKB/f5jQG67LZsxUCoYYL2QwDsrKiV65aEsuWeBeuSAJthiQwxw==",
+      "integrity_verified": true,
+      "files": [
+        {
+          "package_path": "package/src/raydium/cpmm/instruction.ts",
+          "local_file": "raydium-sdk-v2-instruction.ts",
+          "sha256": "33fd5bb534c000ac710ff630e29c1c95e0c847dc4fc72a6547c181a927d50b38"
+        }
+      ]
+    }
+  ],
+  "cpmm_instruction_matches_previous_0_2_73_alpha": true,
+  "trade_sdk_pin": "e6d5c64b2c39764f76be8f4b1633f375c59dcd71",
+  "parser_sdk_pin": "51460a91ca3326663a59651ac0860744ac10fdc0"
+}
