@@ -1422,6 +1422,8 @@ fn mainnet_router_adapter_amm_v4_params() {
         serum_vault_signer: pool.serum_vault_signer,
         coin_reserve: pool.coin_reserve,
         pc_reserve: pool.pc_reserve,
+        swap_fee_numerator: pool.swap_fee_numerator,
+        swap_fee_denominator: pool.swap_fee_denominator,
     };
     let wallet = create_wallet();
     let user = wallet.pubkey();

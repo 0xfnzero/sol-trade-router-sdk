@@ -47,3 +47,6 @@ mainnet trading paths were executed successfully.
 Upgrade the chain program and SDK together before using the repaired protocol.
 The original tag-2 header is restored; the shorter PR #1 tag-2 format is retired.
 Program deployment is a separate action from merging these source changes.
+
+Recent protocol ABI changes, upgraded dependency pins and deployment evidence
+are tracked in [Protocol version review](PROTOCOL_VERSION_REVIEW.md).

@@ -534,6 +534,7 @@ pub fn amm_v4_from_swap(e: &RaydiumAmmV4SwapEvent) -> Option<RaydiumAmmV4Pool> {
         pc_reserve: 0,
         trade_fee_numerator: 25,
         swap_fee_numerator: 25,
+        swap_fee_denominator: 10_000,
     })
 }
 

@@ -204,7 +204,8 @@ pub fn raydium_amm_v4_from_params(p: &RaydiumAmmV4Params) -> RaydiumAmmV4Pool {
         coin_reserve: p.coin_reserve,
         pc_reserve: p.pc_reserve,
         trade_fee_numerator: 25,
-        swap_fee_numerator: 25,
+        swap_fee_numerator: p.swap_fee_numerator,
+        swap_fee_denominator: p.swap_fee_denominator,
     }
 }
 
@@ -283,6 +284,11 @@ pub fn dlmm_from_params(p: &MeteoraDlmmParams) -> MeteoraDlmmPool {
 
 fn via_sol_to_routed(via: &StonkFunViaSolParams, mint: Pubkey) -> Result<RoutedMarket> {
     let bridge = match &via.sol_hop {
+        StonkFunSolHop::Route(_) => {
+            return Err(anyhow!(
+                "multi-leg StonkFun funding routes cannot be represented by a single router bridge"
+            ));
+        }
         StonkFunSolHop::RaydiumCpmm(p) => crate::market::BridgePool::Cpmm(cpmm_from_params(p)),
         StonkFunSolHop::RaydiumAmmV4(p) => {
             crate::market::BridgePool::AmmV4(raydium_amm_v4_from_params(p))
@@ -314,6 +320,11 @@ pub fn to_routed_market_for_user(
         }
         DexParamEnum::StonkFunSwap(p) | DexParamEnum::RaydiumCpmm(p) => {
             RoutedMarket::new(Market::CpmmOuter(cpmm_from_params(p)))
+        }
+        DexParamEnum::StonkFunQuoteRoute(_) => {
+            return Err(anyhow!(
+                "StonkFunQuoteRoute requires the trade-sdk route executor; single-market conversion is unsupported"
+            ));
         }
         DexParamEnum::StonkFunViaSol(via) => via_sol_to_routed(via, mint)?,
         DexParamEnum::RaydiumAmmV4(p) => {
@@ -424,6 +435,8 @@ mod tests {
             serum_vault_signer: Pubkey::default(),
             coin_reserve: 1_000_000_000,
             pc_reserve: 2_000_000_000,
+            swap_fee_numerator: 25,
+            swap_fee_denominator: 10_000,
         };
         let via = StonkFunViaSolParams::curve_with_amm_v4(curve, hop);
         let routed = to_routed_market(&DexParamEnum::StonkFunViaSol(via), meme).unwrap();

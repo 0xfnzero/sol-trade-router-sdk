@@ -896,6 +896,7 @@ pub fn load_amm_v4_pool(
         pc_reserve,
         trade_fee_numerator: info.fees.trade_fee_numerator,
         swap_fee_numerator: info.fees.swap_fee_numerator,
+        swap_fee_denominator: info.fees.swap_fee_denominator,
     })
 }
 

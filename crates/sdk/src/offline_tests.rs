@@ -163,6 +163,7 @@ fn dummy_amm_v4() -> RaydiumAmmV4Pool {
         pc_reserve: 10_000_000_000,
         trade_fee_numerator: 25,
         swap_fee_numerator: 25,
+        swap_fee_denominator: 10_000,
     }
 }
 
@@ -965,10 +966,14 @@ fn offline_adapter_amm_v4_and_cpmm_from_params() {
         serum_vault_signer: amm.serum_vault_signer,
         coin_reserve: amm.coin_reserve,
         pc_reserve: amm.pc_reserve,
+        swap_fee_numerator: 3,
+        swap_fee_denominator: 1_000,
     };
     let back = raydium_amm_v4_from_params(&p);
     assert_eq!(back.amm, amm.amm);
     assert_eq!(back.coin_reserve, amm.coin_reserve);
+    assert_eq!(back.swap_fee_numerator, 3);
+    assert_eq!(back.swap_fee_denominator, 1_000);
 
     let cpmm = dummy_cpmm();
     let cp = sol_trade_sdk::trading::core::params::RaydiumCpmmParams {
@@ -1229,4 +1234,54 @@ fn offline_native_sol_sell_binds_payer_and_sol_mint_sentinel() {
         crate::constants::SYSTEM_PROGRAM.as_ref()
     );
     assert_eq!(&route.data[51..83], PUMPFUN_PROGRAM.as_ref());
+}
+
+#[test]
+fn offline_amm_v4_v2_quotes_use_actual_swap_fee_fraction() {
+    let mut pool = dummy_amm_v4();
+    pool.coin_reserve = 1_000_000;
+    pool.pc_reserve = 2_000_000;
+    pool.trade_fee_numerator = 999; // Historical orderbook fee must not price V2 swaps.
+    pool.swap_fee_numerator = 3;
+    pool.swap_fee_denominator = 1_000;
+    let amount_in = 10_001;
+    let net = amount_in - 31; // ceil(10001 * 3 / 1000)
+    let expected = (2_000_000u128 * net as u128 / (1_000_000 + net) as u128) as u64;
+    assert_eq!(raydium_amm_v4_out(&pool, amount_in, true).unwrap(), expected);
+    let required = crate::quote::raydium_amm_v4_in_for_out(&pool, expected, true).unwrap();
+    assert!(raydium_amm_v4_out(&pool, required, true).unwrap() >= expected);
+    assert!(raydium_amm_v4_out(&pool, required - 1, true).unwrap() < expected);
+    pool.swap_fee_denominator = 0;
+    assert!(raydium_amm_v4_out(&pool, amount_in, true).is_err());
+}
+
+#[test]
+fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
+    use sol_trade_sdk::instruction::utils::pumpswap::PumpSwapFeeBasisPoints;
+    use sol_trade_sdk::utils::calc::pumpswap::{
+        buy_quote_input_internal_with_fees, sell_base_input_internal_with_fees,
+    };
+    let mut pool = dummy_pumpswap();
+    pool.base_reserve = 1_000_000;
+    pool.quote_reserve = 2_000_000;
+    pool.lp_fee_bps = 20;
+    pool.protocol_fee_bps = 5;
+    pool.creator_fee_bps = 30;
+    let fees = PumpSwapFeeBasisPoints::new(20, 5, 30);
+    for offset in [-500_000, 0, 500_000] {
+        pool.virtual_quote_reserves = offset;
+        let buy = buy_quote_input_internal_with_fees(
+            10_000, 0, 1_000_000, 2_000_000, offset, &fees,
+        ).unwrap();
+        let sell = sell_base_input_internal_with_fees(
+            10_000, 0, 1_000_000, 2_000_000, offset, &fees,
+        ).unwrap();
+        assert_eq!(pumpswap_buy_base_out(&pool, 10_000).unwrap(), buy.base);
+        assert_eq!(pumpswap_sell_quote_out(&pool, 10_000).unwrap(), sell.ui_quote);
+    }
+    pool.virtual_quote_reserves = -2_000_000;
+    assert!(pumpswap_buy_base_out(&pool, 10_000).is_err());
+    pool.virtual_quote_reserves = 0;
+    pool.lp_fee_bps = 20_000;
+    assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err());
 }

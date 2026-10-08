@@ -233,8 +233,9 @@ pub struct RaydiumAmmV4Pool {
     pub pc_reserve: u64,
     /// From AmmInfo — default 25 (0.25%).
     pub trade_fee_numerator: u64,
-    /// From AmmInfo — default 25 (taken from trade_fee, deducted from out).
+    /// SwapBaseInV2 input fee from AmmInfo (not a fee on output).
     pub swap_fee_numerator: u64,
+    pub swap_fee_denominator: u64,
 }
 
 impl RaydiumAmmV4Pool {

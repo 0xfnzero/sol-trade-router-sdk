@@ -633,7 +633,12 @@ pub fn pumpswap_sell_quote_out(pool: &PumpSwapPool, base_in: u64) -> Result<u64>
     let fees = compute_fee_bps(gross, pool.lp_fee_bps as u128)
         .saturating_add(compute_fee_bps(gross, pool.protocol_fee_bps as u128))
         .saturating_add(compute_fee_bps(gross, pool.creator_fee_bps as u128));
-    let out = gross.saturating_sub(fees).min(u64::MAX as u128) as u64;
+    let out = u64::try_from(
+        gross
+            .checked_sub(fees)
+            .ok_or_else(|| anyhow!("PumpSwap fees exceed gross output"))?,
+    )
+    .map_err(|_| anyhow!("PumpSwap output exceeds u64"))?;
     if gross.saturating_sub(compute_fee_bps(gross, pool.lp_fee_bps as u128))
         > pool.quote_reserve as u128
     {
@@ -658,13 +663,12 @@ pub fn raydium_amm_v4_out(
     if input_reserve == 0 || output_reserve == 0 {
         return Err(anyhow!("empty Raydium AMM V4 reserves"));
     }
-    // Matches sol-trade-sdk input trade fee; output is pure CP after net input
-    // (do not subtract input-denominated swap_fee from output units).
-    // Streamers must populate AmmInfo trade_fee_numerator (typical 25); 0 means 0.
-    let trade_num = pool.trade_fee_numerator;
-    let trade_fee = (amount_in as u128)
-        .saturating_mul(trade_num as u128)
-        .div_ceil(10_000) as u64;
+    let fee_num = pool.swap_fee_numerator;
+    let fee_den = pool.swap_fee_denominator;
+    if fee_den == 0 || fee_num >= fee_den {
+        return Err(anyhow!("invalid Raydium AMM V4 swap fee fraction"));
+    }
+    let trade_fee = (amount_in as u128 * fee_num as u128).div_ceil(fee_den as u128) as u64;
     let net_in = amount_in.saturating_sub(trade_fee);
     let swapped = (output_reserve as u128).saturating_mul(net_in as u128)
         / (input_reserve as u128).saturating_add(net_in as u128);
@@ -695,15 +699,16 @@ pub fn raydium_amm_v4_in_for_out(
     let net_in = (amount_out as u128)
         .saturating_mul(input_reserve as u128)
         .div_ceil(denom);
-    let trade_num = pool.trade_fee_numerator as u128;
-    if trade_num >= 10_000 {
-        return Err(anyhow!("invalid Raydium AMM V4 trade fee numerator"));
+    let trade_num = pool.swap_fee_numerator as u128;
+    let fee_den = pool.swap_fee_denominator as u128;
+    if fee_den == 0 || trade_num >= fee_den {
+        return Err(anyhow!("invalid Raydium AMM V4 swap fee fraction"));
     }
-    // amount_in - ceil(amount_in * trade_num / 10000) >= net_in
+    // amount_in - ceil(amount_in * swap_fee_num / swap_fee_den) >= net_in
     let amount_in = if trade_num == 0 {
         net_in
     } else {
-        net_in.saturating_mul(10_000).div_ceil(10_000 - trade_num)
+        net_in.saturating_mul(fee_den).div_ceil(fee_den - trade_num)
     };
     let amount_in = amount_in.min(u64::MAX as u128) as u64;
     // Bump once if floor/ceil rounding left us short.

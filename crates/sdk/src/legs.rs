@@ -251,11 +251,12 @@ pub fn pumpfun_buy_leg(
     min_tokens_out: u64,
     user_token_ata: Pubkey,
 ) -> Leg {
-    let mut data = [0u8; 25];
+    let mut data = [0u8; 26];
     data[..8].copy_from_slice(&PUMPFUN_BUY_EXACT_SOL_IN);
     data[8..16].copy_from_slice(&lamports_in.to_le_bytes());
     data[16..24].copy_from_slice(&min_tokens_out.to_le_bytes());
     data[24] = pool.track_volume_byte();
+    data[25] = 0; // partial_fill: OptionBool(false); preserve exact-input spending.
 
     let uva = pumpfun_user_volume_accumulator(user);
     let bonding_curve_v2 = if pool.bonding_curve_v2 == Pubkey::default() {
@@ -426,7 +427,9 @@ pub fn pumpfun_buy_v2_leg(
     quote_in: u64,
     min_tokens_out: u64,
 ) -> Leg {
-    let data = encode_u64_pair(&PUMPFUN_BUY_EXACT_QUOTE_IN_V2, quote_in, min_tokens_out);
+    let mut data =
+        encode_u64_pair(&PUMPFUN_BUY_EXACT_QUOTE_IN_V2, quote_in, min_tokens_out).to_vec();
+    data.push(0); // partial_fill: OptionBool(false).
     Leg {
         program_id: PUMPFUN_PROGRAM,
         accounts: pumpfun_v2_accounts(user, pool, true),
@@ -1015,6 +1018,10 @@ mod tests {
         assert_eq!(buy.accounts.len(), 27);
         assert_eq!(sell.accounts.len(), 26);
         assert_eq!(&buy.data[..8], &PUMPFUN_BUY_EXACT_QUOTE_IN_V2);
+        // pump-public-docs 8cda1fa: OptionBool(false) follows min_tokens_out.
+        assert_eq!(buy.data.len(), 25);
+        assert_eq!(buy.data[24], 0);
+        assert_eq!(sell.data.len(), 24);
         assert_eq!(&sell.data[..8], &PUMPFUN_SELL_V2);
         assert!(buy.accounts[8].is_writable);
         assert_eq!(
@@ -1134,6 +1141,7 @@ mod tests {
             pc_reserve: 2_000,
             trade_fee_numerator: 25,
             swap_fee_numerator: 25,
+            swap_fee_denominator: 10_000,
         };
         assert!(!pool.uses_openbook_market());
         let ix = raydium_amm_v4_swap_leg(&user, &pool, 100, 90, key(2)).unwrap();
@@ -1182,6 +1190,10 @@ mod tests {
         pool.user_volume_accumulator = key(99);
         let buy = pumpfun_buy_leg(&user, &pool, 100, 90, ata(&user, &pool.mint, &TOKEN_PROGRAM));
         let sell = pumpfun_sell_leg(&user, &pool, 100, 90, ata(&user, &pool.mint, &TOKEN_PROGRAM));
+        assert_eq!(buy.data.len(), 26);
+        assert_eq!(buy.data[24], pool.track_volume_byte());
+        assert_eq!(buy.data[25], 0); // partial_fill is explicitly disabled.
+        assert_eq!(sell.data.len(), 24);
         let expected_uva = pumpfun_user_volume_accumulator(&user);
         assert_eq!(buy.accounts[13].pubkey, expected_uva);
         assert_ne!(buy.accounts[13].pubkey, key(99));
