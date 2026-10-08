@@ -395,19 +395,25 @@ pub fn whirlpool_from_account(e: &OrcaWhirlpoolAccountEvent) -> WhirlpoolPool {
 
 /// Merge same-pool swap topology into an account-state snapshot and invalidate
 /// its cached quote. Events with a missing or different pool address are ignored.
+/// Missing mint/vault sides retain cached values; ticks update as a full triplet.
 pub fn merge_whirlpool_swap(pool: &mut WhirlpoolPool, e: &OrcaWhirlpoolSwapEvent) {
     if e.whirlpool == Pubkey::default() || e.whirlpool != pool.whirlpool {
         return;
     }
-    if e.tick_array_0 != Pubkey::default() {
-        pool.tick_arrays = vec![e.tick_array_0, e.tick_array_1, e.tick_array_2];
+    let ticks = [e.tick_array_0, e.tick_array_1, e.tick_array_2];
+    if ticks.iter().all(|key| *key != Pubkey::default()) {
+        pool.tick_arrays = ticks.to_vec();
     }
     if e.token_vault_a != Pubkey::default() {
         pool.vault_a = e.token_vault_a;
+    }
+    if e.token_vault_b != Pubkey::default() {
         pool.vault_b = e.token_vault_b;
     }
     if e.token_mint_a != Pubkey::default() {
         pool.mint_a = e.token_mint_a;
+    }
+    if e.token_mint_b != Pubkey::default() {
         pool.mint_b = e.token_mint_b;
     }
     if e.token_program_a != Pubkey::default() {

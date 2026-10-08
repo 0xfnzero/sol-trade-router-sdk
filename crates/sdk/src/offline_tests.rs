@@ -2593,15 +2593,63 @@ fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
     assert_eq!(pool.token_program_b, crate::constants::TOKEN_2022_PROGRAM);
     assert!(whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).is_ok());
     let wallet = Keypair::new();
-    for input in [pool.mint_a, pool.mint_b] {
-        let leg = whirlpool_swap_leg(&wallet.pubkey(), &pool, 100, 1, input).unwrap();
-        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-            &[solana_sdk::instruction::Instruction {
-                program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
-            }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
-        );
-        tx.verify().unwrap();
+    let verify_merged_legs = |pool: &WhirlpoolPool| {
+        for input in [pool.mint_a, pool.mint_b] {
+            let leg = whirlpool_swap_leg(&wallet.pubkey(), pool, 100, 1, input).unwrap();
+            for (index, key) in [(0, pool.token_program_a), (1, pool.token_program_b),
+                (4, pool.whirlpool), (5, pool.mint_a), (6, pool.mint_b),
+                (8, pool.vault_a), (10, pool.vault_b)] {
+                assert_eq!(leg.accounts[index].pubkey, key);
+            }
+            assert_eq!(leg.accounts[11..14].iter().map(|meta| meta.pubkey).collect::<Vec<_>>(),
+                pool.tick_arrays);
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &[solana_sdk::instruction::Instruction {
+                    program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
+                }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+    };
+    // Partial same-pool overlays must neither erase the other side nor be ignored.
+    let complete = pool.clone();
+    for side in [0, 1] {
+        let mut partial = sol_parser_sdk::core::events::OrcaWhirlpoolSwapEvent::default();
+        partial.whirlpool = complete.whirlpool;
+        pool = complete.clone();
+        if side == 0 {
+            pool.mint_a = Pubkey::default();
+            pool.vault_a = Pubkey::default();
+            partial.token_mint_a = complete.mint_a;
+            partial.token_vault_a = complete.vault_a;
+        } else {
+            pool.mint_b = Pubkey::default();
+            pool.vault_b = Pubkey::default();
+            partial.token_mint_b = complete.mint_b;
+            partial.token_vault_b = complete.vault_b;
+        }
+        crate::parser::merge_whirlpool_swap(&mut pool, &partial);
+        assert_eq!((pool.mint_a, pool.mint_b), (complete.mint_a, complete.mint_b),
+            "partial mint overlay lost the other side or ignored this side");
+        assert_eq!((pool.vault_a, pool.vault_b), (complete.vault_a, complete.vault_b),
+            "partial vault overlay lost the other side or ignored this side");
+        verify_merged_legs(&pool);
     }
+    // A partial tick triplet cannot replace the coherent cached sequence.
+    for missing in 0..3 {
+        let mut partial = event.clone();
+        let mut ticks = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
+        ticks[missing] = Pubkey::default();
+        [partial.tick_array_0, partial.tick_array_1, partial.tick_array_2] = ticks;
+        pool = complete.clone();
+        pool.expected_out = Some(50);
+        pool.quoted_input_mint = Some(pool.mint_a);
+        crate::parser::merge_whirlpool_swap(&mut pool, &partial);
+        assert_eq!(pool.tick_arrays, complete.tick_arrays, "partial tick overlay replaced valid cache");
+        assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
+        verify_merged_legs(&pool);
+    }
+    verify_merged_legs(&complete);
 }
 
 #[test]
