@@ -1,0 +1,361 @@
+{
+  "date": "2026-10-08",
+  "rpc": "https://solana-rpc.publicnode.com",
+  "program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+  "program_account_rpc": {
+    "jsonrpc": "2.0",
+    "result": {
+      "context": {
+        "apiVersion": "4.3.0",
+        "slot": 454473258
+      },
+      "value": {
+        "data": [
+          "AgAAAJWy2WSqUxLsq7FiccnW8C83EAraitR45YMsvQmTvwu6",
+          "base64"
+        ],
+        "executable": true,
+        "lamports": 9393912471,
+        "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+        "rentEpoch": 18446744073709551615,
+        "space": 36
+      }
+    },
+    "id": 1
+  },
+  "program_data": "B5MvUwXdiW1NMM6QFFD3ssPKBujD4zMohncbM73Z2BQu",
+  "program_data_context_slot": 454472205,
+  "program_data_header_base64": "AwAAAFT3+hoAAAAAAWNI+4ICMfurc9wwg+Hz8Un/EltxiCDzLrGhW/781hsJ",
+  "deployment_slot": 452654932,
+  "official_sdk_version": "3.2.0",
+  "official_readme_basic_v3_program_pr": 60,
+  "official_readme_post_completion_program_pr": 61,
+  "verification": "Actual saved ELF in LiteSVM; synthetic non-Mayhem curve states, public mainnet fee accounts. RPC used only for program/deployment metadata. No network transactions.",
+  "boundary_initial_virtual_base": 1073000000000000,
+  "boundary_initial_virtual_quote": 30000000000,
+  "boundary_real_base_remaining": 1000000000,
+  "boundary_virtual_base": 279901000000000,
+  "boundary_virtual_quote": 115004948178,
+  "fee_bps": {
+    "protocol": 95,
+    "creator": 30
+  },
+  "observations": [
+    {
+      "feature_probe": "set_max_curve_depth",
+      "error": 101
+    },
+    {
+      "mode": "exact_out",
+      "amount": 999999999,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999999999,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000000,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 1,
+      "tokens": 1000000000,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000001,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416015,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999995862,
+      "spent": 516015
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416016,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999998295,
+      "spent": 516016
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416017,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416116,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 9900000,
+      "token2022": false,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "exact_out",
+      "amount": 999999999,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999999999,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000000,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 1,
+      "tokens": 1000000000,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000001,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416015,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999995862,
+      "spent": 516015
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416016,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999998295,
+      "spent": 516016
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416017,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416116,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 9900000,
+      "token2022": false,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "exact_out",
+      "amount": 999999999,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999999999,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000000,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 1,
+      "tokens": 1000000000,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000001,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416015,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999995862,
+      "spent": 516015
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416016,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": null,
+      "complete": 0,
+      "tokens": 999998295,
+      "spent": 516016
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416017,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416116,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 9900000,
+      "token2022": true,
+      "initial_quote": 0,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "exact_out",
+      "amount": 999999999,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999999999,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000000,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 1,
+      "tokens": 1000000000,
+      "spent": 516016
+    },
+    {
+      "mode": "exact_out",
+      "amount": 1000000001,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416015,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999995862,
+      "spent": 516015
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416016,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": null,
+      "complete": 0,
+      "tokens": 999998295,
+      "spent": 516016
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416017,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 416116,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "mode": "quote_input",
+      "amount": 9900000,
+      "token2022": true,
+      "initial_quote": 30000000000,
+      "error": "TransactionErrorInstructionError((0, Tagged(InstructionErrorCustom(6021))))",
+      "complete": 0,
+      "tokens": 0
+    },
+    {
+      "boundary_cases_passed": 32,
+      "curve_cost": 416016
+    },
+    {
+      "pump_sha256": "1023f7b01210f102713d52beff506ab1cc940246831a5128f004115e49c80f99",
+      "router_sha256": "e8142b897dfeb03cb97d1c9b1354e7a8b8c1d02dd6a6251a78ee9ded5581d0cf"
+    }
+  ]
+}

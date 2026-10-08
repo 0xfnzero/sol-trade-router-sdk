@@ -622,8 +622,18 @@ mod tests {
             29_700
         );
         assert_eq!(trade.route.data[110], 0);
-        // A large cap must not be mistaken for the actual exact-output spend.
         p.supports_graduation = false;
+        assert_eq!(
+            p.buy_quote_for_tokens(p.curve.real_token_reserves).unwrap(),
+            11_112
+        );
+        assert!(p
+            .buy_exact_out_leg(&user, p.curve.real_token_reserves, 30_000)
+            .is_ok());
+        assert!(p
+            .buy_exact_out_leg(&user, p.curve.real_token_reserves + 1, 30_000)
+            .is_err());
+        // A large cap must not be mistaken for the actual exact-output spend.
         assert!(p
             .build_buy_exact_out_route(
                 &PROGRAM_ID,

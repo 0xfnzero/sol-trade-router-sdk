@@ -288,3 +288,57 @@ routes: 49-byte remaining slice encoding with official enum 6 and 1–3 writable
 arrays. Dynamic amount patching preserves that slice; malformed options, vector
 lengths, enum values, counts, truncated data and missing SDK accounts are tested.
 Transfer-hook slices remain outside the supported dynamic whitelist.
+
+
+### Graduation guard recheck — 2026-10-08
+
+Keep the cold-loader default `supports_graduation=false` for the deployment
+verified here. This rejects an output **greater than** the remaining curve
+supply; it permits buying exactly the remaining supply and completing the curve.
+It does not disable ordinary V3 trading or infer that all V3 features are absent.
+
+The official 3.2.0 npm README distinguishes basic V3 (programs-monorepo PR #60)
+from post-completion buys/nested curves (PR #61). These are references in the
+published README, not independently verified merge/deployment statuses for the
+private program repository. Package publication is not a mainnet upgrade signal.
+
+Fresh read-only mainnet queries confirmed:
+
+- At context slot 454473258, Pump's executable program account still points to
+  ProgramData `B5MvUwXdiW1NMM6QFFD3ssPKBujD4zMohncbM73Z2BQu`.
+- At context slot 454472205, that ProgramData header reports deployment slot
+  **452654932**, matching the downloaded ELF used for the tests.
+- The saved ELF recognizes V3 trade instructions but returns Anchor **101**
+  (`InstructionFallbackNotFound`) for `set_max_curve_depth`, which the same
+  official SDK extension lists. This parser probe does not depend on curve state.
+
+The expanded 32-case LiteSVM matrix uses non-Mayhem curves, classic SPL or
+Token-2022 base mints (6 decimals), WSOL quote (9 decimals), actual fee state,
+and reserve/vault/lamport invariants for a curve near completion. Tests run with
+`initialVirtualQuoteReserves=0` and `30_000_000_000`; both behave identically.
+The remaining base supply is 1,000,000,000 raw units, and its official
+fee-inclusive curve cost is 416,016 lamports (protocol 95 / creator 30 bps).
+
+| Requested trade | Captured deployment result |
+| --- | --- |
+| Exact-output: remaining minus 1 raw unit | Success, curve remains open |
+| Exact-output: exactly remaining | Success, curve becomes complete |
+| Exact-output: remaining plus 1 raw unit | 6021, all trade state and router fee roll back |
+| Quote-input: 416,015 or 416,016 lamports | Success, output remains below remaining due to rounding |
+| Quote-input: 416,017 / 416,116 / 9,900,000 lamports | 6021, all trade state and router fee roll back |
+
+This isolates the unsupported crossing from ATA owner choice, unset new reserve
+fields, general V3 support, and exact-output budget handling. The remaining
+limitation is that these are synthetic states in the actual ELF, not a live
+pool simulation. Re-query ProgramData and re-run the matrix after an upgrade;
+only enable the flag after verifying the new deployment's crossing execution.
+Offline SDK regressions additionally ensure the default guard permits an
+exact-output buy of the remaining supply, rejects remaining plus one, and does
+not treat a large maximum budget as the actual exact-output spend.
+
+```sh
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so --boundary-matrix
+```
+
+Raw deployment headers, ELF hashes and all matrix outcomes are saved in
+[PUMP_V3_DEPLOYMENT_RECHECK.json](PUMP_V3_DEPLOYMENT_RECHECK.json).
