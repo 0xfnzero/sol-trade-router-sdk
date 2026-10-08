@@ -1536,6 +1536,51 @@ fn offline_transfer_fee_and_ata_policy() {
     assert!(buy.create_meme);
     let sell = AtaPolicy::for_sell();
     assert!(!sell.create_meme);
+
+    // Switching away from native SOL must remove its automatic unwrap.
+    let wallet = Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let wsol_ata = crate::ata::ata(&wallet.pubkey(), &WSOL_MINT, &TOKEN_PROGRAM);
+    for market in [
+        RoutedMarket::new(Market::CpmmOuter(dummy_cpmm())),
+        RoutedMarket::raydium_amm_v4(dummy_amm_v4()),
+        RoutedMarket::meteora_damm_v2(dummy_damm_v2()),
+        RoutedMarket::pumpswap(dummy_pumpswap()),
+    ] {
+        let sol = TradeOpts::default().with_min_out(1).sell_to_sol();
+        let native = client.sell_with_opts(1_000, &market, sol.clone()).unwrap();
+        assert_eq!(native.cleanup.len(), 1);
+        assert_eq!(native.cleanup[0].accounts[0].pubkey, wsol_ata);
+        for wrapped in [
+            sol.clone().sell_to_wsol(),
+            sol.clone().sell_to_token(WSOL_MINT),
+        ] {
+            let built = client.sell_with_opts(1_000, &market, wrapped.clone()).unwrap();
+            let route = built.route.as_ref().unwrap();
+            assert_eq!(route.accounts[4].pubkey, wsol_ata);
+            assert_eq!(&route.data[19..51], WSOL_MINT.as_ref());
+            assert!(built.cleanup.is_empty());
+            assert!(!wrapped.ata.close_wsol);
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+
+            // The last explicit policy override still wins.
+            let close = client.sell_with_opts(
+                1_000, &market, wrapped.clone().close_wsol(true),
+            ).unwrap();
+            assert_eq!(close.cleanup.len(), 1);
+            let back_to_sol = client.sell_with_opts(
+                1_000, &market, wrapped.sell_to_sol(),
+            ).unwrap();
+            assert_eq!(back_to_sol.cleanup.len(), 1);
+        }
+        let keep = client.sell_with_opts(1_000, &market, sol.close_wsol(false)).unwrap();
+        assert!(keep.cleanup.is_empty());
+    }
 }
 
 #[test]

@@ -207,6 +207,10 @@ let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
 | quote | `buy_with_token` | `sell_to_token` |
 
+复用 `TradeOpts` 时，调用 `sell_to_wsol()` 或 `sell_to_token(...)` 会清除
+`sell_to_sol()` 设置的 WSOL 关闭策略。需要自定义关闭行为时，请在选择接收资产后
+调用 `close_wsol(...)` 或 `with_ata(...)` 覆盖策略。
+
 ### 3. 从事件 / 参数构建市场
 
 ```rust

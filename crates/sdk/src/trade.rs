@@ -125,14 +125,20 @@ impl TradeOpts {
         self.ata.close_wsol = true;
         self
     }
+    /// Keep the sale proceeds wrapped. Clears a previous SOL settlement's
+    /// automatic unwrap; call `close_wsol(true)` afterward to explicitly close.
     pub fn sell_to_wsol(mut self) -> Self {
         self.sell_to = SellTo::Wsol;
         self.ata.create_meme = false;
+        self.ata.close_wsol = false;
         self
     }
+    /// Receive tokens without inheriting a previous SOL settlement's unwrap.
+    /// Apply an explicit close/ATA policy after selecting the destination.
     pub fn sell_to_token(mut self, mint: Pubkey) -> Self {
         self.sell_to = SellTo::Token(mint);
         self.ata.create_meme = false;
+        self.ata.close_wsol = false;
         self
     }
     pub fn with_ata(mut self, ata: AtaPolicy) -> Self {

@@ -205,6 +205,10 @@ let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
 | Quote token | `buy_with_token` | `sell_to_token` |
 
+When reusing `TradeOpts`, selecting `sell_to_wsol()` or `sell_to_token(...)` clears
+the WSOL close set by `sell_to_sol()`. Apply an explicit `close_wsol(...)` or
+`with_ata(...)` override after selecting the destination.
+
 ### 3. Markets from events / params
 
 ```rust
