@@ -212,6 +212,11 @@ pub fn launchlab_sell_quote_out(pool: &LaunchLabPool, base_in: u64) -> Result<u6
         .checked_sub(base_xfer)
         .ok_or_else(|| anyhow!("LaunchLab base transfer fee exceeds input"))?
         as u128;
+    // real_base tracks purchases outstanding on the curve. Compare the
+    // credited amount after the input transfer fee, not the wallet debit.
+    if curve_input > pool.real_base {
+        return Err(anyhow!("LaunchLab sell input exceeds base previously sold"));
+    }
     let input_reserve = pool
         .virtual_base
         .checked_sub(pool.real_base)
@@ -230,6 +235,11 @@ pub fn launchlab_sell_quote_out(pool: &LaunchLabPool, base_in: u64) -> Result<u6
         .checked_mul(output_reserve)
         .and_then(|v| v.checked_div(denominator))
         .ok_or_else(|| anyhow!("Failed to quote LaunchLab sell"))?;
+    // Virtual liquidity prices the curve but cannot pay users or accrue fees.
+    // Match the official sellExactOut check on the pre-fee output.
+    if gross > pool.real_quote {
+        return Err(anyhow!("LaunchLab real quote reserve cannot cover gross output"));
+    }
     let fee = fee_ceil(gross, launchlab_total_fee_rate(pool, 0)?);
     let vault_out = gross
         .checked_sub(fee)

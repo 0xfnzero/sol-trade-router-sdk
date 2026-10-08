@@ -656,3 +656,44 @@ header/tag 7 incompatibility limits still apply.
 
 Review coverage: 17 changed/added files reviewed, zero skipped (100%), including
 all Rust changes, documentation, official-source snapshot and all evidence logs.
+
+
+### LaunchLab sell curve solvency — 2026-10-09
+
+The local exact-input sell quote previously priced virtual liquidity without
+checking whether the curve could reverse that many outstanding base purchases
+or pay the gross quote output from its real quote reserve. For virtual base
+1,000, outstanding base 100 and total pricing quote 200, it accepted a sell of
+101 despite exceeding outstanding base. The expanded existing sell-builder test
+fails on that case before the production change.
+
+Require base input after its transfer fee to be no greater than real_base, and
+gross curve output before trading/output-transfer fees to be no greater than
+real_quote. Checking only user proceeds is insufficient: gross output 20 with
+10% trade fee pays 18 to the user, but still requires 20 of curve liquidity.
+At real quote 19 plus virtual quote 181, the old formula would accept that
+unbacked quote. Real quote 20 plus virtual quote 180 remains accepted. These
+checks also reach SOL/WSOL and direct token receive paths through the shared
+quote helper. Instruction layout and fee/slippage minimum calculation are unchanged.
+
+A fresh registry capture confirms Raydium SDK 0.2.74-alpha, with tarball SHA-512
+verified and the two relevant source files hashed. Its Curve.sellExactOut checks
+realB against pre-fee output and amountA against realA after curve inversion.
+Its sellExactIn currently omits those two guards; Router intentionally applies
+the same solvency bounds to exact-input automatic quoting rather than treating
+all numerical outputs as executable. The constant-product pricing formula is
+unchanged. The pinned parser decodes real_base/real_quote before/after fields;
+trade-sdk LaunchLab is the existing Bonk builder alias. No sibling SDK changes.
+
+The existing offline_launchlab_sell_leg_builds test now checks exact/out-of-bound
+base and quote thresholds, zero real reserves, input and output transfer fees,
+and valid/invalid automatic builds for SOL, WSOL and token settlement. Its existing
+locally signed account-layout coverage is retained. All 110 offline tests pass
+(93 SDK, 15 program, 2 example); 81 live cases and one doctest remain ignored.
+These tests use synthetic state, not fresh mainnet bank/DEX execution. No deploy,
+broadcast or program source/binary change; mainnet router incompatibility remains.
+Cached caller state must still be current; these checks do not ensure freshness.
+
+Evidence: tools/validation/simulation-coverage-20261009/launchlab-sell-liquidity-followup/.
+Review coverage: 6 changed/added files reviewed, zero skipped (100%), including
+both Rust files, documentation, official-source snapshot and both evidence logs.

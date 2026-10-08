@@ -2398,6 +2398,34 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
 
 #[test]
 fn offline_launchlab_sell_leg_builds() {
+    // real_base is the amount already sold by the curve, not its virtual
+    // inventory. Sells must reverse only those purchases and use real quote.
+    let mut liquidity = dummy_launchlab();
+    liquidity.virtual_base = 1_000;
+    liquidity.real_base = 100;
+    liquidity.virtual_quote = 180;
+    liquidity.real_quote = 20;
+    liquidity.trade_fee_rate = 100_000;
+    let sell_quote = crate::quote::launchlab_sell_quote_out;
+    assert_eq!(sell_quote(&liquidity, 100).unwrap(), 18);
+    assert!(sell_quote(&liquidity, 101).is_err(), "cannot reverse more base than sold");
+    // Keep pricing reserves at 200. User proceeds (18) fit in 19, but the
+    // pre-fee output (20) also funds accrued fees and exceeds real liquidity.
+    liquidity.virtual_quote = 181;
+    liquidity.real_quote = 19;
+    assert!(sell_quote(&liquidity, 100).is_err(), "gross output must fit real quote");
+    liquidity.virtual_quote = 180;
+    liquidity.real_quote = 20;
+    liquidity.base_transfer_fee = TokenTransferFee { basis_points: 1_000, maximum_fee: 100 };
+    assert_eq!(sell_quote(&liquidity, 112).unwrap(), 18); // net base 100
+    assert!(sell_quote(&liquidity, 113).is_err()); // net base 101
+    liquidity.quote_transfer_fee = TokenTransferFee { basis_points: 1_000, maximum_fee: 100 };
+    assert_eq!(sell_quote(&liquidity, 112).unwrap(), 16);
+    liquidity.real_base = 0;
+    assert!(sell_quote(&liquidity, 112).is_err());
+    liquidity.real_base = 100;
+    liquidity.real_quote = 0;
+    assert!(sell_quote(&liquidity, 112).is_err());
     let user = Pubkey::new_unique();
     let pool = dummy_launchlab();
     let base = crate::ata::ata(&user, &pool.base_mint, &TOKEN_PROGRAM);
@@ -2407,6 +2435,24 @@ fn offline_launchlab_sell_leg_builds() {
     let wallet = solana_sdk::signature::Keypair::new();
     let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
         .with_pool_guard(PoolGuardPolicy::disabled());
+    let zero_fee_client = RouterClient::new(wallet.pubkey(), client.fee_recipient, 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    liquidity.base_transfer_fee = TokenTransferFee::default();
+    liquidity.quote_transfer_fee = TokenTransferFee::default();
+    liquidity.real_quote = 20;
+    liquidity.virtual_quote = 180;
+    for opts in [TradeOpts::default(), TradeOpts::default().sell_to_wsol(),
+        TradeOpts::default().sell_to_token(WSOL_MINT)] {
+        let market = RoutedMarket::new(Market::LaunchLabInner(liquidity.clone()));
+        assert!(zero_fee_client.sell_with_opts(100, &market, opts.clone()).is_ok());
+        assert!(zero_fee_client.sell_with_opts(101, &market, opts.clone()).is_err());
+        liquidity.real_quote = 19;
+        liquidity.virtual_quote = 181;
+        let market = RoutedMarket::new(Market::LaunchLabInner(liquidity.clone()));
+        assert!(zero_fee_client.sell_with_opts(100, &market, opts).is_err());
+        liquidity.real_quote = 20;
+        liquidity.virtual_quote = 180;
+    }
     let build_pair = |pool: LaunchLabPool, path: usize| {
         let quote = pool.quote_mint;
         let market = RoutedMarket::new(Market::LaunchLabInner(pool));
