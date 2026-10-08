@@ -48,8 +48,10 @@ pub struct TradeOpts {
     /// None uses automatic quoting with a positive floor; Some(0) explicitly
     /// allows zero output and bypasses the automatic quote guard.
     pub min_out: Option<u64>,
-    /// Exact-out target. When set, `amount_in` on buy/sell is the **max input budget**
-    /// and capable venues use exact-out legs (CPMM / AmmV4 / PumpSwap / DAMM V2).
+    /// Positive exact-out target; `amount_in` is the maximum input budget.
+    /// Single-hop CPMM / AMM V4 / DAMM V2 buys and sells are supported, plus
+    /// PumpSwap buys. Other paths return an error rather than ignoring the target.
+    /// An explicit `min_out` may not exceed this target.
     pub fixed_output: Option<u64>,
     /// Buy input asset (`buy_with_*`).
     pub buy_with: BuyWith,
@@ -74,6 +76,21 @@ impl Default for TradeOpts {
 }
 
 impl TradeOpts {
+    fn validate_fixed_output(&self, supported: bool) -> Result<()> {
+        if let Some(target) = self.fixed_output {
+            if target == 0 {
+                return Err(anyhow!("fixed_output must be positive"));
+            }
+            if self.min_out.is_some_and(|minimum| minimum > target) {
+                return Err(anyhow!("min_out exceeds fixed_output target"));
+            }
+            if !supported {
+                return Err(anyhow!("fixed_output is unsupported for this trade path"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn with_slippage_bps(mut self, slippage_bps: u64) -> Self {
         self.slippage_bps = slippage_bps;
         self
@@ -415,6 +432,11 @@ impl RouterClient {
             }
             BuyWith::Sol | BuyWith::Wsol => market.market.needs_sol_bridge(),
         };
+        opts.validate_fixed_output(!needs_bridge && matches!(
+            &market.market,
+            Market::CpmmOuter(_) | Market::RaydiumAmmV4(_)
+                | Market::MeteoraDammV2(_) | Market::PumpSwapOuter(_)
+        ))?;
         if needs_bridge && market.bridge.is_none() {
             return Err(anyhow!(
                 "SOL/WSOL path needs stock bridge; or use buy_with_token(mint)"
@@ -627,6 +649,10 @@ impl RouterClient {
             }
             SellTo::Sol | SellTo::Wsol => market.market.needs_sol_bridge(),
         };
+        opts.validate_fixed_output(!needs_bridge && matches!(
+            &market.market,
+            Market::CpmmOuter(_) | Market::RaydiumAmmV4(_) | Market::MeteoraDammV2(_)
+        ))?;
         if needs_bridge && market.bridge.is_none() {
             return Err(anyhow!(
                 "SOL/WSOL receive needs stock bridge; or use sell_to_token(mint)"
@@ -1120,7 +1146,7 @@ impl RouterClient {
                     &opts.ata,
                 ),
             (SellTo::Token(out_mint), Market::CpmmOuter(pool)) => self.sell_cpmm_to_mint(
-                sell_amt, pool, meme, *out_mint, slip, opts.min_out, setup, touched, &opts.ata,
+                sell_amt, pool, meme, *out_mint, slip, opts.min_out, opts.fixed_output, setup, touched, &opts.ata,
             ),
             (SellTo::Token(out_mint), Market::PumpSwapOuter(pool)) => {
                 let tp = pool.quote_token_program;
@@ -1143,7 +1169,7 @@ impl RouterClient {
                     AtaKind::Quote
                 };
                 push_create_ata(setup, &opts.ata, kind, &payer, out_mint, &TOKEN_PROGRAM);
-                self.sell_raydium_v4_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out)
+                self.sell_raydium_v4_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Token(out_mint), Market::MeteoraDammV2(pool)) => {
                 let tp = if *out_mint == pool.token_a_mint {
@@ -1159,7 +1185,7 @@ impl RouterClient {
                     AtaKind::Quote
                 };
                 push_create_ata(setup, &opts.ata, kind, &payer, out_mint, &tp);
-                self.sell_meteora_v2_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out)
+                self.sell_meteora_v2_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Token(out_mint), Market::RaydiumClmm(pool)) => {
                 let tp = if *out_mint == pool.token_0_mint {
@@ -1266,6 +1292,7 @@ impl RouterClient {
                     WSOL_MINT,
                     slip,
                     opts.min_out,
+                    opts.fixed_output,
                     setup,
                     touched,
                     &opts.ata,
@@ -1279,12 +1306,12 @@ impl RouterClient {
             (SellTo::Sol | SellTo::Wsol, Market::RaydiumAmmV4(pool))
                 if !market.market.needs_sol_bridge() =>
             {
-                self.sell_raydium_v4_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out)
+                self.sell_raydium_v4_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Sol | SellTo::Wsol, Market::MeteoraDammV2(pool))
                 if !market.market.needs_sol_bridge() =>
             {
-                self.sell_meteora_v2_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out)
+                self.sell_meteora_v2_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Sol | SellTo::Wsol, Market::RaydiumClmm(pool))
                 if !market.market.needs_sol_bridge() =>
@@ -1477,6 +1504,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
     ) -> Result<(Vec<Leg>, u64, Pubkey)> {
         let input_mint = if output_mint == pool.coin_mint {
             pool.pc_mint
@@ -1485,6 +1513,12 @@ impl RouterClient {
         } else {
             return Err(anyhow!("Raydium AMM V4 output mint does not match pool"));
         };
+        if let Some(target) = fixed_output {
+            let (legs, minimum) = self.buy_raydium_v4_with_mint(
+                sell_amt, pool, input_mint, slip, explicit_min_out, Some(target),
+            )?;
+            return Ok((legs, minimum, ata(&self.payer, &output_mint, &TOKEN_PROGRAM)));
+        }
         let expected = raydium_amm_v4_out(pool, sell_amt, input_mint == pool.coin_mint)?;
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
         Ok((
@@ -1546,6 +1580,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
     ) -> Result<(Vec<Leg>, u64, Pubkey)> {
         let (input_mint, output_program) = if output_mint == pool.token_a_mint {
             (pool.token_b_mint, pool.token_a_program)
@@ -1554,6 +1589,12 @@ impl RouterClient {
         } else {
             return Err(anyhow!("Meteora DAMM V2 output mint does not match pool"));
         };
+        if let Some(target) = fixed_output {
+            let (legs, minimum) = self.buy_meteora_v2_with_mint(
+                sell_amt, pool, input_mint, slip, explicit_min_out, Some(target),
+            )?;
+            return Ok((legs, minimum, ata(&self.payer, &output_mint, &output_program)));
+        }
         let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, sell_amt, input_mint == pool.token_a_mint)? };
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
         let mut exact = pool.clone();
@@ -1890,6 +1931,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
         setup: &mut Vec<Instruction>,
         touched: &mut TouchedAtas,
         policy: &AtaPolicy,
@@ -1916,6 +1958,12 @@ impl RouterClient {
             AtaKind::Quote
         };
         push_create_ata(setup, policy, kind, &payer, &output_mint, &output_tp);
+        if let Some(target) = fixed_output {
+            let leg = cpmm_swap_exact_out_leg(
+                &payer, pool, sell_amt, target, input_mint, output_mint, user_in, user_out,
+            )?;
+            return Ok((vec![leg], target, user_out));
+        }
         let expected = cpmm_out(pool, sell_amt, input_is_base)?;
         let min_out = explicit_min_out
             .unwrap_or_else(|| apply_slippage_min_out(expected, slip));

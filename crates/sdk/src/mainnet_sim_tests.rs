@@ -1200,8 +1200,10 @@ fn mainnet_sim_cpmm_exact_out_and_reverse() {
     let meme_tp = pool.token_program_for(&meme).unwrap_or(TOKEN_PROGRAM);
     let wallet = create_wallet();
     let user = wallet.pubkey();
-    let amount_out = 1_000u64;
     let input_is_base = pool.base_mint == WSOL_MINT;
+    let amount_out = crate::quote::cpmm_out(&pool, 1_000_000, input_is_base)
+        .expect("current CPMM output quote") / 2;
+    assert!(amount_out > 0, "CPMM fixture must produce non-dust output");
     let quoted_in = crate::quote::cpmm_in_for_out(&pool, amount_out, input_is_base)
         .expect("current CPMM exact-out quote");
     assert!(crate::quote::cpmm_out(&pool, quoted_in, input_is_base).unwrap() >= amount_out);
@@ -1225,7 +1227,34 @@ fn mainnet_sim_cpmm_exact_out_and_reverse() {
     println!("[cpmm_exact_out] wallet={user} out={amount_out}");
     assert_funded_ok(
         "cpmm_exact_out",
-        simulate_legs_funded(&client, &wallet, setup, &[leg]),
+        simulate_legs_funded(&client, &wallet, setup.clone(), &[leg.clone()]),
+    );
+
+    let sell_target = crate::quote::cpmm_out(&pool, amount_out, !input_is_base)
+        .expect("current CPMM reverse quote") / 2;
+    assert!(sell_target > 0, "CPMM fixture must produce non-dust reverse output");
+    let router = crate::trade::RouterClient::new(user, user, 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let routed = crate::market::RoutedMarket::new(crate::market::Market::CpmmOuter(pool.clone()));
+    let sell = router.sell_with_opts(
+        amount_out, &routed,
+        crate::trade::TradeOpts::default().sell_to_wsol().with_fixed_output(sell_target),
+    ).expect("high-level exact-out sell").route.unwrap();
+    assert_eq!(sell.data[18], 1, "single-hop sell required");
+    assert_eq!(&sell.data[51..83], RAYDIUM_CPMM_PROGRAM.as_ref());
+    let account_count = sell.data[83] as usize;
+    let data_len = u16::from_le_bytes(sell.data[84..86].try_into().unwrap()) as usize;
+    assert_eq!(sell.data.len(), 86 + data_len);
+    // Execute the actual DEX leg emitted by the high-level route, without the
+    // incompatible deployed router header. This does not test router execution.
+    let sell_leg = crate::legs::Leg {
+        program_id: RAYDIUM_CPMM_PROGRAM,
+        accounts: sell.accounts[6..6 + account_count].to_vec(),
+        data: sell.data[86..].to_vec(),
+    };
+    assert_funded_ok(
+        "cpmm_exact_out_sell_roundtrip",
+        simulate_legs_funded(&client, &wallet, setup, &[leg, sell_leg]),
     );
 
     // Reverse: meme→WSOL without meme balance → soft insufficient funds.

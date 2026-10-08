@@ -869,6 +869,97 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
         crate::route_ix::FEE_ASSET_SOL | crate::route_ix::FEE_ASSET_EXACT_OUT
     );
     assert_eq!(&ix.data[19..51], crate::constants::SYSTEM_PROGRAM.as_ref());
+
+    let wallet = Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), fee_recipient, 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let markets = [
+        Market::CpmmOuter(dummy_cpmm()),
+        Market::RaydiumAmmV4(dummy_amm_v4()),
+        Market::MeteoraDammV2(dummy_damm_v2()),
+        Market::PumpSwapOuter(dummy_pumpswap()),
+        Market::PumpFunInner(dummy_pumpfun()),
+        Market::LaunchLabInner(dummy_launchlab()),
+        Market::RaydiumClmm(dummy_clmm()),
+        Market::Whirlpool(dummy_whirlpool()),
+        Market::MeteoraDlmm(dummy_dlmm()),
+    ];
+    for (index, market) in markets.into_iter().enumerate() {
+        let market = RoutedMarket::new(market);
+        for sell in [false, true] {
+            let supported = index < 3 || (index == 3 && !sell);
+            for direct_token in [false, true] {
+                let mut opts = TradeOpts::default().with_min_out(0).with_fixed_output(77);
+                if direct_token {
+                    opts = opts.buy_with_token(market.market.quote_mint())
+                        .sell_to_token(market.market.quote_mint());
+                }
+                let result = if sell {
+                    client.sell_with_opts(1_000, &market, opts)
+                } else {
+                    client.buy_with_opts(1_000, &market, opts)
+                };
+                if !supported {
+                    assert!(result.unwrap_err().to_string().contains("fixed_output is unsupported"));
+                    continue;
+                }
+                let built = result.unwrap();
+                let route = built.route.as_ref().unwrap();
+                assert_eq!(u64::from_le_bytes(route.data[1..9].try_into().unwrap()), 1_000);
+                assert_eq!(u64::from_le_bytes(route.data[9..17].try_into().unwrap()), 77);
+                assert_ne!(route.data[17] & crate::route_ix::FEE_ASSET_EXACT_OUT, 0);
+                assert_eq!(route.data[18], 1);
+                let output = if sell { market.market.quote_mint() } else { market.meme_mint() };
+                assert_eq!(&route.data[19..51], output.as_ref());
+                // Official ABI amount ordering differs between these venues.
+                let mut expected = match index {
+                    0 => crate::constants::CPMM_SWAP_BASE_OUT.to_vec(),
+                    1 => vec![17],
+                    2 => crate::constants::METEORA_DAMM_V2_SWAP2.to_vec(),
+                    3 => crate::constants::PUMPSWAP_BUY.to_vec(),
+                    _ => unreachable!(),
+                };
+                let (first, second) = if index <= 1 { (990u64, 77u64) } else { (77u64, 990u64) };
+                expected.extend_from_slice(&first.to_le_bytes());
+                expected.extend_from_slice(&second.to_le_bytes());
+                if index == 2 { expected.push(crate::constants::METEORA_DAMM_V2_EXACT_OUT); }
+                assert!(route.data.windows(expected.len()).any(|data| data == expected),
+                    "venue={index} sell={sell} token={direct_token} payload={:?}", &route.data[86..]);
+                // Sign the actual high-level route, including fee/ATA setup.
+                let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    solana_sdk::hash::Hash::new_unique(),
+                );
+                tx.verify().unwrap();
+                let restored: solana_sdk::transaction::Transaction =
+                    bincode::deserialize(&bincode::serialize(&tx).unwrap()).unwrap();
+                restored.verify().unwrap();
+                assert_eq!(restored, tx);
+            }
+        }
+    }
+    let market = RoutedMarket::new(Market::CpmmOuter(dummy_cpmm()));
+    for opts in [
+        TradeOpts::default().with_fixed_output(0),
+        TradeOpts::default().with_fixed_output(77).with_min_out(78),
+    ] {
+        assert!(client.buy_with_opts(1_000, &market, opts.clone()).is_err());
+        assert!(client.sell_with_opts(1_000, &market, opts).is_err());
+    }
+    let stock = Pubkey::new_unique();
+    let mut target = dummy_cpmm();
+    target.quote_mint = stock;
+    let mut bridge = dummy_amm_v4();
+    bridge.pc_mint = stock;
+    let bridged = RoutedMarket::with_bridge(Market::CpmmOuter(target), bridge);
+    let opts = TradeOpts::default().with_min_out(0).with_fixed_output(77);
+    assert!(client.buy_with_opts(1_000, &bridged, opts.clone()).unwrap_err()
+        .to_string().contains("fixed_output is unsupported"));
+    assert!(client.sell_with_opts(1_000, &bridged, opts.clone()).unwrap_err()
+        .to_string().contains("fixed_output is unsupported"));
+    // An attached bridge does not prevent supported direct quote-token trades.
+    assert!(client.buy_with_opts(1_000, &bridged, opts.clone().buy_with_token(stock)).is_ok());
+    assert!(client.sell_with_opts(1_000, &bridged, opts.sell_to_token(stock)).is_ok());
 }
 
 #[test]

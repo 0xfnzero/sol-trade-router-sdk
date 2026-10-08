@@ -638,7 +638,7 @@ pub fn raydium_amm_v4_swap_leg(
     })
 }
 
-/// Exact-out AMM V4 swap (tag 17): amount_out + max_amount_in.
+/// Exact-out AMM V4 swap (tag 17): max_amount_in + amount_out.
 pub fn raydium_amm_v4_swap_exact_out_leg(
     user: &Pubkey,
     pool: &RaydiumAmmV4Pool,
