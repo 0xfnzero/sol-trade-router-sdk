@@ -15,49 +15,60 @@ pub mod tag {
     pub const INITIALIZE: u8 = 0;
     pub const UPDATE_CONFIG: u8 = 1;
     pub const ROUTE: u8 = 2;
-    /// Dynamic two-hop exact-input route; legacy ROUTE remains unchanged.
-    pub const ROUTE_DYNAMIC: u8 = 3;
+    // Tags 3/4 used an unbound output mint and are deliberately no longer dispatched.
+    /// Dynamic two-hop exact-input route with an explicit expected output mint.
+    pub const ROUTE_DYNAMIC: u8 = 5;
     /// Dynamic three-hop route; each later leg spends only the previous leg's new output.
-    pub const ROUTE_DYNAMIC_THREE: u8 = 4;
+    pub const ROUTE_DYNAMIC_THREE: u8 = 6;
+}
+
+/// Dispatch a router instruction. Tags 3/4 are retired because they did not bind the output mint.
+pub fn process_instruction(
+    program_id: &pinocchio::Address,
+    accounts: &mut [pinocchio::AccountView],
+    instruction_data: &[u8],
+) -> pinocchio::ProgramResult {
+    let (disc, data) = instruction_data
+        .split_first()
+        .ok_or(RouterError::InvalidInstructionData)?;
+    match *disc {
+        tag::INITIALIZE => instructions::initialize::process(program_id, accounts, data),
+        tag::UPDATE_CONFIG => instructions::update_config::process(program_id, accounts, data),
+        tag::ROUTE => instructions::route::process(program_id, accounts, data),
+        tag::ROUTE_DYNAMIC => instructions::route::process_dynamic(program_id, accounts, data),
+        tag::ROUTE_DYNAMIC_THREE => {
+            instructions::route::process_dynamic_three(program_id, accounts, data)
+        }
+        _ => Err(RouterError::UnknownInstruction.into()),
+    }
 }
 
 #[cfg(feature = "bpf-entrypoint")]
 mod entrypoint_impl {
-    use pinocchio::{
-        default_allocator,
-        nostd_panic_handler,
-        program_entrypoint,
-        AccountView,
-        Address,
-        ProgramResult,
-    };
-
-    use crate::{instructions, tag, RouterError};
-
+    use crate::process_instruction;
+    use pinocchio::{default_allocator, nostd_panic_handler, program_entrypoint};
     program_entrypoint!(process_instruction);
     default_allocator!();
     nostd_panic_handler!();
+}
 
-    pub fn process_instruction(
-        program_id: &Address,
-        accounts: &mut [AccountView],
-        instruction_data: &[u8],
-    ) -> ProgramResult {
-        let (disc, data) = instruction_data
-            .split_first()
-            .ok_or(RouterError::InvalidInstructionData)?;
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
 
-        match *disc {
-            tag::INITIALIZE => instructions::initialize::process(program_id, accounts, data),
-            tag::UPDATE_CONFIG => {
-                instructions::update_config::process(program_id, accounts, data)
-            }
-            tag::ROUTE => instructions::route::process(program_id, accounts, data),
-            tag::ROUTE_DYNAMIC => instructions::route::process_dynamic(program_id, accounts, data),
-            tag::ROUTE_DYNAMIC_THREE => {
-                instructions::route::process_dynamic_three(program_id, accounts, data)
-            }
-            _ => Err(RouterError::UnknownInstruction.into()),
+    #[test]
+    fn retired_unbound_dynamic_tags_are_rejected() {
+        for tag in [3, 4] {
+            assert_eq!(
+                process_instruction(&ID, &mut [], &[tag]),
+                Err(RouterError::UnknownInstruction.into())
+            );
+        }
+        for tag in [2, 5, 6] {
+            assert_eq!(
+                process_instruction(&ID, &mut [], &[tag]),
+                Err(RouterError::InvalidInstructionData.into())
+            );
         }
     }
 }

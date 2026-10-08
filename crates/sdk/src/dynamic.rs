@@ -76,6 +76,7 @@ pub fn build_dynamic_quote_buy(
         route_amount_in,
         quote_min_out,
         min_target_out,
+        &output_mint,
         &first,
         &second,
     )?;

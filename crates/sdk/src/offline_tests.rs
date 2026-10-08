@@ -671,6 +671,7 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         .find(|ix| ix.program_id == crate::PROGRAM_ID)
         .expect("Route ix must target router PROGRAM_ID");
     assert_eq!(route.data[0], crate::route_ix::TAG_ROUTE);
+    assert_eq!(&route.data[19..51], meme.as_ref());
 }
 
 #[test]
@@ -698,6 +699,7 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
         100,
         crate::route_ix::FEE_ASSET_SOL,
         true,
+        &crate::constants::SYSTEM_PROGRAM,
         &[Leg {
             program_id: leg.program_id,
             accounts: vec![solana_sdk::instruction::AccountMeta::new_readonly(
@@ -706,12 +708,13 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
             data: leg.data,
         }],
     );
-    // data[0]=TAG, then amount_in(8), min_out(8), fee_asset at offset 17
+    // Legacy tag-2 header includes the expected output mint at bytes 19..51.
     assert_eq!(ix.data[0], crate::route_ix::TAG_ROUTE);
     assert_eq!(
         ix.data[17],
         crate::route_ix::FEE_ASSET_SOL | crate::route_ix::FEE_ASSET_EXACT_OUT
     );
+    assert_eq!(&ix.data[19..51], crate::constants::SYSTEM_PROGRAM.as_ref());
 }
 
 #[test]
@@ -1162,6 +1165,7 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
             ).unwrap();
             assert_eq!(built.instruction.data[0], crate::TAG_ROUTE_DYNAMIC);
             assert_eq!(built.instruction.data[18], 2);
+            assert_eq!(&built.instruction.data[19..51], target.as_ref());
             assert_eq!(built.instruction.accounts[6].pubkey, built.quote_ata);
             assert_eq!(built.instruction.accounts[4].pubkey, built.output_ata);
             assert_eq!(built.quote_mint, quote);
@@ -1209,4 +1213,20 @@ fn offline_dynamic_quote_buy_rejects_disconnected_pools() {
         &target,
     )
     .is_err());
+}
+
+#[test]
+fn offline_native_sol_sell_binds_payer_and_sol_mint_sentinel() {
+    let payer = Pubkey::new_unique();
+    let client = RouterClient::new(payer, Pubkey::new_unique(), 0)
+        .with_pool_guard(crate::pool_guard::PoolGuardPolicy::disabled());
+    let market = RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun()));
+    let trade = client.sell_to_sol(1_000, &market).unwrap();
+    let route = trade.route.unwrap();
+    assert_eq!(route.accounts[4].pubkey, payer);
+    assert_eq!(
+        &route.data[19..51],
+        crate::constants::SYSTEM_PROGRAM.as_ref()
+    );
+    assert_eq!(&route.data[51..83], PUMPFUN_PROGRAM.as_ref());
 }

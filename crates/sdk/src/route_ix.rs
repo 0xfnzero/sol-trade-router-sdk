@@ -20,13 +20,14 @@ use crate::{
 };
 
 pub const TAG_ROUTE: u8 = 2;
-pub const TAG_ROUTE_DYNAMIC: u8 = 3;
+// Tags 3/4 had no expected output mint; upgraded programs reject those formats.
+pub const TAG_ROUTE_DYNAMIC: u8 = 5;
 /// Dynamic three-hop route: each later leg spends the previous leg's actual new output.
-pub const TAG_ROUTE_DYNAMIC_THREE: u8 = 4;
+pub const TAG_ROUTE_DYNAMIC_THREE: u8 = 6;
 pub const FEE_ASSET_SOL: u8 = 0;
 pub const FEE_ASSET_TOKEN: u8 = 1;
 /// OR into `fee_asset`: `amount_in` is a max budget (exact-out). On-chain checks
-/// `spent <= amount_in` instead of `spent >= amount_in`.
+/// `fee <= spent <= amount_in` instead of `spent == amount_in`.
 pub const FEE_ASSET_EXACT_OUT: u8 = 0x80;
 
 #[derive(Clone, Copy)]
@@ -133,7 +134,8 @@ pub struct RouteAccounts {
     pub payer: Pubkey,
     pub fee_destination: Pubkey,
     pub fee_source: Pubkey,
-    /// Token account whose balance delta is checked against `min_amount_out`.
+    /// Token account whose balance delta is checked against `min_amount_out`,
+    /// or payer for native SOL with the System Program output-mint sentinel.
     pub output_token_account: Pubkey,
     /// System program for SOL fee, or SPL Token / Token-2022 for token fee.
     pub fee_program: Pubkey,
@@ -148,7 +150,7 @@ pub fn build_route_instruction(
     amount_in: u64,
     min_amount_out: u64,
     fee_asset: u8,
-    _expected_output_mint: &Pubkey,
+    expected_output_mint: &Pubkey,
     legs: &[Leg],
 ) -> Instruction {
     build_route_instruction_ex(
@@ -158,6 +160,7 @@ pub fn build_route_instruction(
         min_amount_out,
         fee_asset,
         false,
+        expected_output_mint,
         legs,
     )
 }
@@ -170,6 +173,7 @@ pub fn build_route_instruction_ex(
     min_amount_out: u64,
     fee_asset: u8,
     exact_out: bool,
+    expected_output_mint: &Pubkey,
     legs: &[Leg],
 ) -> Instruction {
     let (config, _) = config_pda(program_id);
@@ -185,6 +189,7 @@ pub fn build_route_instruction_ex(
     data.extend_from_slice(&min_amount_out.to_le_bytes());
     data.push(fee_asset_byte);
     data.push(legs.len() as u8);
+    data.extend_from_slice(expected_output_mint.as_ref());
 
     // Account layout must match on-chain `route::process` (6 fixed + remaining).
     let mut metas = Vec::with_capacity(6 + 32);
@@ -240,11 +245,15 @@ pub fn build_dynamic_route_instruction(
     amount_in: u64,
     intermediate_min_out: u64,
     min_amount_out: u64,
+    expected_output_mint: &Pubkey,
     first_leg: &Leg,
     second_leg: &Leg,
 ) -> Result<Instruction> {
     if amount_in == 0 || intermediate_min_out == 0 || min_amount_out == 0 {
         bail!("dynamic route amounts must be positive");
+    }
+    if *expected_output_mint == SYSTEM_PROGRAM {
+        bail!("dynamic route output must be a token mint; use WSOL for SOL settlement");
     }
     if intermediate_token_account == accounts.fee_source
         || intermediate_token_account == accounts.output_token_account
@@ -277,12 +286,13 @@ pub fn build_dynamic_route_instruction(
     }
 
     let (config, _) = config_pda(program_id);
-    let mut data = Vec::with_capacity(27 + 2 * 35 + first_leg.data.len() + second_leg.data.len());
+    let mut data = Vec::with_capacity(59 + 2 * 35 + first_leg.data.len() + second_leg.data.len());
     data.push(TAG_ROUTE_DYNAMIC);
     data.extend_from_slice(&amount_in.to_le_bytes());
     data.extend_from_slice(&min_amount_out.to_le_bytes());
     data.push(FEE_ASSET_TOKEN); // native SOL is wrapped to WSOL in setup
     data.push(2);
+    data.extend_from_slice(expected_output_mint.as_ref());
     data.extend_from_slice(&intermediate_min_out.to_le_bytes());
 
     let mut metas =
@@ -318,7 +328,7 @@ pub fn build_dynamic_route_instruction(
 /// tag-2 format; each leg must already encode its intended input amount and
 /// intermediate minimum output. In that mode `first_min_out` and
 /// `second_min_out` are not inserted into the route instruction.
-/// `true` emits tag 4 and replaces the zero input in both later exact-input
+/// `true` emits tag 6 and replaces the zero input in both later exact-input
 /// legs with the previous leg's newly credited balance.
 /// Both intermediate accounts must be user-owned, writable token accounts.
 /// The caller remains responsible for constructing the first leg (which can be
@@ -333,6 +343,7 @@ pub fn build_three_hop_route_instruction(
     first_min_out: u64,
     second_min_out: u64,
     min_amount_out: u64,
+    expected_output_mint: &Pubkey,
     legs: &[Leg],
     spend_actual_output: bool,
 ) -> Result<Instruction> {
@@ -347,11 +358,15 @@ pub fn build_three_hop_route_instruction(
             min_amount_out,
             FEE_ASSET_TOKEN,
             false,
+            expected_output_mint,
             legs,
         ));
     }
     if amount_in == 0 || first_min_out == 0 || second_min_out == 0 || min_amount_out == 0 {
         bail!("dynamic three-hop route amounts must be positive");
+    }
+    if *expected_output_mint == SYSTEM_PROGRAM {
+        bail!("dynamic route output must be a token mint; use WSOL for SOL settlement");
     }
     if first_intermediate == second_intermediate
         || first_intermediate == accounts.fee_source
@@ -400,12 +415,13 @@ pub fn build_three_hop_route_instruction(
 
     let (config, _) = config_pda(program_id);
     let mut data =
-        Vec::with_capacity(35 + 3 * 35 + legs.iter().map(|leg| leg.data.len()).sum::<usize>());
+        Vec::with_capacity(67 + 3 * 35 + legs.iter().map(|leg| leg.data.len()).sum::<usize>());
     data.push(TAG_ROUTE_DYNAMIC_THREE);
     data.extend_from_slice(&amount_in.to_le_bytes());
     data.extend_from_slice(&min_amount_out.to_le_bytes());
     data.push(FEE_ASSET_TOKEN);
     data.push(3);
+    data.extend_from_slice(expected_output_mint.as_ref());
     data.extend_from_slice(&first_min_out.to_le_bytes());
     data.extend_from_slice(&second_min_out.to_le_bytes());
 
@@ -585,16 +601,17 @@ mod tests {
                     100,
                     80,
                     7,
+                    &Pubkey::new_unique(),
                     &first,
                     second,
                 )
                 .unwrap();
                 assert_eq!(ix.data[0], TAG_ROUTE_DYNAMIC);
                 assert_eq!(ix.data[18], 2);
-                assert_eq!(&ix.data[19..27], &80u64.to_le_bytes());
+                assert_eq!(&ix.data[51..59], &80u64.to_le_bytes());
                 assert_eq!(ix.accounts[6].pubkey, quote);
                 assert_eq!(ix.accounts[7].pubkey, quote);
-                assert_eq!(&ix.data[27..59], first_program.as_ref());
+                assert_eq!(&ix.data[59..91], first_program.as_ref());
             }
         }
     }
@@ -629,6 +646,7 @@ mod tests {
             100,
             80,
             7,
+            &Pubkey::new_unique(),
             &first,
             &second
         )
@@ -704,7 +722,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let first_account = Pubkey::new_unique();
         let first = Leg {
-            program_id: METEORA_DLMM_PROGRAM,
+            program_id: Pubkey::new_from_array([3; 32]),
             accounts: vec![AccountMeta::new(first_account, false)],
             data: vec![1, 2, 3],
         };
@@ -721,9 +739,14 @@ mod tests {
             100,
             10,
             FEE_ASSET_TOKEN,
-            &Pubkey::new_unique(),
+            &Pubkey::new_from_array([5; 32]),
             &[first],
         );
+        // Wire fixture for baseline 472d57c: input=100, minimum=10,
+        // fee_asset=1, output mint=[5;32], one leg ([3;32], one account, [1,2,3]).
+        let golden = "0264000000000000000a00000000000000010105050505050505050505050505050505050505050505050505050505050505050303030303030303030303030303030303030303030303030303030303030303010300010203";
+        let actual: String = ix.data.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(actual, golden);
         assert_eq!(ix.data[0], TAG_ROUTE);
         assert_eq!(ix.data[18], 1);
         assert_eq!(ix.accounts[6].pubkey, first_account); // no extra intermediate account
@@ -771,6 +794,7 @@ mod tests {
                 100,
                 1,
                 1,
+                &Pubkey::new_unique(),
                 &first,
                 &last,
             )
@@ -834,6 +858,7 @@ mod tests {
                 1,
                 1,
                 1,
+                &Pubkey::new_unique(),
                 &[wsol_to_usdc.clone(), buy_middle, buy.clone()],
                 true,
             )
@@ -867,6 +892,7 @@ mod tests {
                     1,
                     1,
                     1,
+                    &Pubkey::new_unique(),
                     &[sell.clone(), sell_middle.clone(), usdc_to_wsol],
                     true,
                 )
@@ -936,6 +962,7 @@ mod tests {
             400,
             300,
             100,
+            &Pubkey::new_unique(),
             &fixed_legs,
             false,
         )
@@ -943,8 +970,8 @@ mod tests {
         assert_eq!(fixed.data[0], TAG_ROUTE);
         assert_eq!(fixed.data[18], 3);
         assert_eq!(fixed.accounts[6].pubkey, usdc); // first leg account, not a header account
-        assert_eq!(&fixed.data[98..106], &400u64.to_le_bytes());
-        assert_eq!(&fixed.data[161..169], &300u64.to_le_bytes());
+        assert_eq!(&fixed.data[130..138], &400u64.to_le_bytes());
+        assert_eq!(&fixed.data[193..201], &300u64.to_le_bytes());
 
         let dynamic = build_three_hop_route_instruction(
             &crate::PROGRAM_ID,
@@ -955,15 +982,16 @@ mod tests {
             400,
             300,
             100,
+            &Pubkey::new_unique(),
             &legs,
             true,
         )
         .unwrap();
         assert_eq!(dynamic.data[0], TAG_ROUTE_DYNAMIC_THREE);
         assert_eq!(dynamic.data[18], 3);
-        assert_eq!(&dynamic.data[19..27], &400u64.to_le_bytes());
-        assert_eq!(&dynamic.data[27..35], &300u64.to_le_bytes());
-        assert_eq!(&dynamic.data[35..67], first_program.as_ref());
+        assert_eq!(&dynamic.data[51..59], &400u64.to_le_bytes());
+        assert_eq!(&dynamic.data[59..67], &300u64.to_le_bytes());
+        assert_eq!(&dynamic.data[67..99], first_program.as_ref());
         assert_eq!(dynamic.accounts[6].pubkey, usdc);
         assert_eq!(dynamic.accounts[7].pubkey, quote);
         assert_eq!(dynamic.accounts[8].pubkey, usdc);
@@ -978,6 +1006,7 @@ mod tests {
             400,
             300,
             100,
+            &Pubkey::new_unique(),
             &legs,
             true,
         )
@@ -994,6 +1023,7 @@ mod tests {
             400,
             300,
             100,
+            &Pubkey::new_unique(),
             &legs,
             true,
         )
@@ -1009,6 +1039,7 @@ mod tests {
             400,
             300,
             100,
+            &Pubkey::new_unique(),
             &legs,
             true,
         )

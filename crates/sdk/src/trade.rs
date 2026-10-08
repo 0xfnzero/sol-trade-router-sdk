@@ -549,6 +549,7 @@ impl RouterClient {
             min_out,
             fee_asset,
             opts.fixed_output.is_some(),
+            &market.meme_mint(),
             &legs,
         );
 
@@ -687,7 +688,7 @@ impl RouterClient {
         let (legs, min_out, output_ata) =
             self.build_sell_legs(sell_amt, market, &opts, &mut setup, &mut touched)?;
 
-        let (_expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
+        let (expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
             // Native SOL credit — router checks payer lamport Δ.
             (SellTo::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
                 (SYSTEM_PROGRAM, payer)
@@ -715,6 +716,7 @@ impl RouterClient {
             min_out,
             FEE_ASSET_TOKEN,
             opts.fixed_output.is_some(),
+            &expected_output_mint,
             &legs,
         );
 
