@@ -1478,7 +1478,8 @@ fn offline_amm_v4_in_for_out_roundtrip() {
 
 #[test]
 fn offline_via_sol_amm_v4_bridge_builds_route() {
-    let payer = Pubkey::new_unique();
+    let wallet = Keypair::new();
+    let payer = wallet.pubkey();
     let client = RouterClient::new(payer, Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
     let stock = Pubkey::new_unique();
@@ -1499,6 +1500,85 @@ fn offline_via_sol_amm_v4_bridge_builds_route() {
         .expect("via sol amm_v4 bridge buy");
     assert!(built.route.is_some());
     assert!(built.route.as_ref().unwrap().accounts.len() > 10);
+    for target_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+        let mut launch = dummy_launchlab();
+        launch.quote_mint = stock;
+        launch.quote_token_program = target_program;
+        let mut target_cpmm = dummy_cpmm();
+        target_cpmm.quote_mint = stock;
+        target_cpmm.quote_token_program = target_program;
+        for target in [Market::LaunchLabInner(launch), Market::CpmmOuter(target_cpmm)] {
+            for reversed in [false, true] {
+                let mut bridge_cpmm = dummy_cpmm();
+                bridge_cpmm.base_mint = stock;
+                bridge_cpmm.base_token_program = target_program;
+                if reversed {
+                    std::mem::swap(&mut bridge_cpmm.base_mint, &mut bridge_cpmm.quote_mint);
+                    std::mem::swap(&mut bridge_cpmm.base_token_program, &mut bridge_cpmm.quote_token_program);
+                    std::mem::swap(&mut bridge_cpmm.base_vault, &mut bridge_cpmm.quote_vault);
+                    std::mem::swap(&mut bridge_cpmm.base_reserve, &mut bridge_cpmm.quote_reserve);
+                }
+                let mut mismatched = bridge_cpmm.clone();
+                let wrong = if target_program == TOKEN_PROGRAM {
+                    crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
+                if reversed { mismatched.quote_token_program = wrong; }
+                else { mismatched.base_token_program = wrong; }
+                let mut bridges = vec![(crate::market::BridgePool::Cpmm(bridge_cpmm), true),
+                    (crate::market::BridgePool::Cpmm(mismatched), false)];
+                let mut amm = dummy_amm_v4();
+                amm.pc_mint = stock;
+                if reversed {
+                    std::mem::swap(&mut amm.coin_mint, &mut amm.pc_mint);
+                    std::mem::swap(&mut amm.token_coin, &mut amm.token_pc);
+                    std::mem::swap(&mut amm.coin_reserve, &mut amm.pc_reserve);
+                }
+                bridges.push((crate::market::BridgePool::AmmV4(amm.clone()), target_program == TOKEN_PROGRAM));
+                amm.token_program = Pubkey::default(); // Existing AMM V4 legacy fallback is classic SPL.
+                bridges.push((crate::market::BridgePool::AmmV4(amm), target_program == TOKEN_PROGRAM));
+                for (bridge, valid) in bridges {
+                    let market = RoutedMarket::with_bridge(target.clone(), bridge);
+                    let opts = TradeOpts::default().with_min_out(1);
+                    for (side, result) in [client.buy_with_opts(100_000, &market, opts.clone()),
+                        client.sell_with_opts(100_000, &market, opts)].into_iter().enumerate() {
+                        if !valid {
+                            assert!(result.err().expect("bridge accepted inconsistent quote token programs")
+                                .to_string().contains("quote token program"));
+                            continue;
+                        }
+                        let built = result.unwrap();
+                        let quote_ata = crate::ata::ata(&payer, &stock, &target_program);
+                        let sell = side == 1;
+                        let (target_len, target_quote_slot) = match &target {
+                            Market::LaunchLabInner(_) => (18, 6),
+                            Market::CpmmOuter(_) => (13, if sell { 5 } else { 4 }),
+                            _ => unreachable!(),
+                        };
+                        let (bridge_len, bridge_quote_slot) = match market.bridge.as_ref().unwrap() {
+                            crate::market::BridgePool::Cpmm(_) => (13, if sell { 4 } else { 5 }),
+                            crate::market::BridgePool::AmmV4(_) => (8, if sell { 5 } else { 6 }),
+                        };
+                        let (target_start, bridge_start) = if sell { (6, 6 + target_len) }
+                            else { (6 + bridge_len, 6) };
+                        let accounts = &built.route.as_ref().unwrap().accounts;
+                        assert_eq!(accounts[target_start + target_quote_slot].pubkey, quote_ata);
+                        assert_eq!(accounts[bridge_start + bridge_quote_slot].pubkey, quote_ata);
+                        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                            &built.into_instructions(), Some(&payer), &[&wallet],
+                            solana_sdk::hash::Hash::new_unique(),
+                        );
+                        tx.verify().unwrap();
+                    }
+                    // Direct quote settlement does not use the attached bridge.
+                    if !valid {
+                        assert!(client.buy_with_opts(100_000, &market,
+                            TradeOpts::default().buy_with_token(stock).with_min_out(1)).is_ok());
+                        assert!(client.sell_with_opts(100_000, &market,
+                            TradeOpts::default().sell_to_token(stock).with_min_out(1)).is_ok());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

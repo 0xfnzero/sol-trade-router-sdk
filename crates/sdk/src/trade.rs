@@ -61,6 +61,21 @@ fn validate_inner_market_programs(market: &RoutedMarket, quote_ata: bool) -> Res
     Ok(())
 }
 
+fn validate_bridge_quote_program(market: &RoutedMarket) -> Result<()> {
+    let bridge = market.bridge.as_ref().ok_or_else(|| anyhow!("missing SOL/WSOL bridge"))?;
+    let quote = market.quote_mint();
+    let bridge_program = match bridge {
+        BridgePool::Cpmm(pool) => pool.token_program_for(&quote),
+        BridgePool::AmmV4(pool) => bridge.contains_mint(&quote).then_some(
+            if pool.token_program == Pubkey::default() { TOKEN_PROGRAM } else { pool.token_program }
+        ), // AMM V4's leg builder retains the legacy classic-program default.
+    };
+    if bridge_program != Some(market.quote_token_program()) {
+        return Err(anyhow!("bridge quote token program does not match target market"));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct TradeOpts {
     /// Slippage in basis points (default 100 = 1%).
@@ -482,6 +497,9 @@ impl RouterClient {
                 "SOL/WSOL path needs stock bridge; or use buy_with_token(mint)"
             ));
         }
+        if needs_bridge {
+            validate_bridge_quote_program(market)?;
+        }
 
         let is_pump_native_sol =
             matches!(&market.market, Market::PumpFunInner(pool) if pool.is_native_sol_quote());
@@ -699,6 +717,9 @@ impl RouterClient {
             return Err(anyhow!(
                 "SOL/WSOL receive needs stock bridge; or use sell_to_token(mint)"
             ));
+        }
+        if needs_bridge {
+            validate_bridge_quote_program(market)?;
         }
 
         let is_pump_native_sol =
