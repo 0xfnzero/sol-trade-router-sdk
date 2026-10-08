@@ -6,7 +6,10 @@
 //! - Inner (LaunchLab / PumpFun) + outer (CPMM), 1-hop or 2-hop as needed
 
 use anyhow::{anyhow, Result};
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+};
 
 use crate::{
     asset::{BuyWith, SellTo},
@@ -36,7 +39,7 @@ use crate::{
     },
     route_ix::{
         build_route_instruction_ex, sol_fee_program, token_fee_program, RouteAccounts,
-        FEE_ASSET_SOL, FEE_ASSET_TOKEN,
+        FEE_ASSET_SOL, FEE_ASSET_TOKEN, TAG_PREPARE_PUMPFUN,
     },
 };
 
@@ -840,6 +843,27 @@ impl RouterClient {
         match (&opts.buy_with, &market.market) {
             // —— PumpFun WSOL-quote: native SOL always uses V1 layout (sol-trade-sdk) ——
             (BuyWith::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
+                // Pump charges creation rent separately from spendable_sol_in.
+                // Initialize UVA and top up the vault before the route measures input.
+                let volume = crate::constants::pumpfun_user_volume_accumulator(&payer);
+                setup.push(Instruction {
+                    program_id: crate::constants::PUMPFUN_PROGRAM,
+                    accounts: vec![
+                        AccountMeta::new(payer, true), AccountMeta::new_readonly(payer, false),
+                        AccountMeta::new(volume, false), AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+                        AccountMeta::new_readonly(crate::constants::PUMPFUN_EVENT_AUTHORITY, false),
+                        AccountMeta::new_readonly(crate::constants::PUMPFUN_PROGRAM, false),
+                    ],
+                    data: vec![94, 6, 202, 115, 255, 96, 232, 183],
+                });
+                setup.push(Instruction {
+                    program_id: self.program_id,
+                    accounts: vec![
+                        AccountMeta::new(payer, true), AccountMeta::new_readonly(pool.bonding_curve, false),
+                        AccountMeta::new(pool.creator_vault, false), AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+                    ],
+                    data: vec![TAG_PREPARE_PUMPFUN],
+                });
                 let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out

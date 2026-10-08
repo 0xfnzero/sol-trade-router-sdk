@@ -877,6 +877,8 @@ fn offline_router_client_builds_pumpfun_buy() {
     let client =
         RouterClient::new(payer, fee_recipient, 50).with_pool_guard(PoolGuardPolicy::disabled());
     let pf = dummy_pumpfun();
+    let expected_curve = pf.bonding_curve;
+    let expected_vault = pf.creator_vault;
     let market = RoutedMarket {
         market: Market::PumpFunInner(pf),
         bridge: None,
@@ -884,6 +886,14 @@ fn offline_router_client_builds_pumpfun_buy() {
     let built = client
         .buy_with_opts(1_000_000, &market, TradeOpts::default().buy_with_sol())
         .expect("buy build");
+    let init = built.setup.iter().find(|ix| ix.program_id == crate::constants::PUMPFUN_PROGRAM).unwrap();
+    assert_eq!(init.data, [94, 6, 202, 115, 255, 96, 232, 183]);
+    assert_eq!(init.accounts[2].pubkey, crate::constants::pumpfun_user_volume_accumulator(&payer));
+    let prepare = built.setup.iter().find(|ix| ix.program_id == client.program_id && ix.data == [7]).unwrap();
+    assert_eq!(prepare.accounts[0].pubkey, payer);
+    assert!(prepare.accounts[0].is_signer && prepare.accounts[0].is_writable);
+    assert_eq!(prepare.accounts[1].pubkey, expected_curve);
+    assert_eq!(prepare.accounts[2].pubkey, expected_vault);
     let ixs = built.into_instructions();
     assert!(!ixs.is_empty());
     let mut pf = dummy_pumpfun();

@@ -1,4 +1,4 @@
-//! Pump 3.2.0 V3 trades, including the pool-to-be leg at graduation.
+//! Pump 4.0.0 V3 trades, including the pool-to-be leg at graduation.
 //! Quote amounts are in the curve's quote units; token quotes must be funded
 //! before the route. No signing or broadcasting occurs in these helpers.
 use crate::{
@@ -26,7 +26,7 @@ pub struct PumpFunV3Pool {
     pub curve: PumpFunPool,
     pub complete: bool,
     /// Allow the official post-completion quote and buy path. Cold RPC loading
-    /// enables this by default to match Pump SDK 3.2.0. Set false to explicitly
+    /// enables this by default to match Pump SDK 4.0.0. Set false to explicitly
     /// restrict buys to the remaining curve supply. This SDK option does not
     /// attest to a deployment's execution capability.
     pub supports_graduation: bool,
@@ -38,6 +38,7 @@ pub struct PumpFunV3Pool {
     /// settle directly in that token; recursive SOL funding is caller-supplied.
     pub depth: u8,
     pub needs_curve_extension: bool,
+    /// Hint for token-quoted trades and sells; native buys always initialize idempotently.
     pub needs_volume_initialization: bool,
 }
 
@@ -313,7 +314,7 @@ impl PumpFunV3Pool {
                 data: vec![234, 102, 194, 203, 150, 72, 62, 229],
             });
         }
-        if self.needs_volume_initialization {
+        if self.needs_volume_initialization || (buy && p.quote_mint == WSOL_MINT) {
             let volume = Pubkey::find_program_address(
                 &[b"user_volume_accumulator", user.as_ref()],
                 &PUMPFUN_PROGRAM,
@@ -731,6 +732,14 @@ mod tests {
             assert!(p.build_buy_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
             assert!(p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
             assert!(p.build_sell_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
+        }
+        for buy in [
+            p.build_buy_route(&PROGRAM_ID, &user, &fee, 10_000, 100, 1).unwrap(),
+            p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, 100, 1).unwrap(),
+        ] {
+            let init = buy.setup.iter().find(|ix| ix.data == [94, 6, 202, 115, 255, 96, 232, 183]).unwrap();
+            assert_eq!(init.program_id, PUMPFUN_PROGRAM);
+            assert_eq!(init.accounts[2].pubkey, pumpfun_user_volume_accumulator(&user));
         }
         p.needs_curve_extension = true;
         p.needs_volume_initialization = true;

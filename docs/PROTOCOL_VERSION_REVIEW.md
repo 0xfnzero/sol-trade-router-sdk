@@ -401,3 +401,58 @@ Workspace check: 93 SDK, 15 program and 2 example tests pass; 81 network cases
 and one doctest remain explicitly ignored. Review coverage for this follow-up:
 10 changed/added files manually reviewed, 0 skipped (100%), including the
 snapshot, deployment metadata and logs excluded by OCR's default filters.
+
+
+### Native Pump buy setup rent follow-up — 2026-10-09
+
+Official Pump 4.0.0 IDL `buy_exact_sol_in` explicitly requires rent in addition
+to `spendable_sol_in` for the creator vault and user volume accumulator. Actual
+current Pump + Fee Program ELF execute the buy successfully on synthetic state,
+but the router rejects with 16 when missing-account rent increases wallet debit
+above the declared budget. Preinitializing volume alone is insufficient when the
+creator vault is below its rent floor. V3 quote-input buys also reproduce error
+16 for fresh users without volume initialization. These are actual local CPI
+executions, not inferred from SDK comments.
+
+Native V1 high-level buys now add Pump's idempotent volume initialization and a
+router preparation instruction before the route. New **tag 7** takes signer/
+writable payer, readonly Pump curve, writable creator vault and System Program,
+with no payload. It validates curve owner/discriminator/minimum creator field,
+derives the vault PDA from that curve's creator, validates the vault's System
+owner and zero data, and transfers only its missing rent floor using current
+Rent sysvar. Repeated preparation transfers nothing extra; it cannot redirect
+funds to a supplied arbitrary recipient. Native V3 buys always initialize volume
+idempotently, even when a cached `needs_volume_initialization` hint says false.
+Token-quoted/sell hint behavior stays as before. Setup and swap remain in one
+atomic transaction; setup rent is outside trade input and route fee calculation.
+No route debit tolerance or budget/fee/mint protection was relaxed.
+
+The updated existing runner passes **40 native-rent cases**: V1 classic SPL and
+Token-2022 with initialized/uninitialized volume and zero, partial, exact or
+excess creator-vault rent; failing unprepared controls; repeated preparation;
+prepared over-budget rejection with complete setup/fee/token rollback; and V3
+quote-input/exact-output cases with fresh/existing volume. It also rejects helper
+recipient/program substitutions, malformed data and wrong-owner, wrong-
+discriminator or truncated curves. Current 32-case graduation matrix and the
+full existing router ELF security suite pass. Offline workspace checks pass
+93 SDK / 15 program / 2 example tests (81 live tests and one doctest ignored).
+
+```sh
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/current-pump.so \
+  --fee-fixture scripts/fixtures/pump-v4-mainnet-fees.json \
+  --fee-program /path/to/current-fee-program.so --native-rent-matrix
+```
+
+Evidence: `tools/validation/simulation-coverage-20261009/pump-native-rent-followup/`.
+Router ELF SHA-256:
+`9fce64e47706c4bb2dbacee46be95b9dc90d1ff0540c9637b3dcca9183c95924`.
+This follow-up executes the captured Fee Program ELF as well as Pump. Trades use
+synthetic local state and ephemeral signatures; no broadcast or deployment.
+**The current mainnet router does not implement tag 7**. New V1 high-level setup
+requires the repaired router source to be deployed together with the SDK; these
+changes do not repair or establish compatibility with the unchanged deployment.
+Low-level raw leg callers must supply the necessary preparation themselves.
+
+Review coverage: all 14 changed/added files reviewed (8 code files and 6
+documentation/evidence files), zero skipped. No blocking findings remain in
+this follow-up. Historical evidence retains its recorded revisions.

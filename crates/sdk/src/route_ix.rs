@@ -20,6 +20,8 @@ use crate::{
 };
 
 pub const TAG_ROUTE: u8 = 2;
+/// Idempotent Pump creator-vault rent top-up, before route budget measurement.
+pub const TAG_PREPARE_PUMPFUN: u8 = 7;
 // Tags 3/4 had no expected output mint; upgraded programs reject those formats.
 pub const TAG_ROUTE_DYNAMIC: u8 = 5;
 /// Dynamic three-hop route: each later leg spends the previous leg's actual new output.

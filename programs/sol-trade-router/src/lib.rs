@@ -15,6 +15,8 @@ pub mod tag {
     pub const INITIALIZE: u8 = 0;
     pub const UPDATE_CONFIG: u8 = 1;
     pub const ROUTE: u8 = 2;
+    /// Idempotent canonical Pump creator-vault rent preparation.
+    pub const PREPARE_PUMPFUN: u8 = 7;
     // Tags 3/4 used an unbound output mint and are deliberately no longer dispatched.
     /// Dynamic two-hop exact-input route with an explicit expected output mint.
     pub const ROUTE_DYNAMIC: u8 = 5;
@@ -34,6 +36,7 @@ pub fn process_instruction(
     match *disc {
         tag::INITIALIZE => instructions::initialize::process(program_id, accounts, data),
         tag::UPDATE_CONFIG => instructions::update_config::process(program_id, accounts, data),
+        tag::PREPARE_PUMPFUN => instructions::prepare_pumpfun::process(program_id, accounts, data),
         tag::ROUTE => instructions::route::process(program_id, accounts, data),
         tag::ROUTE_DYNAMIC => instructions::route::process_dynamic(program_id, accounts, data),
         tag::ROUTE_DYNAMIC_THREE => {
@@ -64,6 +67,14 @@ mod dispatch_tests {
                 Err(RouterError::UnknownInstruction.into())
             );
         }
+        assert_eq!(
+            process_instruction(&ID, &mut [], &[tag::PREPARE_PUMPFUN]),
+            Err(RouterError::InsufficientAccounts.into())
+        );
+        assert_eq!(
+            process_instruction(&ID, &mut [], &[tag::PREPARE_PUMPFUN, 0]),
+            Err(RouterError::InvalidInstructionData.into())
+        );
         for tag in [2, 5, 6] {
             assert_eq!(
                 process_instruction(&ID, &mut [], &[tag]),
