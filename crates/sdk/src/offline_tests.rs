@@ -364,6 +364,56 @@ fn offline_all_dex_leg_builders() {
     let clmm = dummy_clmm();
     let wp = dummy_whirlpool();
     let dlmm = dummy_dlmm();
+    // Array counts alone cannot make a missing tick/bin address usable.
+    let mut supplemental_wp = wp.clone();
+    supplemental_wp.tick_arrays.extend((0..3).map(|_| Pubkey::new_unique()));
+    let router = RouterClient::new(user, Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    for template in [Market::RaydiumClmm(clmm.clone()),
+        Market::Whirlpool(supplemental_wp), Market::MeteoraDlmm(dlmm.clone())] {
+        let count = match &template {
+            Market::RaydiumClmm(p) => p.tick_arrays.len(),
+            Market::Whirlpool(p) => p.tick_arrays.len(),
+            Market::MeteoraDlmm(p) => p.bin_arrays.len(),
+            _ => unreachable!(),
+        };
+        for missing in 0..count {
+            let mut market = template.clone();
+            let (inputs, label) = match &mut market {
+                Market::RaydiumClmm(p) => {
+                    p.tick_arrays[missing] = Pubkey::default();
+                    ([p.token_0_mint, p.token_1_mint], "CLMM")
+                }
+                Market::Whirlpool(p) => {
+                    p.tick_arrays[missing] = Pubkey::default();
+                    ([p.mint_a, p.mint_b], "Whirlpool")
+                }
+                Market::MeteoraDlmm(p) => {
+                    p.bin_arrays[missing] = Pubkey::default();
+                    ([p.token_x_mint, p.token_y_mint], "DLMM")
+                }
+                _ => unreachable!(),
+            };
+            for input in inputs {
+                let result = match &market {
+                    Market::RaydiumClmm(p) => raydium_clmm_swap_leg(&user, p, 100, 1, input),
+                    Market::Whirlpool(p) => whirlpool_swap_leg(&user, p, 100, 1, input),
+                    Market::MeteoraDlmm(p) => meteora_dlmm_swap_leg(&user, p, 100, 1, input),
+                    _ => unreachable!(),
+                };
+                assert!(result.err().expect("missing array address accepted").to_string()
+                    .contains("array address"), "{label} slot {missing}");
+            }
+            let routed = RoutedMarket::new(market);
+            for result in [router.buy_with_opts(100, &routed,
+                TradeOpts::default().buy_with_wsol().with_min_out(1)),
+                router.sell_with_opts(100, &routed,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1))] {
+                assert!(result.err().expect("Router accepted missing array address").to_string()
+                    .contains("array address"), "{label} slot {missing}");
+            }
+        }
+    }
     let cpmm = dummy_cpmm();
     let input = crate::ata::ata(&user, &cpmm.base_mint, &cpmm.base_token_program);
     let output = crate::ata::ata(&user, &cpmm.quote_mint, &cpmm.quote_token_program);

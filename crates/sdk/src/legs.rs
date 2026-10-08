@@ -40,6 +40,13 @@ fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<()> {
     Ok(())
 }
 
+fn require_array_addresses(addresses: &[Pubkey], dex: &str) -> Result<()> {
+    if addresses.iter().any(|key| *key == Pubkey::default()) {
+        return Err(anyhow!("{dex} snapshot has a missing liquidity array address"));
+    }
+    Ok(())
+}
+
 #[inline(always)]
 fn encode_u64_triple(disc: &[u8; 8], a: u64, b: u64, c: u64) -> [u8; 32] {
     let mut data = [0u8; 32];
@@ -793,6 +800,7 @@ pub fn raydium_clmm_swap_leg(
     if tick_arrays.is_empty() {
         return Err(anyhow!("Raydium CLMM snapshot has no tick arrays"));
     }
+    require_array_addresses(&tick_arrays, "Raydium CLMM")?;
     let (output_mint, input_vault, output_vault, input_program, output_program) =
         if input_mint == pool.token_0_mint {
             (
@@ -871,6 +879,7 @@ pub fn whirlpool_swap_leg(
     if pool.tick_arrays.len() > 6 {
         return Err(anyhow!("Whirlpool allows at most 3 supplemental tick arrays"));
     }
+    require_array_addresses(&pool.tick_arrays, "Orca Whirlpool")?;
     let a_to_b = if input_mint == pool.mint_a {
         true
     } else if input_mint == pool.mint_b {
@@ -948,6 +957,7 @@ pub fn meteora_dlmm_swap_leg(
     if pool.bin_arrays.is_empty() {
         return Err(anyhow!("Meteora DLMM snapshot has no bin arrays"));
     }
+    require_array_addresses(&pool.bin_arrays, "Meteora DLMM")?;
     let output_mint = if input_mint == pool.token_x_mint {
         pool.token_y_mint
     } else if input_mint == pool.token_y_mint {
