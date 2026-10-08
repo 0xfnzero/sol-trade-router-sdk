@@ -30,7 +30,7 @@ Workspace evidence is in `../tools/validation/simulation-coverage-20261008` and 
 
 Field comparison found two genuine bugs beyond parse exceptions: Go PumpSwap exact-quote buys kept the minimum output as actual output, and Rust/streamer AMM V4 logs used the first invocation's pool in multi-invocation transactions. Local parser source fixes and real captured regression fixtures now verify Go actual output and Rust RPC/parallel-gRPC/sequential-gRPC account and amount attribution. These sibling changes are not published dependencies of this router PR.
 
-Native suite results: Node trade 4,248 passed; Python trade 4,338 passed; Go trade passed; Node parser 344 passed / eight skipped. Final affected suites: Python parser 420 passed; Go parser passed; Rust parser library 420 passed / one ignored plus the updated captured-transaction integration test passed. Streamer builds with its local parser dependency.
+Native suite results: Node trade 4,248 passed; Python trade 4,338 passed; Go trade passed; Node parser 344 passed / eight skipped. Final affected suites: Python parser 420 passed; Go parser passed; Rust parser full test run: 494 passed / one ignored (including 420 library tests and the updated captured-transaction integration test). Streamer builds with its local parser dependency.
 
 ## Signature and execution scope
 
