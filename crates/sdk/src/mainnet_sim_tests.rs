@@ -1121,6 +1121,41 @@ fn mainnet_fixture_cpmm_wsol_stonk() {
         "fixture_cpmm",
         simulate_legs_funded(&client, &wallet, setup, &[leg]),
     );
+    let target = load_cpmm_pool(&client, &fixtures::GRAD_POOL)
+        .expect("graduated CPMM target must load from current accounts");
+    let routed = crate::market::RoutedMarket::with_bridge(
+        crate::market::Market::CpmmOuter(target.clone()), pool.clone(),
+    );
+    let stock = routed.quote_mint();
+    let stock_program = routed.quote_token_program();
+    assert_eq!(pool.other_mint(&WSOL_MINT), Some(stock));
+    let meme = routed.meme_mint();
+    let meme_program = routed.meme_token_program();
+    println!("[fixture_cpmm_stock] stock={stock} on_base={} program={stock_program}",
+        target.base_mint == stock);
+    let stock_out = crate::quote::cpmm_out(&pool, amount, pool.base_mint == WSOL_MINT).unwrap();
+    let stock_budget = stock_out / 2;
+    assert!(stock_budget > 0, "bridge must produce a non-dust stock budget");
+    let expected_meme = crate::quote::cpmm_out(&target, stock_budget, target.base_mint == stock).unwrap();
+    let sell_amount = expected_meme / 2;
+    assert!(sell_amount > 0, "target must produce a non-dust meme output");
+    let router = crate::trade::RouterClient::new(user, user, 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let buy = router.buy_with_token(stock_budget, &routed, stock).expect("direct stock buy");
+    let sell = router.sell_to_token(sell_amount, &routed, stock).expect("direct stock sell");
+    let buy_leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&buy);
+    let sell_leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&sell);
+    let funding_leg = cpmm_swap_leg(
+        &user, &pool, amount, stock_budget, WSOL_MINT, stock,
+        ata(&user, &WSOL_MINT, &TOKEN_PROGRAM), ata(&user, &stock, &stock_program),
+    ).expect("SOL to stock funding hop");
+    let mut setup = setup_wsol_and_meme(&user, stock, stock_program, amount);
+    setup.push(create_ata(&user, &user, &meme, &meme_program));
+    assert_funded_ok(
+        "fixture_cpmm_stock_direct_roundtrip",
+        simulate_legs_funded(&client, &wallet, setup, &[funding_leg, buy_leg, sell_leg]),
+    );
+
 }
 
 #[test]
@@ -1239,19 +1274,9 @@ fn mainnet_sim_cpmm_exact_out_and_reverse() {
     let sell = router.sell_with_opts(
         amount_out, &routed,
         crate::trade::TradeOpts::default().sell_to_wsol().with_fixed_output(sell_target),
-    ).expect("high-level exact-out sell").route.unwrap();
-    assert_eq!(sell.data[18], 1, "single-hop sell required");
-    assert_eq!(&sell.data[51..83], RAYDIUM_CPMM_PROGRAM.as_ref());
-    let account_count = sell.data[83] as usize;
-    let data_len = u16::from_le_bytes(sell.data[84..86].try_into().unwrap()) as usize;
-    assert_eq!(sell.data.len(), 86 + data_len);
-    // Execute the actual DEX leg emitted by the high-level route, without the
-    // incompatible deployed router header. This does not test router execution.
-    let sell_leg = crate::legs::Leg {
-        program_id: RAYDIUM_CPMM_PROGRAM,
-        accounts: sell.accounts[6..6 + account_count].to_vec(),
-        data: sell.data[86..].to_vec(),
-    };
+    ).expect("high-level exact-out sell");
+    let sell_leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&sell);
+    assert_eq!(sell_leg.program_id, RAYDIUM_CPMM_PROGRAM);
     assert_funded_ok(
         "cpmm_exact_out_sell_roundtrip",
         simulate_legs_funded(&client, &wallet, setup, &[leg, sell_leg]),

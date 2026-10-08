@@ -592,7 +592,8 @@ impl RoutedMarket {
         }
     }
 
-    /// For non-WSOL CPMM pairs, set `pool.base_mint` = meme and provide `bridge`.
+    /// For non-WSOL CPMM pairs, the bridge identifies the payment mint.
+    /// Keep the original pool mint, vault and reserve ordering.
     pub fn stonk_outer(pool: CpmmPool, bridge: Option<BridgePool>) -> Self {
         Self {
             market: Market::CpmmOuter(pool),
@@ -652,6 +653,25 @@ impl RoutedMarket {
                     .unwrap_or(self.market.base_token_program())
             }
             _ => self.market.base_token_program(),
+        }
+    }
+
+    /// Payment/receive mint for this routed market. A CPMM bridge can select
+    /// either pool side as quote; raw base/quote ordering is not trade direction.
+    pub fn quote_mint(&self) -> Pubkey {
+        match &self.market {
+            Market::CpmmOuter(pool) => pool.other_mint(&self.meme_mint())
+                .unwrap_or_else(|| pool.pay_mint()),
+            _ => self.market.quote_mint(),
+        }
+    }
+
+    /// Token program for the payment/receive mint selected by this routed market.
+    pub fn quote_token_program(&self) -> Pubkey {
+        match &self.market {
+            Market::CpmmOuter(pool) => pool.token_program_for(&self.quote_mint())
+                .unwrap_or_else(|| self.market.quote_token_program()),
+            _ => self.market.quote_token_program(),
         }
     }
 }

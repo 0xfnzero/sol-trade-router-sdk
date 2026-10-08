@@ -164,6 +164,26 @@ pub fn assert_route_ix(built: &crate::trade::BuiltTrade, label: &str) {
     );
 }
 
+/// Extract the single DEX leg actually emitted by a high-level builder, for
+/// direct simulation independent of the unchanged deployed router's header.
+pub fn single_route_leg_for_direct_simulation(built: &crate::trade::BuiltTrade) -> Leg {
+    let route = built.route.as_ref().expect("high-level route is required");
+    assert!(route.data.len() >= 86, "truncated single-leg route");
+    assert_eq!(route.data[0], crate::route_ix::TAG_ROUTE);
+    assert_eq!(route.data[18], 1, "single-hop route required");
+    let program_id = Pubkey::new_from_array(route.data[51..83].try_into().unwrap());
+    let account_count = route.data[83] as usize;
+    assert!((1..=crate::legs::MAX_LEG_ACCOUNTS).contains(&account_count));
+    let data_len = u16::from_le_bytes(route.data[84..86].try_into().unwrap()) as usize;
+    assert_eq!(route.data.len(), 86 + data_len);
+    assert!(route.accounts.len() >= 6 + account_count);
+    Leg {
+        program_id,
+        accounts: route.accounts[6..6 + account_count].to_vec(),
+        data: route.data[86..].to_vec(),
+    }
+}
+
 /// Simulate a full [`BuiltTrade`] (setup + Route + cleanup) with a freshly funded wallet.
 ///
 /// Missing programs or execution failures never count as successful simulation.

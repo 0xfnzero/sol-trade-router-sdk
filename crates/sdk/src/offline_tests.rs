@@ -564,6 +564,75 @@ fn offline_routed_market_helpers() {
     };
     assert_eq!(routed.meme_mint(), pf.mint);
     assert!(!routed.market.needs_sol_bridge());
+
+    let wallet = Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let stock = Pubkey::new_unique();
+    let meme = Pubkey::new_unique();
+    for stock_on_base in [false, true] {
+        for stock_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+            let meme_program = if stock_program == TOKEN_PROGRAM {
+                crate::constants::TOKEN_2022_PROGRAM
+            } else { TOKEN_PROGRAM };
+            let mut target = dummy_cpmm();
+            target.base_mint = if stock_on_base { stock } else { meme };
+            target.quote_mint = if stock_on_base { meme } else { stock };
+            target.base_token_program = if stock_on_base { stock_program } else { meme_program };
+            target.quote_token_program = if stock_on_base { meme_program } else { stock_program };
+            let mut bridge = dummy_cpmm();
+            bridge.base_mint = WSOL_MINT;
+            bridge.quote_mint = stock;
+            bridge.quote_token_program = stock_program;
+            let market = RoutedMarket::with_bridge(Market::CpmmOuter(target), bridge);
+            assert_eq!(market.meme_mint(), meme);
+            assert_eq!(market.meme_token_program(), meme_program);
+            assert_eq!(market.quote_mint(), stock);
+            assert_eq!(market.quote_token_program(), stock_program);
+            let stock_ata = crate::ata::ata(&client.payer, &stock, &stock_program);
+            let meme_ata = crate::ata::ata(&client.payer, &meme, &meme_program);
+            let fee_stock = crate::ata::ata(&client.fee_recipient, &stock, &stock_program);
+            let created = client.create_quote_ata(&market);
+            assert_eq!(created.accounts[1].pubkey, stock_ata);
+            assert_eq!(created.accounts[3].pubkey, stock);
+            assert_eq!(created.accounts[5].pubkey, stock_program);
+            let closed = client.close_quote_ata(&market);
+            assert_eq!(closed.accounts[0].pubkey, stock_ata);
+            assert_eq!(closed.program_id, stock_program);
+            for prepared in [
+                client.prepare_buy_atas(&market, crate::BuyWith::Token(stock)),
+                client.prepare_sell_atas(&market, crate::SellTo::Token(stock)),
+                client.prepare_buy_atas(&market, crate::BuyWith::Sol),
+                client.prepare_sell_atas(&market, crate::SellTo::Sol),
+            ] {
+                assert!(prepared.iter().any(|ix| ix.accounts[1].pubkey == stock_ata
+                    && ix.accounts[3].pubkey == stock && ix.accounts[5].pubkey == stock_program));
+            }
+            let buy = client.buy_with_token(100_000, &market, stock).unwrap();
+            let buy_route = buy.route.as_ref().unwrap();
+            assert_eq!(buy_route.accounts[2].pubkey, fee_stock);
+            assert_eq!(buy_route.accounts[3].pubkey, stock_ata);
+            assert_eq!(buy_route.accounts[4].pubkey, meme_ata);
+            assert_eq!(buy_route.accounts[5].pubkey, stock_program);
+            assert_eq!(&buy_route.data[19..51], meme.as_ref());
+            let sell = client.sell_to_token(100_000, &market, stock).unwrap();
+            let sell_route = sell.route.as_ref().unwrap();
+            assert_eq!(sell_route.accounts[3].pubkey, meme_ata);
+            assert_eq!(sell_route.accounts[4].pubkey, stock_ata);
+            assert_eq!(sell_route.accounts[5].pubkey, meme_program);
+            assert_eq!(&sell_route.data[19..51], stock.as_ref());
+            assert!(client.buy_with_token(100_000, &market, meme).is_err());
+            assert!(client.sell_to_token(100_000, &market, meme).is_err());
+            for built in [buy, sell] {
+                let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    solana_sdk::hash::Hash::new_unique(),
+                );
+                tx.verify().unwrap();
+            }
+        }
+    }
+
 }
 
 #[test]

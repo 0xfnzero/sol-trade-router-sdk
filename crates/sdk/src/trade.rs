@@ -283,15 +283,15 @@ impl RouterClient {
 
     pub fn create_quote_ata(&self, market: &RoutedMarket) -> Instruction {
         self.create_ata(
-            market.market.quote_mint(),
-            market.market.quote_token_program(),
+            market.quote_mint(),
+            market.quote_token_program(),
         )
     }
 
     pub fn close_quote_ata(&self, market: &RoutedMarket) -> Instruction {
         self.close_ata(
-            market.market.quote_mint(),
-            market.market.quote_token_program(),
+            market.quote_mint(),
+            market.quote_token_program(),
         )
     }
 
@@ -319,7 +319,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 ixs.push(self.create_ata(mint, tp));
                 ixs.push(create_ata(&self.payer, &self.fee_recipient, &mint, &tp));
@@ -352,7 +352,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 ixs.push(self.create_ata(mint, tp));
             }
@@ -421,11 +421,11 @@ impl RouterClient {
                 if mint == meme {
                     return Err(anyhow!("buy_with token cannot be the meme mint"));
                 }
-                if mint != market.market.quote_mint() {
+                if mint != market.quote_mint() {
                     return Err(anyhow!(
                         "buy_with token {} is not this market's quote {}",
                         mint,
-                        market.market.quote_mint()
+                        market.quote_mint()
                     ));
                 }
                 false
@@ -532,7 +532,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 let kind = if mint == WSOL_MINT {
                     touched.touch_wsol();
@@ -638,11 +638,11 @@ impl RouterClient {
                 if mint == meme {
                     return Err(anyhow!("sell_to token cannot be the meme mint"));
                 }
-                if mint != market.market.quote_mint() {
+                if mint != market.quote_mint() {
                     return Err(anyhow!(
                         "sell_to token {} is not this market's quote {}",
                         mint,
-                        market.market.quote_mint()
+                        market.quote_mint()
                     ));
                 }
                 false
@@ -705,7 +705,7 @@ impl RouterClient {
                 &TOKEN_PROGRAM,
             );
         } else if let SellTo::Token(mint) = opts.sell_to {
-            let tp = market.market.quote_token_program();
+            let tp = market.quote_token_program();
             let kind = if mint == WSOL_MINT {
                 touched.touch_wsol();
                 AtaKind::Wsol
