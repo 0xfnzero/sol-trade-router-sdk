@@ -243,6 +243,10 @@ For native SOL sells, `close_output_token_ata=true` unwraps the WSOL output.
 Router trades and balance queries use standard ATAs for both Token and Token-2022,
 even when the shared trade configuration enables `use_seed_optimize`.
 
+PumpFun/PumpSwap `BuyAmount::WithMaxInput` (`use_exact_sol_amount=false`)
+is not implemented by the high-level Router client and returns an error.
+Use exact-input sizing or a supported fixed-output target; the latter takes precedence.
+
 ### 5. Admin (after deploy)
 
 ```rust

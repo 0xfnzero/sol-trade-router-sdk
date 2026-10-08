@@ -243,6 +243,10 @@ V1 曲线不支持 WSOL 结算。
 Router 交易及余额查询始终使用标准 ATA，覆盖 Token 和 Token-2022；
 共享交易配置中的 `use_seed_optimize` 不改变 Router 的账户地址。
 
+高层 Router 客户端尚未实现 PumpFun/PumpSwap 的 `BuyAmount::WithMaxInput`
+（`use_exact_sol_amount=false`），请求该模式会明确报错。
+可使用精确输入或已支持的固定输出目标；固定输出目标优先。
+
 ### 5. 管理指令（部署后）
 
 ```rust

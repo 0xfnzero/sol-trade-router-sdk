@@ -708,6 +708,59 @@ fn offline_routed_market_helpers() {
 
 #[test]
 fn offline_router_client_builds_pumpfun_buy() {
+    let wallet = Keypair::new();
+    let intent_client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let mut intent_params = None;
+    for (dex, asset, market) in [
+        (sol_trade_sdk::trading::factory::DexType::PumpFun, sol_trade_sdk::TradeTokenType::SOL,
+            RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun()))),
+        (sol_trade_sdk::trading::factory::DexType::PumpSwap, sol_trade_sdk::TradeTokenType::WSOL,
+            RoutedMarket::pumpswap(dummy_pumpswap())),
+    ] {
+        let mut params: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
+            dex, asset, market.meme_mint(),
+            sol_trade_sdk::BuyAmount::WithMaxInput { quote_amount: 10_000 },
+            sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()),
+            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+        ).into(); // Metadata is unused: exercise sizing option conversion only.
+        assert_eq!(params.use_exact_sol_amount, Some(false));
+        assert!(crate::client::buy_opts_from_params(&params).err()
+            .expect("regular Pump buy intent was silently ignored")
+            .to_string().contains("use_exact_sol_amount=false"));
+        for exact in [None, Some(true)] {
+            params.use_exact_sol_amount = exact;
+            let opts = crate::client::buy_opts_from_params(&params).unwrap().with_min_out(1);
+            let built = intent_client.buy_with_opts(10_000, &market, opts).unwrap();
+            let leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&built);
+            let expected = if dex == sol_trade_sdk::trading::factory::DexType::PumpFun {
+                crate::constants::PUMPFUN_BUY_EXACT_SOL_IN
+            } else { crate::constants::PUMPSWAP_BUY_EXACT_QUOTE_IN };
+            assert_eq!(&leg.data[..8], &expected);
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+        intent_params = Some(params);
+    }
+    let mut params = intent_params.unwrap(); // PumpSwap fixed output takes precedence.
+    params.use_exact_sol_amount = Some(false);
+    params.fixed_output_token_amount = Some(1);
+    let opts = crate::client::buy_opts_from_params(&params).unwrap();
+    let built = intent_client.buy_with_opts(10_000,
+        &RoutedMarket::pumpswap(dummy_pumpswap()), opts).unwrap();
+    assert_eq!(built.route.as_ref().unwrap().data[17], 0x81);
+    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+        solana_sdk::hash::Hash::new_unique(),
+    );
+    tx.verify().unwrap();
+    params.fixed_output_token_amount = None;
+    params.dex_type = sol_trade_sdk::trading::factory::DexType::Bonk;
+    assert!(crate::client::buy_opts_from_params(&params).is_ok()); // Flag only applies to Pump.
+
     let payer = Pubkey::new_unique();
     let fee_recipient = Pubkey::new_unique();
     let client =

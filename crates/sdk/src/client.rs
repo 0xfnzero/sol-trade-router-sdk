@@ -260,6 +260,8 @@ impl TradingClient {
     }
 
     /// Build Route instructions without submitting (simulate / custom send).
+    /// Regular Pump `use_exact_sol_amount=false` sizing is unsupported unless
+    /// a supported fixed-output target takes precedence; it returns an error.
     pub fn build_buy_instructions(&self, params: &TradeBuyParams) -> Result<Vec<Instruction>> {
         let market = to_routed_market_for_user(
             &params.extension_params,
@@ -588,6 +590,15 @@ fn sell_ata_policy(params: &TradeSellParams) -> AtaPolicy {
 }
 
 pub(crate) fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
+    if params.use_exact_sol_amount == Some(false)
+        && params.fixed_output_token_amount.is_none()
+        && matches!(params.dex_type, DexType::PumpFun | DexType::PumpSwap)
+    {
+        return Err(anyhow!(
+            "Router does not support use_exact_sol_amount=false for regular Pump buys; \
+             use exact-input sizing or a supported fixed-output target"
+        ));
+    }
     let mut opts = TradeOpts::default()
         .with_slippage_bps(params.slippage_basis_points.unwrap_or(100))
         .with_ata(buy_ata_policy(params));
