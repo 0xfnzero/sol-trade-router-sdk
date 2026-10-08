@@ -3,7 +3,7 @@ use solana_sdk::pubkey;
 use solana_sdk::pubkey::Pubkey;
 
 /// Deployed router program id (`keys/router-keypair.json`).
-pub const PROGRAM_ID: Pubkey = pubkey!("CMrrMgrEvXW3oo6RtxnneDf5D5TeujfbqveFiKuvqrYg");
+pub const PROGRAM_ID: Pubkey = pubkey!("CmNFUmRJL7YcnVn22oZzwG5Xg5WJqbcHEc6BK5mzDNR8");
 
 pub const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 pub const USDC_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");

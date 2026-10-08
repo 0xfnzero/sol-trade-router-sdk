@@ -1,0 +1,16 @@
+[package]
+name = "touter_test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+solana-client = "=4.2.2"
+solana-sdk = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+bs58 = "0.5"
+serde_json = "1"
+dotenvy = "0.15"
+sol-trade-router-sdk = { path = "../../crates/sdk" }

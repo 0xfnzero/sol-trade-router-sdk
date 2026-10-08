@@ -61,7 +61,7 @@
 4. **DexType 全覆盖** — PumpFun、PumpSwap、LaunchLab/StonkFun/Bonk、Raydium CPMM / AMM V4 / CLMM、Orca Whirlpool、Meteora DLMM / DAMM V2
 5. **热路径零 RPC 池快照** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
 6. **ATA 策略** — WSOL / quote 冷路径准备；meme ATA 买入同笔创建
-7. **花费 / 产出完整性** — exact-in：`fee_source` 花费 **==** `amount_in`；校验 output mint（或原生 SOL）；强制 `min_out`
+7. **手续费完整性** — 链上校验 `fee_source` 花费 ≥ `amount_in`
 8. **Pool guard** — 可选 PDA / 白名单 / `stonk_strict`
 
 ## 📚 文档
@@ -69,6 +69,8 @@
 | 指南 | 用途 |
 |------|------|
 | [低延迟 Bot 接入](docs/LOW_LATENCY_BOTS_CN.md) | 冷/热路径、RiskGate、提交计时 |
+| [动态两跳买卖](docs/DYNAMIC_TWO_HOP_CN.md) | 首跳实际到账全额作为第二跳输入；动态末跳支持 LaunchLab 买入及现有 Raydium/Meteora/Orca 精确输入池 |
+| [动态三跳买卖](docs/DYNAMIC_THREE_HOP_CN.md) | WSOL ↔ USDC ↔ quote ↔ LaunchLab；Raydium/Meteora/Orca 精确输入池可用作动态中间跳或末跳 |
 | [Durable Nonce](docs/NONCE_CACHE_CN.md) | 多 SWQoS / MEV 推荐时钟 |
 | [examples/README_CN.md](examples/README_CN.md) | gRPC / Shred 狙击与跟单模板 |
 | [keys/README.md](keys/README.md) | 本地部署 keypair（勿提交） |

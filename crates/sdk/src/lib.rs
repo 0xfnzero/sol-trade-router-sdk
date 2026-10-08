@@ -26,6 +26,7 @@ mod asset;
 mod ata;
 mod client;
 mod constants;
+mod dynamic;
 mod legs;
 mod market;
 mod parser;
@@ -57,6 +58,12 @@ pub use constants::{
     STONKFUN_STANDARD_PLATFORM_CONFIG, TOKEN_2022_PROGRAM, USDC_MINT, WSOL_MINT,
     raydium_clmm_tick_array_bitmap_extension,
 };
+pub use dynamic::{build_deployed_dynamic_quote_buy, build_dynamic_quote_buy, DynamicBuyRoute};
+pub use legs::{
+    cpmm_swap_leg, launchlab_buy_leg, launchlab_sell_leg, meteora_damm_v2_swap_leg,
+    meteora_dlmm_swap_leg, pumpswap_buy_leg, pumpswap_sell_leg,
+    raydium_amm_v4_swap_leg, raydium_clmm_swap_leg, whirlpool_swap_leg, Leg,
+};
 pub use market::{
     launchlab_creator_associated_account, launchlab_platform_associated_account, BridgePool,
     CpmmPool, LaunchLabPool, Market, MeteoraDammV2Pool, MeteoraDlmmPool, PumpFunPool, PumpSwapPool,
@@ -82,7 +89,11 @@ pub use quote::{
     pumpswap_sell_quote_out, raydium_amm_v4_in_for_out, raydium_amm_v4_out, raydium_clmm_out,
     whirlpool_out, LaunchLabBuyQuote, MAX_SLIPPAGE_BPS,
 };
-pub use route_ix::{sol_fee_program, spl_fee_program, token_fee_program, FEE_ASSET_EXACT_OUT};
+pub use route_ix::{
+    build_dynamic_route_instruction, build_three_hop_route_instruction,
+    sol_fee_program, spl_fee_program, token_fee_program, RouteAccounts,
+    FEE_ASSET_EXACT_OUT, TAG_ROUTE_DYNAMIC, TAG_ROUTE_DYNAMIC_THREE,
+};
 pub use trade::{BuiltTrade, RouterClient, TradeOpts};
 pub use transfer_fee::TokenTransferFee;
 
