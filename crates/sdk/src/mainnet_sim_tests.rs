@@ -1200,8 +1200,16 @@ fn mainnet_sim_cpmm_exact_out_and_reverse() {
     let meme_tp = pool.token_program_for(&meme).unwrap_or(TOKEN_PROGRAM);
     let wallet = create_wallet();
     let user = wallet.pubkey();
-    let max_in = 2_000_000u64;
     let amount_out = 1_000u64;
+    let input_is_base = pool.base_mint == WSOL_MINT;
+    let quoted_in = crate::quote::cpmm_in_for_out(&pool, amount_out, input_is_base)
+        .expect("current CPMM exact-out quote");
+    assert!(crate::quote::cpmm_out(&pool, quoted_in, input_is_base).unwrap() >= amount_out);
+    if quoted_in > 1 {
+        assert!(crate::quote::cpmm_out(&pool, quoted_in - 1, input_is_base).unwrap() < amount_out);
+    }
+    // Allow 1% state movement between quote and simulation (at least one raw unit).
+    let max_in = quoted_in.checked_add(quoted_in.div_ceil(100)).unwrap();
     let setup = setup_wsol_and_meme(&user, meme, meme_tp, max_in);
     let leg = cpmm_swap_exact_out_leg(
         &user,

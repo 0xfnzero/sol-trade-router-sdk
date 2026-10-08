@@ -366,6 +366,71 @@ mod tests {
             let under = cpmm_out(&pool, amount_in - 1, true).unwrap();
             assert!(under < want_out, "amount_in-1 still yields >= want");
         }
+
+        // Doubling an estimate can exceed the token vault's u64 capacity even
+        // though the requested output has a valid, smaller exact-in quote.
+        let mut large = pool.clone();
+        large.base_reserve = u64::MAX / 2;
+        large.quote_reserve = 1_000_000;
+        large.trade_fee_rate = 0;
+        let want = 400_000;
+        let required = cpmm_in_for_out(&large, want, true).unwrap();
+        // Official ConstantProductCurve.swapBaseOutputWithoutFees uses ceil.
+        let official = (large.base_reserve as u128 * want as u128)
+            .div_ceil((large.quote_reserve - want) as u128);
+        assert_eq!(required as u128, official);
+        assert!(cpmm_out(&large, required, true).unwrap() >= want);
+        assert!(cpmm_out(&large, required - 1, true).unwrap() < want);
+        assert!(cpmm_in_for_out(&large, 600_000, true).is_err());
+        assert!(cpmm_in_for_out(&large, 999_999, true).is_err());
+        large.base_transfer_fee = TokenTransferFee {
+            basis_points: 10_000,
+            maximum_fee: 7,
+        };
+        let capped = cpmm_in_for_out(&large, 500_000, true).unwrap();
+        assert_eq!(capped, large.base_reserve + 7);
+        assert!(capped > u64::MAX - large.base_reserve);
+        assert_eq!(cpmm_out(&large, capped, true).unwrap(), 500_000);
+        assert!(cpmm_out(&large, capped - 1, true).unwrap() < 500_000);
+
+        let mut small = pool.clone();
+        small.base_reserve = 100;
+        small.quote_reserve = 300;
+        small.enable_creator_fee = true;
+        small.creator_fee_rate = 10_000;
+        small.base_transfer_fee = TokenTransferFee {
+            basis_points: 500,
+            maximum_fee: 7,
+        };
+        small.quote_transfer_fee = TokenTransferFee {
+            basis_points: 400,
+            maximum_fee: 5,
+        };
+        // Brute-force oracle covers both creator-fee sides, mint fee caps and
+        // integer plateaus without reusing the inverse search implementation.
+        for creator_fee_on in 0..=2 {
+            small.creator_fee_on = creator_fee_on;
+            for direction in [true, false] {
+                for desired in 1..=60 {
+                    let first = (1..=1_024)
+                        .find(|&input| cpmm_out(&small, input, direction).unwrap() >= desired)
+                        .unwrap();
+                    assert_eq!(cpmm_in_for_out(&small, desired, direction).unwrap(), first);
+                }
+            }
+        }
+        small.fee_rates_known = false;
+        assert!(cpmm_in_for_out(&small, 1, true)
+            .unwrap_err().to_string().contains("missing"));
+        small.fee_rates_known = true;
+        small.trade_fee_rate = 1_000_000;
+        assert!(cpmm_in_for_out(&small, 1, true)
+            .unwrap_err().to_string().contains("invalid CPMM fee"));
+        large.base_transfer_fee = TokenTransferFee {
+            basis_points: 10_000,
+            maximum_fee: u64::MAX,
+        };
+        assert!(cpmm_in_for_out(&large, 1, true).is_err());
     }
 
     #[test]
@@ -530,20 +595,46 @@ pub fn cpmm_in_for_out(pool: &CpmmPool, amount_out: u64, input_is_base: bool) ->
     } else {
         pool.quote_reserve
     };
+    // Validate current fee state before searching; quote errors must not be
+    // mistaken for zero output. If one unit cannot fit, no positive output is reachable.
+    cpmm_out(pool, 1, input_is_base)?;
+    let input_fee = if input_is_base {
+        pool.base_transfer_fee
+    } else {
+        pool.quote_transfer_fee
+    };
+    let capacity = u64::MAX - input_reserve;
+    // The vault receives input net of the mint's transfer fee, but includes
+    // pool fees. Find the largest gross input whose vault credit fits u64.
+    let mut max_lo = 0u64;
+    let mut max_hi = u64::MAX;
+    while max_lo < max_hi {
+        let distance = max_hi - max_lo;
+        let mid = max_lo + distance / 2 + distance % 2;
+        let credit = mid - input_fee.calculate(mid);
+        if credit <= capacity {
+            max_lo = mid;
+        } else {
+            max_hi = mid - 1;
+        }
+    }
+    let max_input = max_lo;
+    if max_input == 0 || cpmm_out(pool, max_input, input_is_base)? < amount_out {
+        return Err(anyhow!("cpmm amount_out is unreachable within token vault capacity"));
+    }
     let naive = (amount_out as u128)
         .saturating_mul(input_reserve as u128)
         .div_ceil((output_reserve - amount_out) as u128);
-    let mut lo = (naive as u64).max(1);
-    let mut hi = lo.saturating_mul(2).saturating_add(10_000);
-    while cpmm_out(pool, hi, input_is_base).unwrap_or(0) < amount_out {
-        if hi == u64::MAX {
-            return Err(anyhow!("cpmm_in_for_out overflow"));
-        }
-        hi = hi.saturating_mul(2).max(hi.saturating_add(1));
+    let mut lo = u64::try_from(naive)
+        .map_err(|_| anyhow!("cpmm exact-out input exceeds u64"))?
+        .max(1);
+    let mut hi = lo.saturating_mul(2).saturating_add(10_000).min(max_input);
+    while cpmm_out(pool, hi, input_is_base)? < amount_out {
+        hi = hi.saturating_mul(2).max(hi.saturating_add(1)).min(max_input);
     }
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if cpmm_out(pool, mid, input_is_base).unwrap_or(0) >= amount_out {
+        if cpmm_out(pool, mid, input_is_base)? >= amount_out {
             hi = mid;
         } else {
             lo = mid + 1;
