@@ -1,0 +1,35 @@
+{"feature_probe": "set_max_curve_depth", "error": 3005}
+{"mode": "exact_out", "amount": 999999999, "token2022": false, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999999999, "spent": 516016}
+{"mode": "exact_out", "amount": 1000000000, "token2022": false, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 1000000001, "token2022": false, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000001, "spent": 516019, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416015, "token2022": false, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999995862, "spent": 516015}
+{"mode": "quote_input", "amount": 416016, "token2022": false, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999998295, "spent": 516016}
+{"mode": "quote_input", "amount": 416017, "token2022": false, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416116, "token2022": false, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000236136, "spent": 516116, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 9900000, "token2022": false, "initial_quote": 0, "error": null, "complete": 1, "tokens": 23800200361, "spent": 10000000, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 999999999, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999999999, "spent": 516016}
+{"mode": "exact_out", "amount": 1000000000, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 1000000001, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000001, "spent": 516019, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416015, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999995862, "spent": 516015}
+{"mode": "quote_input", "amount": 416016, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999998295, "spent": 516016}
+{"mode": "quote_input", "amount": 416017, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416116, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000236136, "spent": 516116, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 9900000, "token2022": false, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 23800200361, "spent": 10000000, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 999999999, "token2022": true, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999999999, "spent": 516016}
+{"mode": "exact_out", "amount": 1000000000, "token2022": true, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 1000000001, "token2022": true, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000001, "spent": 516019, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416015, "token2022": true, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999995862, "spent": 516015}
+{"mode": "quote_input", "amount": 416016, "token2022": true, "initial_quote": 0, "error": null, "complete": 0, "tokens": 999998295, "spent": 516016}
+{"mode": "quote_input", "amount": 416017, "token2022": true, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416116, "token2022": true, "initial_quote": 0, "error": null, "complete": 1, "tokens": 1000236136, "spent": 516116, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 9900000, "token2022": true, "initial_quote": 0, "error": null, "complete": 1, "tokens": 23800200361, "spent": 10000000, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 999999999, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999999999, "spent": 516016}
+{"mode": "exact_out", "amount": 1000000000, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "exact_out", "amount": 1000000001, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000001, "spent": 516019, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416015, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999995862, "spent": 516015}
+{"mode": "quote_input", "amount": 416016, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 0, "tokens": 999998295, "spent": 516016}
+{"mode": "quote_input", "amount": 416017, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000000000, "spent": 516016, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 416116, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 1000236136, "spent": 516116, "completed_curve_buy_error": 6005}
+{"mode": "quote_input", "amount": 9900000, "token2022": true, "initial_quote": 30000000000, "error": null, "complete": 1, "tokens": 23800200361, "spent": 10000000, "completed_curve_buy_error": 6005}
+{"boundary_cases_passed": 32, "curve_cost": 416016}
+{"pump_sha256": "a4b32d322295a15666b1293e0028b9b75d688bfce10b574e1094f249f2ce9f16", "router_sha256": "9fa096f49b7a32ee8f4ce774a1c650c96febf7c54c35266c4d91cd5a5cd5ac86"}

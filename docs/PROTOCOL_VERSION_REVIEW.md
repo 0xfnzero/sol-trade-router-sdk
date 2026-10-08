@@ -37,7 +37,7 @@ README examples):
 
 | Official SDK | Version | Source |
 | --- | --- | --- |
-| Pump | 3.2.0 | [npm](https://www.npmjs.com/package/@pump-fun/pump-sdk), `src/fees.ts`, `src/bondingCurve.ts`, published IDL |
+| Pump | 4.0.0 | [npm](https://www.npmjs.com/package/@pump-fun/pump-sdk), `src/fees.ts`, `src/bondingCurve.ts`, published IDL |
 | PumpSwap | 2.1.0 | [npm](https://www.npmjs.com/package/@pump-fun/pump-swap-sdk), fee math and swap builders |
 | Raydium | 0.2.73-alpha | [npm](https://www.npmjs.com/package/@raydium-io/raydium-sdk-v2), LaunchLab/CPMM/AMM/CLMM builders and math |
 | Orca Whirlpool | 0.22.0 | [npm](https://www.npmjs.com/package/@orca-so/whirlpools-sdk), swap-v2 and quote dependencies |
@@ -259,7 +259,7 @@ curve supply. That math is implemented and unit-tested.
 published official SDK's quote and construction behavior. Callers can explicitly
 set it to false to restrict buys to the remaining curve supply. This is an SDK
 construction option, not a declaration that a specific deployment accepts it.
-The captured mainnet Pump ELF returns 6021 (`NotEnoughTokensToBuy`) for our
+The historical 2026-10-08 captured mainnet Pump ELF returns 6021 (`NotEnoughTokensToBuy`) for our
 non-Mayhem crossing fixture, including with realistic curve reserve invariants.
 This local observation does not prove every possible live crossing fails, and
 SDK publication alone does not establish deployed behavior.
@@ -346,3 +346,58 @@ python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so --bound
 
 Raw deployment headers, ELF hashes and all matrix outcomes are saved in
 [PUMP_V3_DEPLOYMENT_RECHECK.json](PUMP_V3_DEPLOYMENT_RECHECK.json).
+
+
+### Current Pump deployment recheck — 2026-10-09
+
+The official `@pump-fun/pump-sdk` latest package is **4.0.0**, published
+2026-10-08T12:53:48.925Z. Compared with 3.2.0, the quote-coin creation seed
+calculation changed; the V3 trading math and published IDL remain unchanged.
+The router does not construct quote-coin creation instructions. The official V3
+quote functions explicitly reject already-complete curves. Crossing inside the
+completing buy is supported; trading an already-complete curve before migration
+is not. The SDK's completed-curve guards remain correct.
+
+New read-only captures identify Pump deployment slot **454596459**, ELF SHA-256
+`a4b32d322295a15666b1293e0028b9b75d688bfce10b574e1094f249f2ce9f16`, and Fee Program
+deployment slot **454596501**, ELF SHA-256
+`73c679c8dae8d24153fdd0455b557b73662e93ab2ec88831a9e4be2b08a897a4`.
+Global/FeeConfig were captured together at slot **454622338**. Global now has
+1088 bytes (including `max_curve_depth=1`); the old 1087-byte Global fixture
+fails account deserialization against the new Pump program. Both old and current
+snapshots are retained. The Fee Program ELF was captured but is **not executed**
+by these V3 cases, which read FeeConfig directly.
+
+The existing local runner now accepts `--fee-fixture` and an explicit
+`--graduation-supported` expectation. Its admin dispatch probe checks 3005
+(missing accounts) on the new program, rather than old error 101; actual trading
+cases independently establish crossing support. Fee rates come from the selected
+snapshot, and crossing output includes the official pool-to-be leg, independent
+ceil fees and migration fee. Exact-output cases also assert actual debit equals
+the official fee-inclusive cost plus router fee. Completion means output >= remaining supply.
+
+With the current Pump ELF and repaired local router ELF, all **32 current
+boundary cases pass**, including exact-output remaining+1 and quote-input
+416,017 / 416,116 / 9,900,000 lamports. Classic SPL and Token-2022 synthetic base
+mints and both initial quote reserve variants pass. A second buy on each
+completed curve fails with 6005; token/curve state and router fee roll back
+(the transaction fee remains charged). Ordinary quote-input and exact-output
+buy/sell roundtrips also pass. The **32 historical cases still pass** with the
+old ELF/fixture and old rejection expectations. Thus the historical deployment
+limitation above does not apply to the current captured Pump program.
+
+```sh
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/current-pump.so \
+  --fee-fixture scripts/fixtures/pump-v4-mainnet-fees.json \
+  --boundary-matrix --graduation-supported
+```
+
+Evidence: `tools/validation/simulation-coverage-20261009/pump-current-deployment-followup/`.
+These are locally signed LiteSVM transactions using real captured program ELF
+and synthetic curves, not bank simulations of live pools. The mainnet router
+program was not deployed or upgraded. Graduation remains enabled by default.
+
+Workspace check: 93 SDK, 15 program and 2 example tests pass; 81 network cases
+and one doctest remain explicitly ignored. Review coverage for this follow-up:
+10 changed/added files manually reviewed, 0 skipped (100%), including the
+snapshot, deployment metadata and logs excluded by OCR's default filters.

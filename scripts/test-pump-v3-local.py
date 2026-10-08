@@ -62,7 +62,7 @@ def send(vm, payer, instruction):
 
 def run_case(router_code, pump_code, *, boundary=False, token2022=False,
              initial_quote=0, exact_out=None, quote_input=9_900_000,
-             expected_failure=False, sell_after=True):
+             expected_failure=False, sell_after=True, fee_fixture=None):
     vm = LiteSVM().with_default_programs()
     vm.add_program(PUMP, pump_code)
     vm.add_program(ROUTER, router_code)
@@ -75,7 +75,8 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     global_key = pda([b"global"])
     event = pda([b"__event_authority"])
     config = pda([b"fee_config", bytes(PUMP)], FEES)
-    fixture = json.loads((Path(__file__).parent / "fixtures/pump-v3-mainnet-fees.json").read_text())
+    fixture_path = fee_fixture or Path(__file__).parent / "fixtures/pump-v3-mainnet-fees.json"
+    fixture = json.loads(fixture_path.read_text())
     accounts = fixture["result"]["value"]
     for key, account in zip([global_key, config], accounts):
         vm.set_account(key, Account(account["lamports"], base64.b64decode(account["data"][0]),
@@ -156,11 +157,45 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     net = quote_input * 10000 // (10000 + protocol_bps + creator_bps)
     net -= max(0, net + bps_fee(net, protocol_bps) + bps_fee(net, creator_bps) - quote_input)
     expected = exact_out if exact_out is not None else (net - 1) * virtual_base // (virtual_quote + net - 1)
+    if exact_out is None and expected > remaining:
+        curve_net = remaining * virtual_quote // (virtual_base - remaining) + 1
+        leftover = quote_input - curve_net - bps_fee(curve_net, protocol_bps) - bps_fee(curve_net, creator_bps)
+        after_fees = leftover * 10000 // (10000 + protocol_bps + creator_bps)
+        leg_net = after_fees - max(0, after_fees + bps_fee(after_fees, protocol_bps)
+                                    + bps_fee(after_fees, creator_bps) - leftover)
+        migration_fee = struct.unpack_from("<Q", global_data, 146)[0]
+        pool_quote = real_quote + curve_net - migration_fee
+        pool_base = vault_balance - remaining
+        assert pool_quote > 0 and pool_base > 0
+        expected = remaining if after_fees < 2 else remaining + (leg_net - 1) * pool_base // (pool_quote + leg_net - 1)
     assert tokens == expected, (observed, expected)
-    assert observed["complete"] == int(tokens == remaining), observed
+    assert observed["complete"] == int(tokens >= remaining), observed
     assert vm.get_account(recipient).lamports - initial_fee == ROUTER_FEE
     observed["spent"] = initial_sol - vm.get_account(user).lamports - 5000
     assert ROUTER_FEE <= observed["spent"] <= BUDGET, observed
+    if exact_out is not None:
+        curve_tokens = min(exact_out, remaining)
+        curve_net = curve_tokens * virtual_quote // (virtual_base - curve_tokens) + 1
+        expected_cost = curve_net + bps_fee(curve_net, protocol_bps) + bps_fee(curve_net, creator_bps)
+        if exact_out > remaining:
+            pool_base = vault_balance - remaining
+            pool_quote = real_quote + curve_net - struct.unpack_from("<Q", global_data, 146)[0]
+            past_curve = exact_out - remaining
+            assert pool_base > past_curve and pool_quote > 0
+            leg_net = (pool_quote * past_curve + pool_base - past_curve - 1) // (pool_base - past_curve)
+            expected_cost += leg_net + bps_fee(leg_net, protocol_bps) + bps_fee(leg_net, creator_bps)
+        assert observed["spent"] == ROUTER_FEE + expected_cost, (observed, expected_cost)
+    if observed["complete"]:
+        # Crossing is allowed within the completing buy, not on subsequent trades.
+        before = {key: vm.get_account(key) for key in [user, recipient, curve, curve_base, user_base]}
+        rejected = send(vm, payer, route(BUY_IN + struct.pack("<QQB", 1_000_000, 1, 0),
+                                        BUDGET, 1, 0x80, user_base, user, recipient, SYSTEM, mint))
+        assert isinstance(rejected, FailedTransactionMetadata), observed
+        assert "InstructionErrorCustom(6005)" in str(rejected.err()), rejected.meta().logs()
+        for key, account in before.items():
+            after = vm.get_account(key)
+            assert after.data == account.data and after.lamports == account.lamports - (5000 if key == user else 0)
+        observed["completed_curve_buy_error"] = 6005
     if not sell_after:
         return observed
     fee_base = ata(recipient, mint, base_program)
@@ -178,7 +213,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     return observed
 
 
-def feature_probe(pump_code):
+def feature_probe(pump_code, graduation_supported):
     vm = LiteSVM().with_default_programs()
     vm.add_program(PUMP, pump_code)
     payer = Keypair()
@@ -186,45 +221,56 @@ def feature_probe(pump_code):
     data = hashlib.sha256(b"global:set_max_curve_depth").digest()[:8] + bytes([1])
     result = send(vm, payer, Instruction(PUMP, data, []))
     assert isinstance(result, FailedTransactionMetadata)
-    assert "InstructionErrorCustom(101)" in str(result.err()), result.meta().logs()
-    print(json.dumps({"feature_probe": "set_max_curve_depth", "error": 101}))
+    expected_error = 3005 if graduation_supported else 101
+    assert f"InstructionErrorCustom({expected_error})" in str(result.err()), result.meta().logs()
+    print(json.dumps({"feature_probe": "set_max_curve_depth", "error": expected_error}))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("router", type=Path)
     parser.add_argument("pump", type=Path)
+    parser.add_argument("--fee-fixture", type=Path,
+                        help="Global/FeeConfig getMultipleAccounts snapshot matching the captured Pump ELF")
+    parser.add_argument("--graduation-supported", action="store_true",
+                        help="Expect crossing buys to succeed for the upgraded captured deployment")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--graduation-rejection", action="store_true")
     modes.add_argument("--exact-out", action="store_true")
     modes.add_argument("--boundary-matrix", action="store_true")
     args = parser.parse_args()
+    if args.graduation_supported and args.graduation_rejection:
+        parser.error("--graduation-supported conflicts with --graduation-rejection")
     router, pump = args.router.read_bytes(), args.pump.read_bytes()
     if args.boundary_matrix:
-        feature_probe(pump)
+        feature_probe(pump, args.graduation_supported)
         # Official fee-inclusive quote for the remaining 1e9 raw base units.
         virtual_base = 279_901_000_000_000
         virtual_quote = 1_073_000_000_000_000 * 30_000_000_000 // virtual_base
         net = 1_000_000_000 * virtual_quote // (virtual_base - 1_000_000_000) + 1
-        cost = net + bps_fee(net, 95) + bps_fee(net, 30)
+        fixture_path = args.fee_fixture or Path(__file__).parent / "fixtures/pump-v3-mainnet-fees.json"
+        fee_data = base64.b64decode(json.loads(fixture_path.read_text())["result"]["value"][1]["data"][0])
+        assert struct.unpack_from("<I", fee_data, 65)[0] == 1
+        _, protocol_bps, creator_bps = struct.unpack_from("<QQQ", fee_data, 85)
+        cost = net + bps_fee(net, protocol_bps) + bps_fee(net, creator_bps)
         count = 0
         for token2022 in [False, True]:
             for initial_quote in [0, 30_000_000_000]:
                 for amount in [999_999_999, 1_000_000_000, 1_000_000_001]:
                     print(json.dumps(run_case(router, pump, boundary=True, token2022=token2022,
                         initial_quote=initial_quote, exact_out=amount,
-                        expected_failure=amount > 1_000_000_000, sell_after=False)))
+                        expected_failure=not args.graduation_supported and amount > 1_000_000_000, sell_after=False, fee_fixture=args.fee_fixture)))
                     count += 1
                 for amount in [cost - 1, cost, cost + 1, cost + 100, 9_900_000]:
                     print(json.dumps(run_case(router, pump, boundary=True, token2022=token2022,
                         initial_quote=initial_quote, quote_input=amount,
-                        expected_failure=amount > cost, sell_after=False)))
+                        expected_failure=not args.graduation_supported and amount > cost, sell_after=False, fee_fixture=args.fee_fixture)))
                     count += 1
         print(json.dumps({"boundary_cases_passed": count, "curve_cost": cost}))
     else:
         print(json.dumps(run_case(router, pump, boundary=args.graduation_rejection,
             expected_failure=args.graduation_rejection,
-            exact_out=100_000_000_000 if args.exact_out else None)))
+            exact_out=100_000_000_000 if args.exact_out else None, fee_fixture=args.fee_fixture)))
     print(json.dumps({"pump_sha256": hashlib.sha256(pump).hexdigest(),
                       "router_sha256": hashlib.sha256(router).hexdigest()}))
 
