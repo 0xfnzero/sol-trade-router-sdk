@@ -997,6 +997,36 @@ fn offline_amm_v4_in_for_out_roundtrip() {
     assert!(back_in >= 1_000_000);
     let out2 = raydium_amm_v4_out(&amm, back_in, true).unwrap();
     assert!(out2 >= out);
+    let mut extreme = amm.clone();
+    extreme.coin_reserve = u64::MAX / 2;
+    extreme.pc_reserve = 1_000_000;
+    extreme.swap_fee_numerator = 0;
+    assert!(crate::quote::raydium_amm_v4_in_for_out(&extreme, 999_999, true).is_err());
+    let valid = crate::quote::raydium_amm_v4_in_for_out(&extreme, 400_000, true).unwrap();
+    assert!(raydium_amm_v4_out(&extreme, valid, true).unwrap() >= 400_000);
+    assert!(raydium_amm_v4_out(&extreme, valid - 1, true).unwrap() < 400_000);
+    // The gross input can fit u64 while the input vault's resulting balance cannot.
+    assert!(crate::quote::raydium_amm_v4_in_for_out(&extreme, 600_000, true).is_err());
+    assert!(raydium_amm_v4_out(&extreme, u64::MAX, true).is_err());
+    extreme.swap_fee_numerator = u64::MAX - 1;
+    extreme.swap_fee_denominator = u64::MAX;
+    assert!(crate::quote::raydium_amm_v4_in_for_out(&extreme, 1, true).is_err());
+
+    let mut small = amm.clone();
+    small.coin_reserve = 100;
+    small.pc_reserve = 300;
+    for numerator in [0, 1, 25, 5_000, 9_999] {
+        small.swap_fee_numerator = numerator;
+        for direction in [true, false] {
+            for wanted in 1..=60 {
+                let input = crate::quote::raydium_amm_v4_in_for_out(&small, wanted, direction).unwrap();
+                assert!(raydium_amm_v4_out(&small, input, direction).unwrap() >= wanted);
+                if input > 1 {
+                    assert!(raydium_amm_v4_out(&small, input - 1, direction).unwrap() < wanted);
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -1194,6 +1224,27 @@ fn offline_fee_reduces_route_amount_in() {
         "fee destination must be in Route accounts"
     );
     assert!(crate::quote::fee_amount(amount, 500) > 0);
+
+    let client = RouterClient::new(payer, fee_recv, 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let mut launch = dummy_launchlab();
+    launch.virtual_base = 1_100;
+    launch.virtual_quote = 1_000;
+    launch.real_base = 0;
+    launch.real_quote = 0;
+    launch.total_base_sell = 100;
+    launch.trade_fee_rate = 0;
+    let quote = crate::quote::launchlab_buy_quote(&launch, 990, 0).unwrap();
+    assert_eq!(quote.amount_in, 100);
+    let clamped = client.buy_with_opts(
+        1_000, &RoutedMarket::new(Market::LaunchLabInner(launch)),
+        TradeOpts::default().buy_with_wsol(),
+    ).unwrap().route.unwrap();
+    let budget = u64::from_le_bytes(clamped.data[1..9].try_into().unwrap());
+    let charged = crate::quote::fee_amount(budget, 100);
+    assert_eq!(budget, 101);
+    assert_eq!(u64::from_le_bytes(clamped.data[94..102].try_into().unwrap()), quote.amount_in);
+    assert_eq!(budget, quote.amount_in + charged, "exact-in route must spend its declared budget");
 }
 
 #[test]

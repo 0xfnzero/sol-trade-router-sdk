@@ -1968,7 +1968,14 @@ fn mainnet_fixture_amm_v4_account_load_buy_and_exact_out() {
         let wallet = create_wallet();
         let user = wallet.pubkey();
         let amount_out = 10_000u64;
-        let max_in = 5_000_000u64;
+        let direction = pool.coin_mint == WSOL_MINT;
+        let required = crate::quote::raydium_amm_v4_in_for_out(&pool, amount_out, direction)
+            .expect("fresh AMM V4 exact-out quote");
+        assert!(crate::quote::raydium_amm_v4_out(&pool, required, direction).unwrap() >= amount_out);
+        if required > 1 {
+            assert!(crate::quote::raydium_amm_v4_out(&pool, required - 1, direction).unwrap() < amount_out);
+        }
+        let max_in = required.checked_add(required.div_ceil(100)).unwrap();
         let mut setup = setup_wsol(&user, max_in);
         setup.push(create_ata(&user, &user, &out, &pool.token_program));
         let leg = raydium_amm_v4_swap_exact_out_leg(&user, &pool, amount_out, max_in, WSOL_MINT)

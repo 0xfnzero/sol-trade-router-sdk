@@ -359,10 +359,8 @@ fn checked_fee(amount_in: u64, fee_bps: u16) -> Result<u64, ProgramError> {
     if fee_bps == 0 {
         return Ok(0);
     }
-    amount_in
-        .checked_mul(fee_bps as u64)
-        .and_then(|v| v.checked_div(10_000))
-        .ok_or_else(|| RouterError::ArithmeticOverflow.into())
+    let fee = amount_in as u128 * fee_bps as u128 / 10_000;
+    u64::try_from(fee).map_err(|_| RouterError::ArithmeticOverflow.into())
 }
 
 #[inline(always)]
@@ -893,6 +891,11 @@ mod tests {
 
     #[test]
     fn exact_out_preserves_the_fee_floor_and_budget_ceiling() {
+        for bps in [0u16, 1, 25, 100, 1_000, 9_999, 10_000] {
+            let expected = (u64::MAX as u128 * bps as u128 / 10_000) as u64;
+            assert_eq!(checked_fee(u64::MAX, bps), Ok(expected));
+        }
+        assert_eq!(checked_fee(u64::MAX, u16::MAX), Err(RouterError::ArithmeticOverflow.into()));
         let mismatch = Err(RouterError::FeeSourceMismatch.into());
         assert_eq!(validate_spend(20_000, 19_900, 10_000, 100, true), Ok(()));
         assert_eq!(validate_spend(20_000, 10_000, 10_000, 100, true), Ok(()));

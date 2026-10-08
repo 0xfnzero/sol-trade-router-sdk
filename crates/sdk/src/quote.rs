@@ -785,6 +785,8 @@ pub fn raydium_amm_v4_out(
     if fee_den == 0 || fee_num >= fee_den {
         return Err(anyhow!("invalid Raydium AMM V4 swap fee fraction"));
     }
+    input_reserve.checked_add(amount_in)
+        .ok_or_else(|| anyhow!("Raydium AMM V4 input reserve overflows token balance"))?;
     let trade_fee = (amount_in as u128 * fee_num as u128).div_ceil(fee_den as u128) as u64;
     let net_in = amount_in.saturating_sub(trade_fee);
     let swapped = (output_reserve as u128).saturating_mul(net_in as u128)
@@ -821,19 +823,18 @@ pub fn raydium_amm_v4_in_for_out(
     if fee_den == 0 || trade_num >= fee_den {
         return Err(anyhow!("invalid Raydium AMM V4 swap fee fraction"));
     }
-    // amount_in - ceil(amount_in * swap_fee_num / swap_fee_den) >= net_in
-    let amount_in = if trade_num == 0 {
-        net_in
-    } else {
-        net_in.saturating_mul(fee_den).div_ceil(fee_den - trade_num)
-    };
-    let amount_in = amount_in.min(u64::MAX as u128) as u64;
-    // Bump once if floor/ceil rounding left us short.
+    // Reject an unrepresentable net input before fee multiplication, which
+    // otherwise could overflow u128 for extreme reserve/fee configurations.
+    let net_in = u64::try_from(net_in)
+        .map_err(|_| anyhow!("Raydium AMM V4 exact-out net input exceeds u64"))?;
+    // Pool fees round up: net = floor(gross * (fee_den - trade_num) / fee_den).
+    let amount_in = (net_in as u128 * fee_den).div_ceil(fee_den - trade_num);
+    let amount_in = u64::try_from(amount_in)
+        .map_err(|_| anyhow!("Raydium AMM V4 exact-out gross input exceeds u64"))?;
     if raydium_amm_v4_out(pool, amount_in, input_is_coin)? < amount_out {
-        Ok(amount_in.saturating_add(1))
-    } else {
-        Ok(amount_in)
+        return Err(anyhow!("Raydium AMM V4 exact-out quote cannot reach target"));
     }
+    Ok(amount_in)
 }
 
 pub fn meteora_damm_v2_out(

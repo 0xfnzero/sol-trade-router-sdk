@@ -45,7 +45,7 @@ def mint_account(authority, supply):
 
 
 def run_case(code, name, declared, swap_input, *, bound_mint, wrong_mint=False,
-             native_output=False, minimum=1):
+             native_output=False, minimum=1, input_balance=20_000):
     vm = LiteSVM().with_default_programs()
     vm.add_program(PROGRAM, code)
     payer = Keypair()
@@ -60,9 +60,9 @@ def run_case(code, name, declared, swap_input, *, bound_mint, wrong_mint=False,
     vm.set_account(config_address, Account(2_000_000, config, PROGRAM))
     source, sink, out_source, output, fee_dest = [Pubkey.new_unique() for _ in range(5)]
     mint_in, mint_out = Pubkey.new_unique(), Pubkey.new_unique()
-    vm.set_account(mint_in, mint_account(user, 20_000))
+    vm.set_account(mint_in, mint_account(user, input_balance))
     vm.set_account(mint_out, mint_account(user, 100))
-    for address, mint, amount in [(source, mint_in, 20_000), (sink, mint_in, 0),
+    for address, mint, amount in [(source, mint_in, input_balance), (sink, mint_in, 0),
                                  (out_source, mint_out, 100), (output, mint_out, 0),
                                  (fee_dest, mint_in, 0)]:
         owner = recipient if address == fee_dest else user
@@ -110,7 +110,7 @@ def run_case(code, name, declared, swap_input, *, bound_mint, wrong_mint=False,
     metadata = result.meta() if failed else result
     return {"case": name, "success": not failed,
             "custom_error": int(match.group(1)) if match else None, "error": error,
-            "input_spent": 20_000 - balance(vm, source), "fee_paid": balance(vm, fee_dest),
+            "input_spent": input_balance - balance(vm, source), "fee_paid": balance(vm, fee_dest),
             "output_received": None if native_output else balance(vm, output),
             "logs": metadata.logs()}
 
@@ -130,6 +130,13 @@ def main():
         ("native_sol_settlement", 1, 1, {"native_output": True, "minimum": 500}, 17 if old else None),
         ("native_sol_slippage", 1, 1, {"native_output": True, "minimum": 501}, 17 if old else 10),
     ]
+    if not old:
+        maximum = (1 << 64) - 1
+        fee = maximum * 100 // 10_000
+        cases.extend([
+            ("large_exact_input", maximum, maximum - fee, {"input_balance": maximum}, None),
+            ("clamped_exact_input", 101, 100, {}, None),
+        ])
     for name, declared, swap_input, options, expected_error in cases:
         result = run_case(code, name, declared, swap_input, bound_mint=not old, **options)
         assert result["success"] == (expected_error is None), result
@@ -140,6 +147,9 @@ def main():
             assert result["input_spent"] == 10_000 and result["fee_paid"] == 100, result
         elif name == "understated_fee":
             assert result["input_spent"] == 10_000 and result["fee_paid"] == 0, result
+        elif name in ("large_exact_input", "clamped_exact_input"):
+            assert result["input_spent"] == declared, result
+            assert result["fee_paid"] == declared * 100 // 10_000, result
         print(json.dumps({k: v for k, v in result.items() if k != "logs"}))
     if old:
         result = run_case(code, "pre_pr_tag2_header", 1, 1, bound_mint=True)

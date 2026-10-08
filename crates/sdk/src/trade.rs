@@ -493,7 +493,7 @@ impl RouterClient {
         let route_amount_in = if swap_spent == spend {
             amount_in
         } else {
-            route_amount_in_for_spend(swap_spent, self.fee_bps)
+            route_amount_in_for_spend(swap_spent, self.fee_bps)?
         };
 
         if matches!(opts.buy_with, BuyWith::Sol) && !is_pump_native_sol {
@@ -2460,20 +2460,18 @@ fn pair_input_and_output_program(
 
 /// Smallest `amount_in` such that `amount_in - fee_amount(amount_in, fee_bps) >= spend`.
 #[inline]
-fn route_amount_in_for_spend(spend: u64, fee_bps: u16) -> u64 {
-    if fee_bps == 0 || spend == 0 {
-        return spend;
+fn route_amount_in_for_spend(spend: u64, fee_bps: u16) -> Result<u64> {
+    if fee_bps >= 10_000 {
+        return Err(anyhow!("router fee must be below 10_000 bps"));
     }
-    let bps = fee_bps as u128;
-    let denom = 10_000u128.saturating_sub(bps);
-    if denom == 0 {
-        return u64::MAX;
+    if spend == 0 {
+        return Ok(0);
     }
-    let mut amount = (spend as u128).saturating_mul(10_000).div_ceil(denom);
-    while amount.saturating_sub(amount.saturating_mul(bps) / 10_000) < spend as u128 {
-        amount = amount.saturating_add(1);
-    }
-    amount.min(u64::MAX as u128) as u64
+    // On-chain fees round down, so net = ceil(gross * (10000 - bps) / 10000).
+    // The first gross amount reaching spend is floor((spend - 1) * 10000 / d) + 1.
+    let denominator = 10_000u128 - fee_bps as u128;
+    let amount = (spend as u128 - 1) * 10_000 / denominator + 1;
+    u64::try_from(amount).map_err(|_| anyhow!("router input including fee exceeds u64"))
 }
 
 fn resolve_shared_mint(pool: &CpmmPool, bridge: &BridgePool) -> Result<Pubkey> {
@@ -2578,15 +2576,32 @@ mod tests {
 
     #[test]
     fn route_amount_in_covers_spend_after_fee() {
-        for bps in [0u16, 1, 25, 100, 1000] {
+        for bps in [0u16, 1, 25, 100, 1000, 9_999] {
             for spend in [1u64, 999, 1_000_000, 12_345_678] {
-                let amount = route_amount_in_for_spend(spend, bps);
+                let amount = route_amount_in_for_spend(spend, bps).unwrap();
                 let net = amount.saturating_sub(fee_amount(amount, bps));
                 assert!(
                     net >= spend,
                     "bps={bps} spend={spend} amount={amount} net={net}"
                 );
+                if amount > 0 {
+                    let previous = amount - 1;
+                    assert!(previous - fee_amount(previous, bps) < spend,
+                        "gross input is not minimal: bps={bps} spend={spend} amount={amount}");
+                }
             }
         }
+        assert_eq!(route_amount_in_for_spend(0, 100).unwrap(), 0);
+        assert_eq!(route_amount_in_for_spend(u64::MAX, 0).unwrap(), u64::MAX);
+        for bps in [1, 25, 9_999] {
+            let reachable = u64::MAX - fee_amount(u64::MAX, bps);
+            let gross = route_amount_in_for_spend(reachable, bps).unwrap();
+            assert_eq!(gross - fee_amount(gross, bps), reachable);
+            assert!(route_amount_in_for_spend(reachable + 1, bps).is_err());
+        }
+        for bps in [10_000, 10_001, u16::MAX] {
+            assert!(route_amount_in_for_spend(1, bps).is_err());
+        }
+
     }
 }
