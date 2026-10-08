@@ -8,6 +8,7 @@ members = [
     "examples/pumpfun_sniper_trading",
     "examples/pumpfun_copy_trading",
     "examples/pumpfun_shred_sniper",
+    "examples/touter_test"
 ]
 default-members = ["crates/sdk"]
 
@@ -36,3 +37,12 @@ tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
 solana-hash = "4.4.0"
 solana-message = "4.4.0"
 core_affinity = "0.8"
+
+[patch.crates-io]
+# Yellowstone 13.5.0 imports UnixStream unconditionally; the local copy
+# gates its UDS-only API on Unix so Windows RPC examples can compile.
+yellowstone-grpc-client = { path = "vendor/yellowstone-grpc-client" }
+
+[profile.release.package.sol-trade-router]
+# Keep size tuning local to the on-chain program; client SDK builds stay unchanged.
+opt-level = "s"

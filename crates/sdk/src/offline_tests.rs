@@ -671,8 +671,6 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         .find(|ix| ix.program_id == crate::PROGRAM_ID)
         .expect("Route ix must target router PROGRAM_ID");
     assert_eq!(route.data[0], crate::route_ix::TAG_ROUTE);
-    // Header after tag: amount(8)+min(8)+fee_asset(1)+num_legs(1)+output_mint(32)
-    assert_eq!(&route.data[19..51], meme.as_ref());
 }
 
 #[test]
@@ -700,7 +698,6 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
         100,
         crate::route_ix::FEE_ASSET_SOL,
         true,
-        &crate::constants::SYSTEM_PROGRAM,
         &[Leg {
             program_id: leg.program_id,
             accounts: vec![solana_sdk::instruction::AccountMeta::new_readonly(
@@ -709,13 +706,12 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
             data: leg.data,
         }],
     );
-    // data[0]=TAG, amount_in(8), min_out(8), fee_asset at offset 17, num_legs at 18, mint at 19..51
+    // data[0]=TAG, then amount_in(8), min_out(8), fee_asset at offset 17
     assert_eq!(ix.data[0], crate::route_ix::TAG_ROUTE);
     assert_eq!(
         ix.data[17],
         crate::route_ix::FEE_ASSET_SOL | crate::route_ix::FEE_ASSET_EXACT_OUT
     );
-    assert_eq!(&ix.data[19..51], crate::constants::SYSTEM_PROGRAM.as_ref());
 }
 
 #[test]
@@ -1117,4 +1113,100 @@ fn offline_router_sell_builds_for_major_dexes() {
     clmm.expected_out = Some(900);
     let clmm_m = RoutedMarket::new(Market::RaydiumClmm(clmm));
     assert!(client.sell_to_wsol(1_000, &clmm_m).is_ok());
+}
+
+#[test]
+fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
+    let payer = Pubkey::new_unique();
+    let fee_recipient = Pubkey::new_unique();
+    let quote = Pubkey::new_unique();
+    let target = Pubkey::new_unique();
+
+    let mut cpmm_bridge = dummy_cpmm();
+    cpmm_bridge.base_mint = quote;
+    let mut amm_bridge = dummy_amm_v4();
+    amm_bridge.pc_mint = quote;
+    let mut clmm_bridge = dummy_clmm();
+    clmm_bridge.token_1_mint = quote;
+    let mut orca_bridge = dummy_whirlpool();
+    orca_bridge.mint_b = quote;
+    let mut dlmm_bridge = dummy_dlmm();
+    dlmm_bridge.token_y_mint = quote;
+    let mut damm_bridge = dummy_damm_v2();
+    damm_bridge.token_b_mint = quote;
+    let mut pump_bridge = dummy_pumpswap();
+    pump_bridge.base_mint = quote;
+
+    let mut launch = dummy_launchlab();
+    launch.quote_mint = quote;
+    launch.base_mint = target;
+    let mut cpmm_target = dummy_cpmm();
+    cpmm_target.quote_mint = quote;
+    cpmm_target.base_mint = target;
+    let targets = [Market::LaunchLabInner(launch), Market::CpmmOuter(cpmm_target)];
+    let bridges = [
+        Market::CpmmOuter(cpmm_bridge),
+        Market::RaydiumAmmV4(amm_bridge),
+        Market::RaydiumClmm(clmm_bridge),
+        Market::Whirlpool(orca_bridge),
+        Market::MeteoraDlmm(dlmm_bridge),
+        Market::MeteoraDammV2(damm_bridge),
+        Market::PumpSwapOuter(pump_bridge),
+    ];
+    for bridge in &bridges {
+        for target_pool in &targets {
+            let built = crate::build_dynamic_quote_buy(
+                &crate::PROGRAM_ID, &payer, &fee_recipient,
+                500_000_000, 500_000_000, 1_000, 10,
+                bridge, target_pool,
+            ).unwrap();
+            assert_eq!(built.instruction.data[0], crate::TAG_ROUTE_DYNAMIC);
+            assert_eq!(built.instruction.data[18], 2);
+            assert_eq!(built.instruction.accounts[6].pubkey, built.quote_ata);
+            assert_eq!(built.instruction.accounts[4].pubkey, built.output_ata);
+            assert_eq!(built.quote_mint, quote);
+            assert_eq!(built.output_mint, target);
+            assert_eq!(built.instruction.accounts.last().unwrap().pubkey,
+                match target_pool {
+                    Market::LaunchLabInner(_) => crate::LAUNCHLAB_PROGRAM,
+                    Market::CpmmOuter(_) => crate::RAYDIUM_CPMM_PROGRAM,
+                    _ => unreachable!(),
+                });
+        }
+    }
+}
+
+#[test]
+fn offline_dynamic_quote_buy_rejects_disconnected_pools() {
+    let payer = Pubkey::new_unique();
+    let fee_recipient = Pubkey::new_unique();
+    let bridge = Market::MeteoraDlmm(dummy_dlmm());
+    let target = Market::LaunchLabInner(dummy_launchlab()); // quote is WSOL, not DLMM output
+    assert!(crate::build_dynamic_quote_buy(
+        &crate::PROGRAM_ID,
+        &payer,
+        &fee_recipient,
+        1_000_000,
+        1_000_000,
+        100,
+        10,
+        &bridge,
+        &target,
+    )
+    .is_err());
+
+    let mut invalid_bridge = dummy_whirlpool();
+    invalid_bridge.mint_a = Pubkey::new_unique();
+    assert!(crate::build_dynamic_quote_buy(
+        &crate::PROGRAM_ID,
+        &payer,
+        &fee_recipient,
+        1_000_000,
+        1_000_000,
+        100,
+        10,
+        &Market::Whirlpool(invalid_bridge),
+        &target,
+    )
+    .is_err());
 }

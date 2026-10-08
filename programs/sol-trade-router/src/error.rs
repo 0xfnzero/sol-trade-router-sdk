@@ -19,12 +19,16 @@ pub enum RouterError {
     InsufficientAccounts = 13,
     ArithmeticOverflow = 14,
     InvalidProgramId = 15,
-    /// fee_source spend does not match `amount_in` (exact-in: == ; exact-out: <= budget).
+    /// fee_source did not spend at least `amount_in` (fee + swap).
     FeeSourceMismatch = 16,
-    /// user_output is not a Token / Token-2022 account (or SOL sentinel mismatch).
+    /// user_output is not a Token / Token-2022 account.
     InvalidOutputAccount = 17,
-    /// user_output mint does not match the mint declared in instruction data.
-    InvalidOutputMint = 18,
+    /// Dynamic route's intermediate token account is invalid or disconnected.
+    InvalidIntermediateAccount = 18,
+    /// Dynamic route only permits LaunchLab buyExactIn or CPMM swapBaseInput as leg two.
+    InvalidDynamicLeg = 19,
+    /// The second leg did not spend exactly the tokens received from leg one.
+    IntermediateNotSpent = 20,
 }
 
 impl From<RouterError> for ProgramError {
