@@ -1974,6 +1974,68 @@ fn offline_launchlab_sell_leg_builds() {
     let quote = crate::ata::ata(&user, &pool.quote_mint, &TOKEN_PROGRAM);
     let leg = launchlab_sell_leg(&user, &pool, 1_000, 0, base, quote);
     assert_eq!(leg.program_id, crate::constants::LAUNCHLAB_PROGRAM);
+    let wallet = solana_sdk::signature::Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let build_pair = |pool: LaunchLabPool, path: usize| {
+        let quote = pool.quote_mint;
+        let market = RoutedMarket::new(Market::LaunchLabInner(pool));
+        let opts = match path {
+            0 => TradeOpts::default(),
+            1 => TradeOpts::default().buy_with_wsol().sell_to_wsol(),
+            _ => TradeOpts::default().buy_with_token(quote).sell_to_token(quote),
+        }.with_min_out(1);
+        [client.buy_with_opts(1_000, &market, opts.clone()),
+            client.sell_with_opts(1_000, &market, opts)]
+    };
+    for path in 0..3 {
+        let mut fixture = dummy_launchlab();
+        if path == 2 { fixture.quote_mint = Pubkey::new_unique(); }
+        for invalid in [Pubkey::default(), Pubkey::new_unique()] {
+            for base_side in [true, false] {
+                let mut bad = fixture.clone();
+                if base_side { bad.base_token_program = invalid; }
+                else { bad.quote_token_program = invalid; }
+                for result in build_pair(bad, path) {
+                    assert!(result.err().expect("LaunchLab accepted unsupported token program")
+                        .to_string().contains("token program"));
+                }
+            }
+        }
+        if path != 2 {
+            let mut bad = fixture.clone();
+            bad.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
+            for result in build_pair(bad, path) {
+                assert!(result.err().expect("LaunchLab accepted Token-2022 WSOL")
+                    .to_string().contains("classic WSOL"));
+            }
+        }
+        for base_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+            for quote_program in if path == 2 {
+                vec![TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM]
+            } else { vec![TOKEN_PROGRAM] } {
+                let mut valid = fixture.clone();
+                valid.base_token_program = base_program;
+                valid.quote_token_program = quote_program;
+                let base_ata = crate::ata::ata(&wallet.pubkey(), &valid.base_mint, &base_program);
+                let quote_ata = crate::ata::ata(&wallet.pubkey(), &valid.quote_mint, &quote_program);
+                for result in build_pair(valid, path) {
+                    let built = result.unwrap();
+                    let route = built.route.as_ref().unwrap();
+                    let accounts = &route.accounts[6..24]; // six fixed Router accounts, then the leg
+                    assert_eq!(accounts[5].pubkey, base_ata);
+                    assert_eq!(accounts[6].pubkey, quote_ata);
+                    assert_eq!(accounts[11].pubkey, base_program);
+                    assert_eq!(accounts[12].pubkey, quote_program);
+                    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                        solana_sdk::hash::Hash::new_unique(),
+                    );
+                    tx.verify().unwrap();
+                }
+            }
+        }
+    }
 }
 
 #[test]

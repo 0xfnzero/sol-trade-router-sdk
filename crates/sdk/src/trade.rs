@@ -40,7 +40,14 @@ use crate::{
     },
 };
 
-fn validate_pumpfun_programs(market: &RoutedMarket, quote_ata: bool) -> Result<()> {
+fn validate_inner_market_programs(market: &RoutedMarket, quote_ata: bool) -> Result<()> {
+    if let Market::LaunchLabInner(pool) = &market.market {
+        require_token_programs(&[pool.base_token_program, pool.quote_token_program], "LaunchLab")?;
+        // LaunchLab always settles through token accounts, including SOL wrapping.
+        if pool.is_sol_quote() && pool.quote_token_program != TOKEN_PROGRAM {
+            return Err(anyhow!("LaunchLab WSOL settlement requires classic WSOL token program"));
+        }
+    }
     if let Market::PumpFunInner(pool) = &market.market {
         require_token_programs(&[pool.mint_token_program], "PumpFun")?;
         // Native SOL settlement uses lamports, not the quote mint's token program.
@@ -421,7 +428,7 @@ impl RouterClient {
     ) -> Result<BuiltTrade> {
         validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
-        validate_pumpfun_programs(market, !matches!(opts.buy_with, BuyWith::Sol))?;
+        validate_inner_market_programs(market, !matches!(opts.buy_with, BuyWith::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
@@ -651,7 +658,7 @@ impl RouterClient {
     ) -> Result<BuiltTrade> {
         validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
-        validate_pumpfun_programs(market, !matches!(opts.sell_to, SellTo::Sol))?;
+        validate_inner_market_programs(market, !matches!(opts.sell_to, SellTo::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
