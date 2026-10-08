@@ -809,10 +809,84 @@ fn offline_market_mint_helpers_cover_dexes() {
         Market::Whirlpool(dummy_whirlpool()),
         Market::MeteoraDlmm(dummy_dlmm()),
     ] {
-        let _ = market.base_mint();
-        let _ = market.quote_mint();
-        let _ = market.base_token_program();
-        let _ = market.needs_sol_bridge();
+        assert_ne!(market.base_mint(), market.quote_mint());
+        assert_eq!(market.quote_mint(), WSOL_MINT);
+        assert_eq!(market.base_token_program(), TOKEN_PROGRAM);
+        assert_eq!(market.quote_token_program(), TOKEN_PROGRAM);
+        assert!(!market.needs_sol_bridge());
+    }
+
+    // WSOL takes precedence over USDC regardless of stored pool order.
+    // Otherwise a USDC/WSOL pool may select WSOL as both trade sides.
+    let wallet = Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    for wsol_first in [false, true] {
+        let (a, b) = if wsol_first {
+            (WSOL_MINT, crate::constants::USDC_MINT)
+        } else {
+            (crate::constants::USDC_MINT, WSOL_MINT)
+        };
+        let mut amm = dummy_amm_v4();
+        amm.coin_mint = a;
+        amm.pc_mint = b;
+        let mut damm = dummy_damm_v2();
+        damm.token_a_mint = a;
+        damm.token_b_mint = b;
+        for raw in [Market::RaydiumAmmV4(amm), Market::MeteoraDammV2(damm)] {
+            let (input_index, output_index) = match &raw {
+                Market::RaydiumAmmV4(_) => (5, 6),
+                Market::MeteoraDammV2(_) => (2, 3),
+                _ => unreachable!(),
+            };
+            let market = RoutedMarket::new(raw);
+            assert_eq!(market.meme_mint(), crate::constants::USDC_MINT);
+            assert_eq!(market.quote_mint(), WSOL_MINT);
+            assert_eq!(market.meme_token_program(), TOKEN_PROGRAM);
+            assert_eq!(market.quote_token_program(), TOKEN_PROGRAM);
+            assert!(!market.market.needs_sol_bridge());
+            assert_eq!(
+                client.create_meme_ata(&market).accounts[3].pubkey,
+                crate::constants::USDC_MINT,
+            );
+            assert_eq!(client.create_quote_ata(&market).accounts[3].pubkey, WSOL_MINT);
+            for exact_out in [false, true] {
+                let opts = if exact_out {
+                    TradeOpts::default().with_fixed_output(7)
+                } else {
+                    TradeOpts::default().with_min_out(1)
+                };
+                for sell in [false, true] {
+                    let built = if sell {
+                        client.sell_with_opts(1_000, &market, opts.clone().sell_to_wsol())
+                    } else {
+                        client.buy_with_opts(1_000, &market, opts.clone().buy_with_wsol())
+                    }
+                    .unwrap();
+                    let (input, output) = if sell {
+                        (crate::constants::USDC_MINT, WSOL_MINT)
+                    } else {
+                        (WSOL_MINT, crate::constants::USDC_MINT)
+                    };
+                    let route = built.route.as_ref().unwrap();
+                    let input_ata = crate::ata::ata(&wallet.pubkey(), &input, &TOKEN_PROGRAM);
+                    let output_ata = crate::ata::ata(&wallet.pubkey(), &output, &TOKEN_PROGRAM);
+                    assert_eq!(route.accounts[3].pubkey, input_ata);
+                    assert_eq!(route.accounts[4].pubkey, output_ata);
+                    assert_eq!(&route.data[19..51], output.as_ref());
+                    let leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&built);
+                    assert_eq!(leg.accounts[input_index].pubkey, input_ata);
+                    assert_eq!(leg.accounts[output_index].pubkey, output_ata);
+                    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                        &built.into_instructions(),
+                        Some(&wallet.pubkey()),
+                        &[&wallet],
+                        solana_sdk::hash::Hash::new_unique(),
+                    );
+                    tx.verify().unwrap();
+                }
+            }
+        }
     }
 }
 

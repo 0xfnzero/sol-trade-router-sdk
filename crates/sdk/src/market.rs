@@ -415,20 +415,8 @@ impl Market {
             Self::CpmmOuter(p) => p.meme_mint(),
             Self::PumpFunInner(p) => p.mint,
             Self::PumpSwapOuter(p) => p.base_mint,
-            Self::RaydiumAmmV4(p) => {
-                if p.coin_mint == WSOL_MINT || p.coin_mint == USDC_MINT {
-                    p.pc_mint
-                } else {
-                    p.coin_mint
-                }
-            }
-            Self::MeteoraDammV2(p) => {
-                if p.token_a_mint == WSOL_MINT || p.token_a_mint == USDC_MINT {
-                    p.token_b_mint
-                } else {
-                    p.token_a_mint
-                }
-            }
+            Self::RaydiumAmmV4(p) => pair_base(p.coin_mint, p.pc_mint),
+            Self::MeteoraDammV2(p) => pair_base(p.token_a_mint, p.token_b_mint),
             Self::RaydiumClmm(p) => pair_base(p.token_0_mint, p.token_1_mint),
             Self::Whirlpool(p) => pair_base(p.mint_a, p.mint_b),
             Self::MeteoraDlmm(p) => pair_base(p.token_x_mint, p.token_y_mint),
@@ -442,22 +430,8 @@ impl Market {
             Self::CpmmOuter(p) => p.pay_mint(),
             Self::PumpFunInner(p) => p.quote_mint,
             Self::PumpSwapOuter(p) => p.quote_mint,
-            Self::RaydiumAmmV4(p) => {
-                if p.coin_mint == WSOL_MINT || p.coin_mint == USDC_MINT {
-                    p.coin_mint
-                } else {
-                    p.pc_mint
-                }
-            }
-            Self::MeteoraDammV2(p) => {
-                if p.token_a_mint == WSOL_MINT || p.token_b_mint == WSOL_MINT {
-                    WSOL_MINT
-                } else if p.token_a_mint == USDC_MINT {
-                    USDC_MINT
-                } else {
-                    p.token_b_mint
-                }
-            }
+            Self::RaydiumAmmV4(p) => pair_quote(p.coin_mint, p.pc_mint),
+            Self::MeteoraDammV2(p) => pair_quote(p.token_a_mint, p.token_b_mint),
             Self::RaydiumClmm(p) => pair_quote(p.token_0_mint, p.token_1_mint),
             Self::Whirlpool(p) => pair_quote(p.mint_a, p.mint_b),
             Self::MeteoraDlmm(p) => pair_quote(p.token_x_mint, p.token_y_mint),
