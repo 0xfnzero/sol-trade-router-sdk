@@ -1881,6 +1881,66 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
             assert!(client.sell_to_wsol(1_000, &market).is_err());
         }
     }
+    let build_pair = |pool: crate::market::PumpFunPool, path: usize| {
+        let quote = pool.quote_mint;
+        let market = RoutedMarket::pumpfun(pool);
+        let opts = match path {
+            0 => TradeOpts::default(),
+            1 => TradeOpts::default().buy_with_wsol().sell_to_wsol(),
+            _ => TradeOpts::default().buy_with_token(quote).sell_to_token(quote),
+        }.with_min_out(1);
+        [client.buy_with_opts(1_000, &market, opts.clone()),
+            client.sell_with_opts(1_000, &market, opts)]
+    };
+    for path in 0..3 {
+        let mut fixture = dummy_pumpfun();
+        fixture.use_v2 = path != 0;
+        if path == 2 { fixture.quote_mint = Pubkey::new_unique(); }
+        for invalid in [Pubkey::default(), Pubkey::new_unique()] {
+            let mut bad = fixture.clone();
+            bad.mint_token_program = invalid;
+            for result in build_pair(bad, path) {
+                assert!(result.err().expect("Pump accepted unsupported base token program")
+                    .to_string().contains("token program"));
+            }
+            if path != 0 {
+                let mut bad = fixture.clone();
+                bad.quote_token_program = invalid;
+                for result in build_pair(bad, path) {
+                    assert!(result.err().expect("Pump accepted unsupported quote token program")
+                        .to_string().contains("token program"));
+                }
+            }
+        }
+        if path == 1 {
+            let mut bad = fixture.clone();
+            bad.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
+            for result in build_pair(bad, path) {
+                assert!(result.err().expect("Token-2022 WSOL quote accepted").to_string()
+                    .contains("classic WSOL"));
+            }
+        }
+        for base in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+            for quote in if path == 0 { vec![Pubkey::default(), Pubkey::new_unique()] }
+                else if path == 1 { vec![TOKEN_PROGRAM] }
+                else { vec![TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] } {
+                let mut valid = fixture.clone();
+                valid.mint_token_program = base;
+                valid.quote_token_program = quote;
+                let mint_ata = crate::ata::ata(&wallet.pubkey(), &valid.mint, &base);
+                for (side, result) in build_pair(valid, path).into_iter().enumerate() {
+                    let built = result.unwrap();
+                    assert_eq!(built.route.as_ref().unwrap().accounts[if side == 0 { 4 } else { 3 }].pubkey,
+                        mint_ata);
+                    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                        solana_sdk::hash::Hash::new_unique(),
+                    );
+                    tx.verify().unwrap();
+                }
+            }
+        }
+    }
     let mut pool = dummy_pumpfun();
     assert!(!pool.uses_v2());
     assert!(pool.is_native_sol_quote());

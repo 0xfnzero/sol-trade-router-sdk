@@ -33,7 +33,7 @@ fn ensure_leg_account_budget(n: usize) -> Result<()> {
     Ok(())
 }
 
-fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<()> {
+pub(crate) fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<()> {
     if programs.iter().any(|program| *program != TOKEN_PROGRAM && *program != TOKEN_2022_PROGRAM) {
         return Err(anyhow!("{dex} mint token program is missing or unsupported; supply actual mint owners"));
     }

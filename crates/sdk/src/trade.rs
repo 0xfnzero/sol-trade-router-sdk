@@ -21,7 +21,7 @@ use crate::{
         meteora_damm_v2_swap_leg, meteora_dlmm_swap_leg, pumpfun_buy_leg, pumpfun_buy_v2_leg,
         pumpfun_sell_leg, pumpfun_sell_v2_leg, pumpswap_buy_exact_out_leg, pumpswap_buy_leg,
         pumpswap_sell_leg, raydium_amm_v4_swap_exact_out_leg, raydium_amm_v4_swap_leg,
-        raydium_clmm_swap_leg, whirlpool_swap_leg, Leg,
+        raydium_clmm_swap_leg, require_token_programs, whirlpool_swap_leg, Leg,
     },
     market::{
         BridgePool, CpmmPool, LaunchLabPool, Market, MeteoraDammV2Pool, MeteoraDlmmPool,
@@ -39,6 +39,20 @@ use crate::{
         FEE_ASSET_SOL, FEE_ASSET_TOKEN,
     },
 };
+
+fn validate_pumpfun_programs(market: &RoutedMarket, quote_ata: bool) -> Result<()> {
+    if let Market::PumpFunInner(pool) = &market.market {
+        require_token_programs(&[pool.mint_token_program], "PumpFun")?;
+        // Native SOL settlement uses lamports, not the quote mint's token program.
+        if !pool.is_native_sol_quote() || quote_ata {
+            require_token_programs(&[pool.quote_token_program], "PumpFun quote")?;
+            if pool.is_native_sol_quote() && pool.quote_token_program != TOKEN_PROGRAM {
+                return Err(anyhow!("PumpFun WSOL ATA settlement requires classic WSOL token program"));
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct TradeOpts {
@@ -407,6 +421,7 @@ impl RouterClient {
     ) -> Result<BuiltTrade> {
         validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
+        validate_pumpfun_programs(market, !matches!(opts.buy_with, BuyWith::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
@@ -636,6 +651,7 @@ impl RouterClient {
     ) -> Result<BuiltTrade> {
         validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
+        validate_pumpfun_programs(market, !matches!(opts.sell_to, SellTo::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
