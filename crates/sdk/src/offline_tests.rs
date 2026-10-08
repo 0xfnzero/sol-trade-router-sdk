@@ -2522,6 +2522,39 @@ fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
             &crate::constants::TOKEN_2022_PROGRAM
         )
     );
+    // Foreign or unidentified events must not mix their topology into this cache.
+    pool.expected_out = Some(50);
+    pool.quoted_input_mint = Some(pool.token_0_mint);
+    let before = format!("{pool:?}");
+    let mut update = event.clone();
+    update.tick_arrays = (0..3).map(|_| Pubkey::new_unique()).collect();
+    update.amm_config = Pubkey::new_unique();
+    update.observation_state = Pubkey::new_unique();
+    update.tick_array_bitmap_extension = Some(Pubkey::new_unique());
+    update.amount_0 = 100;
+    for key in [Pubkey::new_unique(), Pubkey::default()] {
+        update.pool_state = key;
+        crate::parser::merge_clmm_swap(&mut pool, &update);
+        assert_eq!(format!("{pool:?}"), before, "foreign CLMM event mutated snapshot");
+    }
+    update.pool_state = pool.pool_state;
+    crate::parser::merge_clmm_swap(&mut pool, &update);
+    assert_eq!(pool.tick_arrays, update.tick_arrays);
+    assert_eq!(pool.amm_config, update.amm_config);
+    assert_eq!(pool.observation_state, update.observation_state);
+    assert_eq!(pool.tick_array_bitmap_extension, update.tick_array_bitmap_extension);
+    assert_eq!(pool.quoted_amount_in, Some(100));
+    assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
+    let wallet = Keypair::new();
+    for input in [pool.token_0_mint, pool.token_1_mint] {
+        let leg = raydium_clmm_swap_leg(&wallet.pubkey(), &pool, 100, 1, input).unwrap();
+        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+            &[solana_sdk::instruction::Instruction {
+                program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
+            }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+        );
+        tx.verify().unwrap();
+    }
     crate::parser::clmm_apply_token_programs(&mut pool, Pubkey::default(), TOKEN_PROGRAM);
     assert!(raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).is_err());
 }
@@ -2536,10 +2569,39 @@ fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
     let mut event = sol_parser_sdk::core::events::OrcaWhirlpoolSwapEvent::default();
     event.token_program_a = TOKEN_PROGRAM;
     event.token_program_b = Pubkey::default();
+    event.tick_array_0 = Pubkey::new_unique();
+    event.tick_array_1 = Pubkey::new_unique();
+    event.tick_array_2 = Pubkey::new_unique();
+    event.token_mint_a = pool.mint_a;
+    event.token_mint_b = pool.mint_b;
+    event.token_vault_a = pool.vault_a;
+    event.token_vault_b = pool.vault_b;
+    event.input_amount = 100;
+    pool.quoted_input_mint = Some(pool.mint_a);
+    let before = format!("{pool:?}");
+    for key in [Pubkey::new_unique(), Pubkey::default()] {
+        event.whirlpool = key;
+        crate::parser::merge_whirlpool_swap(&mut pool, &event);
+        assert_eq!(format!("{pool:?}"), before, "foreign Whirlpool event mutated snapshot");
+    }
+    event.whirlpool = pool.whirlpool;
     crate::parser::merge_whirlpool_swap(&mut pool, &event);
+    assert_eq!(pool.tick_arrays, [event.tick_array_0, event.tick_array_1, event.tick_array_2]);
+    assert_eq!(pool.quoted_amount_in, Some(100));
+    assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
     assert_eq!(pool.token_program_a, TOKEN_PROGRAM);
     assert_eq!(pool.token_program_b, crate::constants::TOKEN_2022_PROGRAM);
     assert!(whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).is_ok());
+    let wallet = Keypair::new();
+    for input in [pool.mint_a, pool.mint_b] {
+        let leg = whirlpool_swap_leg(&wallet.pubkey(), &pool, 100, 1, input).unwrap();
+        let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+            &[solana_sdk::instruction::Instruction {
+                program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
+            }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+        );
+        tx.verify().unwrap();
+    }
 }
 
 #[test]

@@ -393,8 +393,12 @@ pub fn whirlpool_from_account(e: &OrcaWhirlpoolAccountEvent) -> WhirlpoolPool {
     }
 }
 
-/// Merge swap-instruction tick arrays / quote into an account-state snapshot.
+/// Merge same-pool swap topology into an account-state snapshot and invalidate
+/// its cached quote. Events with a missing or different pool address are ignored.
 pub fn merge_whirlpool_swap(pool: &mut WhirlpoolPool, e: &OrcaWhirlpoolSwapEvent) {
+    if e.whirlpool == Pubkey::default() || e.whirlpool != pool.whirlpool {
+        return;
+    }
     if e.tick_array_0 != Pubkey::default() {
         pool.tick_arrays = vec![e.tick_array_0, e.tick_array_1, e.tick_array_2];
     }
@@ -421,7 +425,12 @@ pub fn merge_whirlpool_swap(pool: &mut WhirlpoolPool, e: &OrcaWhirlpoolSwapEvent
     }
 }
 
+/// Merge same-pool swap topology and invalidate its cached quote.
+/// Events with a missing or different pool address leave the snapshot unchanged.
 pub fn merge_clmm_swap(pool: &mut RaydiumClmmPool, e: &RaydiumClmmSwapEvent) {
+    if e.pool_state == Pubkey::default() || e.pool_state != pool.pool_state {
+        return;
+    }
     if !e.tick_arrays.is_empty() {
         pool.tick_arrays = e.tick_arrays.clone();
     }
