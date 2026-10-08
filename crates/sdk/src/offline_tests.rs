@@ -1602,6 +1602,77 @@ fn offline_transfer_fee_and_ata_policy() {
     let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
         .with_pool_guard(PoolGuardPolicy::disabled());
     let wsol_ata = crate::ata::ata(&wallet.pubkey(), &WSOL_MINT, &TOKEN_PROGRAM);
+    // The generic WSOL mint alias must retain the same account policy as WSOL.
+    let market = RoutedMarket::new(Market::CpmmOuter(dummy_cpmm()));
+    for create in [false, true] {
+        for close in [false, true] {
+            let mut sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
+                sol_trade_sdk::trading::factory::DexType::Bonk,
+                sol_trade_sdk::TradeTokenType::SOL, market.meme_mint(),
+                sol_trade_sdk::SellAmount::ExactInput(10_000),
+                sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()),
+                solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+            ).into();
+            sell.create_output_token_ata = create;
+            sell.close_output_token_ata = close;
+            let built = client.sell_with_opts(10_000, &market,
+                crate::client::sell_opts_from_params(&sell).unwrap().with_min_out(1)).unwrap();
+            assert_eq!(built.cleanup.len(), usize::from(close));
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+    }
+    for create in [false, true] {
+        for close in [false, true] {
+            let mut expected = None;
+            for asset in [sol_trade_sdk::TradeTokenType::WSOL,
+                sol_trade_sdk::TradeTokenType::Token(WSOL_MINT)] {
+                let extension = sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(
+                    Default::default()); // Only option conversion is under test here.
+                let mut buy: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
+                    sol_trade_sdk::trading::factory::DexType::Bonk, asset, market.meme_mint(),
+                    sol_trade_sdk::BuyAmount::ExactInput(10_000), extension.clone(),
+                    solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+                ).into();
+                buy.create_input_token_ata = create;
+                buy.close_input_token_ata = close;
+                let mut sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
+                    sol_trade_sdk::trading::factory::DexType::Bonk, asset, market.meme_mint(),
+                    sol_trade_sdk::SellAmount::ExactInput(10_000), extension,
+                    solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+                ).into();
+                sell.create_output_token_ata = create;
+                sell.close_output_token_ata = close;
+                let mut bundles = Vec::new();
+                for built in [
+                    client.buy_with_opts(10_000, &market,
+                        crate::client::buy_opts_from_params(&buy).unwrap().with_min_out(1)).unwrap(),
+                    client.sell_with_opts(10_000, &market,
+                        crate::client::sell_opts_from_params(&sell).unwrap().with_min_out(1)).unwrap(),
+                ] {
+                    assert_eq!(built.setup.iter().any(|ix|
+                        ix.program_id == crate::constants::ASSOCIATED_TOKEN_PROGRAM
+                            && ix.accounts[1].pubkey == wsol_ata), create);
+                    assert_eq!(built.cleanup.len(), usize::from(close));
+                    let instructions = built.into_instructions();
+                    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                        &instructions, Some(&wallet.pubkey()), &[&wallet],
+                        solana_sdk::hash::Hash::new_unique(),
+                    );
+                    tx.verify().unwrap();
+                    bundles.push(instructions);
+                }
+                if let Some(ref expected) = expected {
+                    assert_eq!(&bundles, expected);
+                } else {
+                    expected = Some(bundles);
+                }
+            }
+        }
+    }
     for market in [
         RoutedMarket::new(Market::CpmmOuter(dummy_cpmm())),
         RoutedMarket::raydium_amm_v4(dummy_amm_v4()),

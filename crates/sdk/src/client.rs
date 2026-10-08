@@ -557,46 +557,36 @@ fn trade_token_to_sell_to(t: TradeTokenType) -> SellTo {
 }
 
 fn buy_ata_policy(params: &TradeBuyParams) -> AtaPolicy {
+    let asset = trade_token_to_buy_with(params.input_token_type);
     AtaPolicy {
         create_meme: params.create_mint_ata,
         create_wsol: params.create_input_token_ata
-            && matches!(
-                params.input_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         create_quote: params.create_input_token_ata
-            && !matches!(
-                params.input_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && !matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         close_wsol: params.close_input_token_ata
-            && matches!(params.input_token_type, TradeTokenType::WSOL),
+            && matches!(asset, BuyWith::Wsol),
         close_meme: false,
         close_quote: false,
     }
 }
 
 fn sell_ata_policy(params: &TradeSellParams) -> AtaPolicy {
+    let asset = trade_token_to_sell_to(params.output_token_type);
     AtaPolicy {
         create_meme: false,
         create_wsol: params.create_output_token_ata
-            && matches!(
-                params.output_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && matches!(asset, SellTo::Sol | SellTo::Wsol),
         create_quote: params.create_output_token_ata
-            && !matches!(
-                params.output_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && !matches!(asset, SellTo::Sol | SellTo::Wsol),
         close_wsol: params.close_output_token_ata
-            && matches!(params.output_token_type, TradeTokenType::WSOL),
+            && matches!(asset, SellTo::Sol | SellTo::Wsol),
         close_meme: params.close_mint_token_ata,
         close_quote: false,
     }
 }
 
-fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
+pub(crate) fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
     let mut opts = TradeOpts::default()
         .with_slippage_bps(params.slippage_basis_points.unwrap_or(100))
         .with_ata(buy_ata_policy(params));
@@ -607,7 +597,7 @@ fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
     Ok(opts)
 }
 
-fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
+pub(crate) fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
     let mut opts = TradeOpts::default()
         .with_slippage_bps(params.slippage_basis_points.unwrap_or(100))
         .with_ata(sell_ata_policy(params));

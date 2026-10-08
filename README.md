@@ -236,6 +236,10 @@ For SOL-paired Pump curves with `use_v2=true`, prepare `BuyWith::Wsol` or
 `SellTo::Wsol` to create the required WSOL ATAs. Native SOL settlement still
 skips them; V1 curves reject WSOL settlement.
 
+In `TradeBuyParams` / `TradeSellParams`, `TradeTokenType::Token(WSOL_MINT)`
+uses the same WSOL account creation and close flags as `TradeTokenType::WSOL`.
+For native SOL sells, `close_output_token_ata=true` unwraps the WSOL output.
+
 ### 5. Admin (after deploy)
 
 ```rust
