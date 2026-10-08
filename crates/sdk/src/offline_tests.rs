@@ -1429,6 +1429,68 @@ fn offline_all_exact_out_and_reverse_legs() {
     .unwrap();
     assert_eq!(leg.program_id, RAYDIUM_CPMM_PROGRAM);
 
+    let wallet = Keypair::new();
+    let router = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let build_legs = |pool: &CpmmPool, reverse: bool| {
+        let (input, output, input_program, output_program) = if reverse {
+            (pool.quote_mint, pool.base_mint, pool.quote_token_program, pool.base_token_program)
+        } else {
+            (pool.base_mint, pool.quote_mint, pool.base_token_program, pool.quote_token_program)
+        };
+        let input_ata = crate::ata::ata(&wallet.pubkey(), &input, &input_program);
+        let output_ata = crate::ata::ata(&wallet.pubkey(), &output, &output_program);
+        [cpmm_swap_leg(&wallet.pubkey(), pool, 10_000, 1, input, output, input_ata, output_ata),
+            cpmm_swap_exact_out_leg(&wallet.pubkey(), pool, 10_000, 1,
+                input, output, input_ata, output_ata)]
+    };
+    for invalid in [Pubkey::default(), Pubkey::new_unique()] {
+        for base_side in [false, true] {
+            let mut pool = cpmm.clone();
+            if base_side { pool.base_token_program = invalid; }
+            else { pool.quote_token_program = invalid; }
+            for reverse in [false, true] {
+                for result in build_legs(&pool, reverse) {
+                    assert!(result.err().expect("CPMM accepted an invalid token program")
+                        .to_string().contains("token program"));
+                }
+            }
+            let market = RoutedMarket::new(Market::CpmmOuter(pool));
+            for result in [
+                router.buy_with_opts(10_000, &market,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1)),
+                router.sell_with_opts(10_000, &market,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1)),
+            ] {
+                assert!(result.err().expect("Router accepted an invalid CPMM token program")
+                    .to_string().contains("token program"));
+            }
+        }
+    }
+    for base_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+        for quote_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+            let mut pool = cpmm.clone();
+            pool.quote_mint = Pubkey::new_unique(); // Generic token quote, not a Token-2022 WSOL mint.
+            pool.base_token_program = base_program;
+            pool.quote_token_program = quote_program;
+            for reverse in [false, true] {
+                for result in build_legs(&pool, reverse) {
+                    let leg = result.unwrap();
+                    let (input_program, output_program) = if reverse {
+                        (quote_program, base_program) } else { (base_program, quote_program) };
+                    assert_eq!(leg.accounts[8].pubkey, input_program);
+                    assert_eq!(leg.accounts[9].pubkey, output_program);
+                    let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                        &[solana_sdk::instruction::Instruction {
+                            program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
+                        }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+                    );
+                    tx.verify().unwrap();
+                }
+            }
+        }
+    }
+
     let amm = dummy_amm_v4();
     let leg = raydium_amm_v4_swap_exact_out_leg(&user, &amm, 100, 1_000_000, WSOL_MINT).unwrap();
     assert_eq!(leg.program_id, RAYDIUM_AMM_V4_PROGRAM);

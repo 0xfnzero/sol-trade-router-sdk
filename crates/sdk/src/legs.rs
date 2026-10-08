@@ -144,6 +144,7 @@ pub fn cpmm_swap_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
@@ -202,6 +203,7 @@ pub fn cpmm_swap_exact_out_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
