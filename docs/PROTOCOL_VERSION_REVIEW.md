@@ -456,3 +456,49 @@ Low-level raw leg callers must supply the necessary preparation themselves.
 Review coverage: all 14 changed/added files reviewed (8 code files and 6
 documentation/evidence files), zero skipped. No blocking findings remain in
 this follow-up. Historical evidence retains its recorded revisions.
+
+
+### Native Pump first-sell rent follow-up — 2026-10-09
+
+The same setup gap also affected native SOL **output**. Executing current
+Pump/Fee/router ELF with a funded curve and preexisting seller token balance
+reproduces router error 10 despite the DEX's sell succeeding: creator-vault rent
+(V1) or fresh user-volume rent (V3) is charged during the swap, so wallet net
+credit falls below the automatic quote's 1% slippage floor. The sell fixture
+preserves the original virtual-reserve constant product, real/virtual quote
+relationship and vault/supply bounds; it does not require a preceding buy by the
+seller. These are synthetic local states, not a claim about every live curve.
+
+The high-level native V1 sell now uses the same idempotent creator-vault top-up
+as buys before output measurement. Ordinary sells do not create an unnecessary
+user volume account; cashback sells initialize it. Native V3 sells also always
+initialize volume even if the cached hint is false. Buy/sell preparation shares
+one helper; router output minimum and fee/input debit checks remain strict.
+This SDK follow-up uses the existing tag 7; no on-chain source changed here.
+
+The existing native-rent matrix expands from 40 to **86 cases**, adding 32 V1
+first-sell cases with four vault funding states, eight V3 first-sell cases,
+four cashback sells and two V1 buy/sell roundtrips across classic SPL and
+Token-2022 base programs. Unprepared failing controls require exact router error
+10 and verify token, vault, curve, fee and volume rollback (transaction fee
+retained). Prepared sells require actual quote receipt, exact token debit and
+router fee. Cashback cases additionally verify the creator fee accrues in volume
+rather than counting that accrued balance as setup rent. Setup rent is measured
+from the Rent sysvar floor. Both V1 and V3 roundtrips now check the exact native
+sell proceeds, replacing the earlier merely-positive assertion; V1 roundtrips
+use the proper sell account layout/discriminator.
+
+The existing Rust construction tests now verify and sign four ordinary/cashback
+V1 sells and three V3 buy/exact-output-buy/sell transactions including setup.
+All 86 local rent cases, current 32-case graduation matrix, V3 ordinary and
+exact-output roundtrips and 110 offline checks pass (93 SDK / 15 program /
+2 examples; 81 live cases and one doctest ignored). Evidence:
+`tools/validation/simulation-coverage-20261009/pump-native-sell-rent-followup/`.
+The router ELF remains
+`9fce64e47706c4bb2dbacee46be95b9dc90d1ff0540c9637b3dcca9183c95924`;
+prior security evidence for that binary remains valid and was not relabeled as a
+new run. The unchanged mainnet router lacks tag 7, so new V1 setup still requires
+its source upgrade together with the SDK. No deploy or broadcast occurred.
+
+Review coverage: 10 changed/added files reviewed, zero skipped (100%), including
+all documentation and logs excluded by OCR's default filters.

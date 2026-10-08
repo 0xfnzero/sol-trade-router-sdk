@@ -1998,6 +1998,34 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
     let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
         .with_pool_guard(PoolGuardPolicy::disabled());
     let wsol = crate::ata::ata(&wallet.pubkey(), &WSOL_MINT, &TOKEN_PROGRAM);
+    for cashback in [false, true] {
+        for token_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
+            let mut fixture = dummy_pumpfun();
+            fixture.is_cashback_coin = cashback;
+            fixture.mint_token_program = token_program;
+            let expected_curve = fixture.bonding_curve;
+            let expected_vault = fixture.creator_vault;
+            let market = RoutedMarket::pumpfun(fixture);
+            let sell = client.sell_with_opts(1_000, &market,
+                TradeOpts::default().sell_to_sol().with_min_out(1)).unwrap();
+            let prepare = sell.setup.iter().find(|ix| ix.program_id == client.program_id
+                && ix.data == [crate::route_ix::TAG_PREPARE_PUMPFUN]).unwrap();
+            assert_eq!(prepare.accounts[1].pubkey, expected_curve);
+            assert_eq!(prepare.accounts[2].pubkey, expected_vault);
+            let volume = sell.setup.iter().filter(|ix| ix.program_id == crate::constants::PUMPFUN_PROGRAM
+                && ix.data == [94, 6, 202, 115, 255, 96, 232, 183]).collect::<Vec<_>>();
+            assert_eq!(volume.len(), usize::from(cashback));
+            if cashback {
+                assert_eq!(volume[0].accounts[2].pubkey,
+                    crate::constants::pumpfun_user_volume_accumulator(&wallet.pubkey()));
+            }
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &sell.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+    }
     for use_v2 in [false, true] {
         let mut fixture = dummy_pumpfun();
         fixture.use_v2 = use_v2;

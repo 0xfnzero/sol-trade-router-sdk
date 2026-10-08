@@ -38,7 +38,7 @@ pub struct PumpFunV3Pool {
     /// settle directly in that token; recursive SOL funding is caller-supplied.
     pub depth: u8,
     pub needs_curve_extension: bool,
-    /// Hint for token-quoted trades and sells; native buys always initialize idempotently.
+    /// Hint for token-quoted trades; native buys/sells always initialize idempotently.
     pub needs_volume_initialization: bool,
 }
 
@@ -314,7 +314,7 @@ impl PumpFunV3Pool {
                 data: vec![234, 102, 194, 203, 150, 72, 62, 229],
             });
         }
-        if self.needs_volume_initialization || (buy && p.quote_mint == WSOL_MINT) {
+        if self.needs_volume_initialization || p.quote_mint == WSOL_MINT {
             let volume = Pubkey::find_program_address(
                 &[b"user_volume_accumulator", user.as_ref()],
                 &PUMPFUN_PROGRAM,
@@ -717,7 +717,8 @@ mod tests {
     #[test]
     fn routes_bind_output_and_max_budget_with_setup_outside_debit() {
         let mut p = pool();
-        let user = Pubkey::new_unique();
+        let wallet = solana_sdk::signature::Keypair::new();
+        let user = solana_sdk::signature::Signer::pubkey(&wallet);
         let fee = Pubkey::new_unique();
         for bps in [1_001, 9_999, 10_000, u16::MAX] {
             for result in [
@@ -733,13 +734,19 @@ mod tests {
             assert!(p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
             assert!(p.build_sell_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
         }
-        for buy in [
+        for trade in [
             p.build_buy_route(&PROGRAM_ID, &user, &fee, 10_000, 100, 1).unwrap(),
             p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, 100, 1).unwrap(),
+            p.build_sell_route(&PROGRAM_ID, &user, &fee, 10_000, 100, 1).unwrap(),
         ] {
-            let init = buy.setup.iter().find(|ix| ix.data == [94, 6, 202, 115, 255, 96, 232, 183]).unwrap();
+            let init = trade.setup.iter().find(|ix| ix.data == [94, 6, 202, 115, 255, 96, 232, 183]).unwrap();
             assert_eq!(init.program_id, PUMPFUN_PROGRAM);
             assert_eq!(init.accounts[2].pubkey, pumpfun_user_volume_accumulator(&user));
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &trade.into_instructions(), Some(&user), &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
         }
         p.needs_curve_extension = true;
         p.needs_volume_initialization = true;

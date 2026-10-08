@@ -64,7 +64,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
              initial_quote=0, exact_out=None, quote_input=9_900_000,
              expected_failure=False, sell_after=True, fee_fixture=None, legacy=False,
              fee_code=None, initialize_volume=True, fund_creator=False, prepare=False,
-             expected_budget_failure=False):
+             expected_budget_failure=False, sell_only=False, expected_sell_failure=False, cashback=False):
     vm = LiteSVM().with_default_programs()
     vm.add_program(PUMP, pump_code)
     vm.add_program(ROUTER, router_code)
@@ -102,7 +102,15 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     remaining = 1_000_000_000 if boundary else 793_100_000_000_000
     virtual_base = 279_900_000_000_000 + remaining if boundary else 1_073_000_000_000_000
     virtual_quote = 1_073_000_000_000_000 * 30_000_000_000 // virtual_base if boundary else 30_000_000_000
+    if sell_only:
+        # A half-virtual-base curve with the original constant product; the
+        # seller's existing tokens belong to the already-circulating supply.
+        remaining = 256_600_000_000_000
+        virtual_base = 536_500_000_000_000
+        virtual_quote = 60_000_000_000
+        assert virtual_base * virtual_quote == 1_073_000_000_000_000 * 30_000_000_000
     real_quote = virtual_quote - 30_000_000_000
+    held = 100_000_000_000 if sell_only else 0
     vault_balance = 206_900_000_000_000 + remaining
     data = bytearray(166)
     data[:8] = bytes([23, 183, 248, 55, 96, 216, 172, 96])
@@ -110,11 +118,12 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
                           (32, real_quote), (40, 1_000_000_000_000_000), (142, initial_quote)]:
         struct.pack_into("<Q", data, offset, value)
     data[49:81] = bytes(user)
+    data[82] = int(cashback)
     vm.set_account(curve, Account(real_quote + 3_000_000, bytes(data), PUMP))
     curve_base = ata(curve, mint, base_program)
     user_base = ata(user, mint, base_program)
     vm.set_account(curve_base, account_with_program(token_account(curve, mint, vault_balance), base_program))
-    vm.set_account(user_base, account_with_program(token_account(user, mint, 0), base_program))
+    vm.set_account(user_base, account_with_program(token_account(user, mint, held), base_program))
     volume = pda([b"user_volume_accumulator", bytes(user)])
     init = Instruction(PUMP, bytes([94, 6, 202, 115, 255, 96, 232, 183]), [
         AccountMeta(user, True, True), AccountMeta(user, False, False),
@@ -183,6 +192,67 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
             assert isinstance(rejected, FailedTransactionMetadata)
             vm.set_account(curve, valid_curve)
         vm.expire_blockhash()
+    def legacy_sell_metas():
+        sell_keys = [global_key, fee_recipient, mint, curve, curve_base, user_base, user,
+                     SYSTEM, creator_vault, base_program, event, PUMP, config, FEES,
+                     pda([b"bonding-curve-v2", bytes(mint)]), buyback]
+        result = [AccountMeta(key, i == 6, i in [1, 3, 4, 5, 6, 8, 15]) for i, key in enumerate(sell_keys)]
+        if cashback:
+            result.insert(14, AccountMeta(volume, False, True))
+        return result
+
+    if sell_only:
+        if legacy:
+            metas = legacy_sell_metas()
+        fee_base = ata(recipient, mint, base_program)
+        vm.set_account(fee_base, account_with_program(token_account(recipient, mint, 0), base_program))
+        fee = held // 100
+        gross = (held - fee) * virtual_quote // (virtual_base + held - fee)
+        expected_quote = gross - bps_fee(gross, protocol_bps) - bps_fee(gross, creator_bps)
+        minimum = max(1, expected_quote * 99 // 100)
+        before = vm.get_account(user).lamports
+        before_volume = vm.get_account(volume)
+        before_vault = vm.get_account(creator_vault) if legacy else None
+        setup = [init] if prepare and (not legacy or cashback) else []
+        if prepare and legacy:
+            setup.append(Instruction(ROUTER, bytes([7]), good))
+        sell_data = (bytes([51, 230, 133, 164, 1, 127, 131, 173]) if legacy else SELL) + struct.pack("<QQ", held - fee, minimum)
+        ix = route(sell_data, held, minimum, 1, user, user_base, fee_base, base_program, SYSTEM)
+        result = vm.send_transaction(Transaction.new_signed_with_payer(setup + [ix], user, [payer], vm.latest_blockhash()))
+        error = str(result.err()) if isinstance(result, FailedTransactionMetadata) else None
+        observed = dict(mode="sell_only", legacy=legacy, token2022=token2022, cashback=cashback,
+                        initialize_volume=initialize_volume, prepared=prepare, creator_lamports=fund_creator,
+                        quote=expected_quote, minimum=minimum, error=error)
+        if expected_sell_failure:
+            assert error and "InstructionErrorCustom(10)" in error, (observed, result.meta().logs())
+            assert vm.get_account(user).lamports == before - 5000
+            assert struct.unpack_from("<Q", vm.get_account(curve_base).data, 64)[0] == vault_balance
+            assert struct.unpack_from("<Q", vm.get_account(user_base).data, 64)[0] == held
+            assert struct.unpack_from("<Q", vm.get_account(fee_base).data, 64)[0] == 0
+            assert vm.get_account(curve).data == bytes(data)
+            assert vm.get_account(volume) == before_volume
+            if legacy:
+                assert vm.get_account(creator_vault) == before_vault
+            return observed
+        assert error is None, (observed, result.meta().logs()) if error else observed
+        setup_rent = 0
+        if prepare:
+            if not initialize_volume and (not legacy or cashback):
+                setup_rent += vm.minimum_balance_for_rent_exemption(len(vm.get_account(volume).data))
+            if legacy:
+                setup_rent += max(0, vm.minimum_balance_for_rent_exemption(0) - (before_vault.lamports if before_vault else 0))
+        received = vm.get_account(user).lamports - before + 5000 + setup_rent
+        assert received == expected_quote, (observed, received)
+        assert struct.unpack_from("<Q", vm.get_account(user_base).data, 64)[0] == 0
+        assert struct.unpack_from("<Q", vm.get_account(fee_base).data, 64)[0] == fee
+        if cashback:
+            volume_after = vm.get_account(volume)
+            before_lamports = before_volume.lamports if before_volume else vm.minimum_balance_for_rent_exemption(len(volume_after.data))
+            cashback_fee = bps_fee(gross, creator_bps)
+            assert volume_after.lamports - before_lamports == cashback_fee
+            observed["cashback_accrued"] = cashback_fee
+        observed.update(received=received, setup_rent=setup_rent)
+        return observed
     initial_sol = vm.get_account(user).lamports
     initial_fee = vm.get_account(recipient).lamports
     route_instruction = route(dex, BUDGET, exact_out or 1, 0 if legacy else 0x80, user_base, user, recipient, SYSTEM, mint)
@@ -241,7 +311,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     if prepare:
         setup_rent = max(0, vm.minimum_balance_for_rent_exemption(0) - (vault_before.lamports if vault_before else 0)) if legacy else 0
         if not initialize_volume:
-            setup_rent += vm.get_account(volume).lamports
+            setup_rent += vm.minimum_balance_for_rent_exemption(len(vm.get_account(volume).data))
         observed["setup_rent"] = setup_rent
         observed["spent"] -= setup_rent
     assert ROUTER_FEE <= observed["spent"] <= BUDGET, observed
@@ -275,13 +345,19 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     amount = tokens // 2
     fee = amount // 100
     initial_sol = vm.get_account(user).lamports
-    result = send(vm, payer, route(SELL + struct.pack("<QQ", amount - fee, 1), amount, 1, 1,
+    if legacy:
+        metas = legacy_sell_metas()
+    sell_discriminator = bytes([51, 230, 133, 164, 1, 127, 131, 173]) if legacy else SELL
+    post_base, post_quote = struct.unpack_from("<QQ", vm.get_account(curve).data, 8)
+    gross = (amount - fee) * post_quote // (post_base + amount - fee)
+    expected_sell = gross - bps_fee(gross, protocol_bps) - bps_fee(gross, creator_bps)
+    result = send(vm, payer, route(sell_discriminator + struct.pack("<QQ", amount - fee, 1), amount, 1, 1,
                                   user, user_base, fee_base, base_program, SYSTEM))
     assert not isinstance(result, FailedTransactionMetadata), (result.err(), result.meta().logs()) if isinstance(result, FailedTransactionMetadata) else None
     assert struct.unpack_from("<Q", vm.get_account(user_base).data, 64)[0] == tokens - amount
     assert struct.unpack_from("<Q", vm.get_account(fee_base).data, 64)[0] == fee
     observed["sell_received"] = vm.get_account(user).lamports - initial_sol + 5000
-    assert observed["sell_received"] > 0, observed
+    assert observed["sell_received"] == expected_sell > 0, (observed, expected_sell)
     return observed
 
 
@@ -306,7 +382,7 @@ def main():
                         help="Global/FeeConfig getMultipleAccounts snapshot matching the captured Pump ELF")
     parser.add_argument("--graduation-supported", action="store_true",
                         help="Expect crossing buys to succeed for the upgraded captured deployment")
-    parser.add_argument("--fee-program", type=Path, help="Captured Fee Program ELF for V1 native buys")
+    parser.add_argument("--fee-program", type=Path, help="Captured Fee Program ELF for V1 native buys/sells")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--graduation-rejection", action="store_true")
     modes.add_argument("--exact-out", action="store_true")
@@ -343,6 +419,28 @@ def main():
                 count += 1
             print(json.dumps(run_case(router, pump, fee_fixture=args.fee_fixture,
                 initialize_volume=initialized, prepare=True, exact_out=100_000_000_000, sell_after=False)))
+            count += 1
+        for legacy in [True, False]:
+            for token2022 in [False, True]:
+                for initialized in [False, True]:
+                    for funded in ([0, 100_000, True, 2_000_000] if legacy else [0]):
+                        for prepared in [False, True]:
+                            missing_rent = (funded is not True and funded < 890_880) if legacy else not initialized
+                            print(json.dumps(run_case(router, pump, legacy=legacy, token2022=token2022,
+                                fee_code=fees, fee_fixture=args.fee_fixture, initialize_volume=initialized,
+                                fund_creator=funded, prepare=prepared, sell_only=True,
+                                expected_sell_failure=not prepared and missing_rent)))
+                            count += 1
+        for token2022 in [False, True]:
+            for initialized in [False, True]:
+                print(json.dumps(run_case(router, pump, legacy=True, token2022=token2022,
+                    fee_code=fees, fee_fixture=args.fee_fixture, initialize_volume=initialized,
+                    prepare=True, sell_only=True, cashback=True)))
+                count += 1
+        for token2022 in [False, True]:
+            print(json.dumps(run_case(router, pump, legacy=True, token2022=token2022,
+                fee_code=fees, fee_fixture=args.fee_fixture, initialize_volume=False,
+                prepare=True, sell_after=True)))
             count += 1
         print(json.dumps({"native_rent_cases_passed": count, "fee_program_sha256": hashlib.sha256(fees).hexdigest()}))
     elif args.boundary_matrix:
