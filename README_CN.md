@@ -88,7 +88,7 @@ sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk
 sol-parser-sdk = "=0.7.10"
 
 [patch.crates-io]
-sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "61c0e406807d4d00f3978cf1289adc5b99e91d0a" }
+sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "3ab31b72180bee7d1bb68d5a128f6f309bf45ae3" }
 sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
 ```
 
