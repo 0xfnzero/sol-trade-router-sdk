@@ -25,9 +25,10 @@ pub const PUMPFUN_SELL_V3: [u8; 8] = [28, 146, 222, 119, 38, 196, 105, 213];
 pub struct PumpFunV3Pool {
     pub curve: PumpFunPool,
     pub complete: bool,
-    /// Enable only after verifying the target deployment supports the official
-    /// post-completion leg. Cold RPC loading defaults to false: the captured
-    /// mainnet ELF returns 6021 for our non-Mayhem crossing regression.
+    /// Allow the official post-completion quote and buy path. Cold RPC loading
+    /// enables this by default to match Pump SDK 3.2.0. Set false to explicitly
+    /// restrict buys to the remaining curve supply. This SDK option does not
+    /// attest to a deployment's execution capability.
     pub supports_graduation: bool,
     pub real_quote_reserves: u64,
     pub curve_base_token_balance: u64,
@@ -123,7 +124,7 @@ impl PumpFunV3Pool {
             return positive_u64(tokens);
         }
         if !self.supports_graduation {
-            bail!("Pump V3 graduation is not verified for this deployment");
+            bail!("Pump V3 graduation is disabled for this pool");
         }
         if self.mayhem_mode {
             bail!("Pump V3 Mayhem graduation requires partial fill, unsupported by this exact-budget route");
@@ -184,7 +185,7 @@ impl PumpFunV3Pool {
             return positive_u64(curve_total);
         }
         if !self.supports_graduation {
-            bail!("Pump V3 graduation is not verified for this deployment");
+            bail!("Pump V3 graduation is disabled for this pool");
         }
         let past = amount as u128 - remaining;
         let base = (self.curve_base_token_balance as u128)

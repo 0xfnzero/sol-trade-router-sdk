@@ -329,7 +329,7 @@ pub async fn load_pumpfun_v3_by_rpc(
     Ok(crate::pumpfun_v3::PumpFunV3Pool {
         curve: pool,
         complete: false, // apply_inner rejects already-completed curves.
-        supports_graduation: false,
+        supports_graduation: true,
         real_quote_reserves: u64_at(&get(0)?.data, 32)?,
         curve_base_token_balance: u64_at(&base_vault.data, 64)?,
         pool_migration_fee: u64_at(&get(1)?.data, 146)?,

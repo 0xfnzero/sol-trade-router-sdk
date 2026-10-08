@@ -254,9 +254,11 @@ quote cost. Sell routes retain exact debit equality. Setup rent is outside the
 trade input budget; `fee_bps` must match the deployed router config.
 
 Official 3.2.0 quotes include a pool-to-be leg when buying beyond the remaining
-curve supply. That math is implemented and unit-tested, but
-`supports_graduation` defaults to false in the cold loader and crossing builders
-fail unless the caller has verified and explicitly enabled the target deployment.
+curve supply. That math is implemented and unit-tested.
+`supports_graduation` defaults to **true** in the cold loader, matching the
+published official SDK's quote and construction behavior. Callers can explicitly
+set it to false to restrict buys to the remaining curve supply. This is an SDK
+construction option, not a declaration that a specific deployment accepts it.
 The captured mainnet Pump ELF returns 6021 (`NotEnoughTokensToBuy`) for our
 non-Mayhem crossing fixture, including with realistic curve reserve invariants.
 This local observation does not prove every possible live crossing fails, and
@@ -290,12 +292,13 @@ lengths, enum values, counts, truncated data and missing SDK accounts are tested
 Transfer-hook slices remain outside the supported dynamic whitelist.
 
 
-### Graduation guard recheck — 2026-10-08
+### Graduation compatibility recheck — 2026-10-08
 
-Keep the cold-loader default `supports_graduation=false` for the deployment
-verified here. This rejects an output **greater than** the remaining curve
-supply; it permits buying exactly the remaining supply and completing the curve.
-It does not disable ordinary V3 trading or infer that all V3 features are absent.
+The cold-loader default is `supports_graduation=true`, so the SDK permits the
+official post-completion quote and construction paths. Explicitly setting false
+rejects output **greater than** the remaining curve supply while permitting
+buying exactly the remaining supply and completing the curve. The deployment
+observations below are retained as execution evidence, not as a default SDK gate.
 
 The official 3.2.0 npm README distinguishes basic V3 (programs-monorepo PR #60)
 from post-completion buys/nested curves (PR #61). These are references in the
@@ -327,14 +330,15 @@ fee-inclusive curve cost is 416,016 lamports (protocol 95 / creator 30 bps).
 | Quote-input: 416,015 or 416,016 lamports | Success, output remains below remaining due to rounding |
 | Quote-input: 416,017 / 416,116 / 9,900,000 lamports | 6021, all trade state and router fee roll back |
 
-This isolates the unsupported crossing from ATA owner choice, unset new reserve
-fields, general V3 support, and exact-output budget handling. The remaining
-limitation is that these are synthetic states in the actual ELF, not a live
-pool simulation. Re-query ProgramData and re-run the matrix after an upgrade;
-only enable the flag after verifying the new deployment's crossing execution.
-Offline SDK regressions additionally ensure the default guard permits an
-exact-output buy of the remaining supply, rejects remaining plus one, and does
-not treat a large maximum budget as the actual exact-output spend.
+The captured crossing rejection persists across ATA owner choices and zero or
+populated initial quote reserves, while ordinary V3 and exact graduation succeed.
+These are synthetic states in the actual ELF, not a live pool simulation, and
+are not sufficient to conclude that every real mainnet pool rejects crossing.
+SDK quote/construction follows the official behavior by default; a transaction
+simulation against the target deployment determines execution compatibility.
+Offline SDK regressions cover enabled crossing quotes and route construction,
+explicit opt-out at remaining plus one, exact graduation, and large maximum
+budgets that must not be mistaken for the actual exact-output spend.
 
 ```sh
 python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so --boundary-matrix
