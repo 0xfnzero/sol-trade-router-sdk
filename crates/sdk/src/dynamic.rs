@@ -9,7 +9,7 @@ use crate::{
     legs::{
         cpmm_swap_leg, launchlab_buy_leg, meteora_damm_v2_swap_leg, meteora_dlmm_swap_leg,
         pumpswap_buy_leg, pumpswap_sell_leg, raydium_amm_v4_swap_leg, raydium_clmm_swap_leg,
-        whirlpool_swap_leg, Leg,
+        require_mint_programs, whirlpool_swap_leg, Leg,
     },
     market::Market,
     route_ix::{build_dynamic_route_instruction, RouteAccounts},
@@ -274,6 +274,8 @@ fn quote_to_target_leg(
 ) -> Result<(Leg, Pubkey, Pubkey)> {
     match pool {
         Market::LaunchLabInner(p) => {
+            require_mint_programs(&[(p.base_mint, p.base_token_program),
+                (p.quote_mint, p.quote_token_program)], "LaunchLab")?;
             if p.quote_mint != quote_mint || p.quote_token_program != quote_program {
                 bail!("LaunchLab quote mint/program does not match first hop");
             }

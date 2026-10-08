@@ -21,7 +21,7 @@ use crate::{
         meteora_damm_v2_swap_leg, meteora_dlmm_swap_leg, pumpfun_buy_leg, pumpfun_buy_v2_leg,
         pumpfun_sell_leg, pumpfun_sell_v2_leg, pumpswap_buy_exact_out_leg, pumpswap_buy_leg,
         pumpswap_sell_leg, raydium_amm_v4_swap_exact_out_leg, raydium_amm_v4_swap_leg,
-        raydium_clmm_swap_leg, require_token_programs, whirlpool_swap_leg, Leg,
+        raydium_clmm_swap_leg, require_mint_programs, require_token_programs, whirlpool_swap_leg, Leg,
     },
     market::{
         BridgePool, CpmmPool, LaunchLabPool, Market, MeteoraDammV2Pool, MeteoraDlmmPool,
@@ -42,11 +42,8 @@ use crate::{
 
 fn validate_inner_market_programs(market: &RoutedMarket, quote_ata: bool) -> Result<()> {
     if let Market::LaunchLabInner(pool) = &market.market {
-        require_token_programs(&[pool.base_token_program, pool.quote_token_program], "LaunchLab")?;
-        // LaunchLab always settles through token accounts, including SOL wrapping.
-        if pool.is_sol_quote() && pool.quote_token_program != TOKEN_PROGRAM {
-            return Err(anyhow!("LaunchLab WSOL settlement requires classic WSOL token program"));
-        }
+        require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+            (pool.quote_mint, pool.quote_token_program)], "LaunchLab")?;
     }
     if let Market::PumpFunInner(pool) = &market.market {
         require_token_programs(&[pool.mint_token_program], "PumpFun")?;

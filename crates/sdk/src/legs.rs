@@ -40,7 +40,7 @@ pub(crate) fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<(
     Ok(())
 }
 
-fn require_mint_programs(mints: &[(Pubkey, Pubkey)], dex: &str) -> Result<()> {
+pub(crate) fn require_mint_programs(mints: &[(Pubkey, Pubkey)], dex: &str) -> Result<()> {
     for &(mint, program) in mints {
         require_token_programs(&[program], dex)?;
         // Token-2022's native mint has a different address from classic WSOL.

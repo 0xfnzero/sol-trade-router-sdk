@@ -2129,6 +2129,14 @@ fn offline_launchlab_sell_leg_builds() {
         [client.buy_with_opts(1_000, &market, opts.clone()),
             client.sell_with_opts(1_000, &market, opts)]
     };
+    let mut bad = dummy_launchlab();
+    bad.base_mint = WSOL_MINT;
+    bad.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+    bad.quote_mint = Pubkey::new_unique();
+    for result in build_pair(bad, 2) {
+        assert!(result.err().expect("LaunchLab accepted Token-2022 canonical WSOL base")
+            .to_string().contains("classic WSOL"));
+    }
     for path in 0..3 {
         let mut fixture = dummy_launchlab();
         if path == 2 { fixture.quote_mint = Pubkey::new_unique(); }
@@ -2424,7 +2432,8 @@ fn offline_router_sell_builds_for_major_dexes() {
 
 #[test]
 fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
-    let payer = Pubkey::new_unique();
+    let wallet = Keypair::new();
+    let payer = wallet.pubkey();
     let fee_recipient = Pubkey::new_unique();
     let quote = Pubkey::new_unique();
     let target = Pubkey::new_unique();
@@ -2464,7 +2473,32 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
         Market::PumpSwapOuter(pump_bridge),
     ];
     for bridge in &bridges {
-        for target_pool in &targets {
+        if let Market::LaunchLabInner(pool) = &targets[0] {
+            for invalid in [Pubkey::default(), Pubkey::new_unique()] {
+                let mut bad = pool.clone();
+                bad.base_token_program = invalid;
+                assert!(crate::build_dynamic_quote_buy(
+                    &crate::PROGRAM_ID, &payer, &fee_recipient, 500_000_000, 500_000_000,
+                    1_000, 10, bridge, &Market::LaunchLabInner(bad),
+                ).err().expect("dynamic LaunchLab accepted unsupported base token program")
+                    .to_string().contains("token program"));
+            }
+            let mut bad = pool.clone();
+            bad.base_mint = WSOL_MINT;
+            bad.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+            assert!(crate::build_dynamic_quote_buy(
+                &crate::PROGRAM_ID, &payer, &fee_recipient, 500_000_000, 500_000_000,
+                1_000, 10, bridge, &Market::LaunchLabInner(bad),
+            ).err().expect("dynamic LaunchLab accepted Token-2022 canonical WSOL")
+                .to_string().contains("classic WSOL"));
+        }
+        let mut token_2022 = match &targets[0] {
+            Market::LaunchLabInner(pool) => pool.clone(),
+            _ => unreachable!(),
+        };
+        token_2022.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+        let token_2022 = Market::LaunchLabInner(token_2022);
+        for target_pool in targets.iter().chain(std::iter::once(&token_2022)) {
             let built = crate::build_dynamic_quote_buy(
                 &crate::PROGRAM_ID,
                 &payer,
@@ -2492,6 +2526,23 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
                     _ => unreachable!(),
                 }
             );
+            let base_program = target_pool.base_token_program();
+            assert_eq!(built.output_token_program, base_program);
+            assert_eq!(built.output_ata, crate::ata::ata(&payer, &target, &base_program));
+            if let Market::LaunchLabInner(pool) = target_pool {
+                let slot = built.instruction.accounts.iter()
+                    .position(|account| account.pubkey == pool.pool_state).unwrap();
+                assert_eq!(built.instruction.accounts[slot + 1].pubkey, built.output_ata);
+                assert_eq!(built.instruction.accounts[slot + 7].pubkey, base_program);
+            }
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &[built.instruction], Some(&payer), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+            let restored: solana_sdk::transaction::Transaction =
+                bincode::deserialize(&bincode::serialize(&tx).unwrap()).unwrap();
+            restored.verify().unwrap();
+            assert_eq!(restored, tx);
         }
     }
 }
