@@ -1,5 +1,5 @@
 //! Current PumpFun fee/owner refresh for the cold RPC path.
-//! Fixed offsets below are from pump-sdk 3.2.0's published Global/BondingCurve IDL.
+//! Fixed offsets below match pump-sdk 4.0.0's published Global/BondingCurve IDL.
 use crate::{constants::*, market::PumpFunPool};
 use anyhow::{anyhow, Result};
 use sol_trade_sdk::common::SolanaRpcClient;
@@ -80,7 +80,8 @@ fn mint_program(account: &Account) -> Result<Pubkey> {
     }
     // The current PumpFun quote math does not implement mint extension fees/hooks.
     // A base Token-2022 mint with metadata/authorities remains usable; reject
-    // TransferFeeConfig and TransferHook before presenting an automatic quote.
+    // TransferFeeConfig and active TransferHook before presenting a quote.
+    // A disabled Hook (no program id) does not invoke a callback.
     if account.owner == TOKEN_2022_PROGRAM && account.data.len() > 82 {
         if account.data.get(165) != Some(&1) {
             return Err(anyhow!("invalid Token-2022 mint account type"));
@@ -92,15 +93,27 @@ fn mint_program(account: &Account) -> Result<Pubkey> {
             if kind == 0 {
                 break;
             }
-            if !matches!(kind, 3 | 10 | 18 | 19 | 20 | 21 | 22 | 23) {
+            let end = offset
+                .checked_add(4 + len)
+                .filter(|end| *end <= account.data.len())
+                .ok_or_else(|| anyhow!("malformed Token-2022 mint extensions"))?;
+            if kind == 14 {
+                // TransferHook = optional authority (32) + optional program (32).
+                // OptionalNonZeroPubkey uses all-zero bytes to represent None.
+                if len != 64 {
+                    return Err(anyhow!("malformed Token-2022 TransferHook extension"));
+                }
+                if account.data[offset + 36..end].iter().any(|byte| *byte != 0) {
+                    return Err(anyhow!(
+                        "active PumpFun transfer hook requires unsupported extra accounts"
+                    ));
+                }
+            } else if !matches!(kind, 3 | 10 | 18 | 19 | 20 | 21 | 22 | 23) {
                 return Err(anyhow!(
                     "PumpFun mint extension {kind} requires unsupported handling"
                 ));
             }
-            offset = offset
-                .checked_add(4 + len)
-                .filter(|end| *end <= account.data.len())
-                .ok_or_else(|| anyhow!("malformed Token-2022 mint extensions"))?;
+            offset = end;
         }
     }
     Ok(account.owner)
@@ -494,5 +507,35 @@ mod tests {
         hook.data[165] = 1;
         hook.data[166] = 14;
         assert!(apply(&mut pool, &curve, &global, None, &mint, &hook).is_err());
+        // Bank-created inactive/disabled hooks have no callback program, so
+        // ordinary transfers do not require Hook remaining accounts.
+        let quote_key = Pubkey::new_unique();
+        pool.quote_mint = quote_key;
+        curve.data[83..115].copy_from_slice(quote_key.as_ref());
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../scripts/fixtures/token-hook-mints-20261008.json"
+        )).unwrap();
+        for case in fixture["cases"].as_array().unwrap() {
+            let data = case["mint_hex"].as_str().unwrap().as_bytes().chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect::<Vec<_>>();
+            let mut account = mint.clone();
+            account.owner = TOKEN_2022_PROGRAM;
+            account.data = data;
+            let reject = case["reject_hook"].as_bool().unwrap();
+            assert_eq!(mint_program(&account).is_err(), reject, "{}", case["name"]);
+            for length in [0u16, 1, 63, 65] {
+                let mut malformed = account.clone();
+                malformed.data[168..170].copy_from_slice(&length.to_le_bytes());
+                assert!(mint_program(&malformed).is_err());
+            }
+            let mut truncated = account.clone();
+            truncated.data.pop();
+            assert!(mint_program(&truncated).is_err());
+            // Both base and quote mint snapshots use this validator.
+            for (base, quote) in [(&account, &mint), (&mint, &account)] {
+                assert_eq!(apply(&mut pool, &curve, &global, None, base, quote).is_err(), reject);
+            }
+        }
     }
 }

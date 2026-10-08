@@ -502,3 +502,50 @@ its source upgrade together with the SDK. No deploy or broadcast occurred.
 
 Review coverage: 10 changed/added files reviewed, zero skipped (100%), including
 all documentation and logs excluded by OCR's default filters.
+
+
+### Disabled Token-2022 Hook compatibility — 2026-10-09
+
+Pump's cold mint validator previously rejected every TransferHook extension,
+including an inactive or disabled Hook with no callback program. The existing
+negative-state test reproduces this rejection with real bank-created mint bytes.
+A TransferHook stores optional authority and program pubkeys (32 bytes each);
+zero program bytes mean no callback and do not require extra transfer accounts.
+The validator now accepts only that disabled state, requires exact 64-byte Hook
+payload and valid TLV bounds, and continues rejecting active/malformed hooks,
+transfer fees and other unsupported extensions. No active callback support is
+claimed. Both V1 refresh and V3 cold discovery use the same mint validator.
+
+The existing unit test covers three bank mint records (inactive, disabled after
+activation, active), each on base/quote sides, plus invalid Hook lengths 0/1/63/65
+and truncated bytes. The snapshot records original bank validation slots and
+source SHA-256; it is retained in `scripts/fixtures/token-hook-mints-20261008.json`.
+The existing Pump ELF runner adds six disabled-Hook buy/sell roundtrips across V1,
+V3 quote-input and V3 exact-output. It retains those mint extension bytes and uses
+valid TransferHookAccount token-account state; synthetic base supply/authority
+are adjusted to match the runner's synthetic curve. These executions use the
+current captured Pump and Fee Program ELF and the unchanged repaired router ELF;
+outputs and spends match the independent quote. This is local signature/execution
+coverage, not a fresh mainnet bank run or arbitrary extension support.
+
+All six Hook roundtrips, the 86-case native-rent regression matrix and 110 offline
+checks pass (93 SDK / 15 program / 2 example tests; 81 live cases and one doctest
+ignored). A requested existing Pump mainnet roundtrip could not execute because
+RPC transport was unavailable and failed explicitly; its redacted log is saved,
+not counted as passing. The public default Git heads of trade/parser were also
+rechecked as October 7 ancestors of this router's October 8 pinned repair commits,
+so replacing the pins with those heads would remove fixes. Dependencies remain
+at their tested pins; sibling worktrees were not modified.
+
+```sh
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/current-pump.so \
+  --fee-fixture scripts/fixtures/pump-v4-mainnet-fees.json \
+  --fee-program /path/to/current-fee-program.so --hook-matrix
+```
+
+Evidence: `tools/validation/simulation-coverage-20261009/pump-disabled-hook-followup/`.
+No on-chain source change, deployment or broadcast. Existing V1 preparation
+still requires tag 7, unavailable in the unchanged mainnet router.
+
+Review coverage: 10 changed/added files reviewed, zero skipped (100%), including
+all documentation, fixture bytes and logs excluded by OCR default filters.

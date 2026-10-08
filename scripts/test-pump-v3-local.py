@@ -64,7 +64,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
              initial_quote=0, exact_out=None, quote_input=9_900_000,
              expected_failure=False, sell_after=True, fee_fixture=None, legacy=False,
              fee_code=None, initialize_volume=True, fund_creator=False, prepare=False,
-             expected_budget_failure=False, sell_only=False, expected_sell_failure=False, cashback=False):
+             expected_budget_failure=False, sell_only=False, expected_sell_failure=False, cashback=False, hook_mint=None):
     vm = LiteSVM().with_default_programs()
     vm.add_program(PUMP, pump_code)
     vm.add_program(ROUTER, router_code)
@@ -94,6 +94,13 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     base_mint = mint_account(user, 1_000_000_000_000_000)
     base_data = bytearray(base_mint.data)
     base_data[44] = 6
+    if hook_mint is not None:
+        assert token2022
+        # Retain the bank-created extension bytes; synthetic mint supply matches
+        # this runner's synthetic curve instead of the source bank's tiny supply.
+        extension_data = bytearray(hook_mint)
+        extension_data[:82] = base_data
+        base_data = extension_data
     vm.set_account(mint, Account(base_mint.lamports, bytes(base_data), base_program))
     quote_mint = mint_account(user, 1_000_000_000_000)
     quote_data = bytearray(quote_mint.data)
@@ -122,8 +129,17 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     vm.set_account(curve, Account(real_quote + 3_000_000, bytes(data), PUMP))
     curve_base = ata(curve, mint, base_program)
     user_base = ata(user, mint, base_program)
-    vm.set_account(curve_base, account_with_program(token_account(curve, mint, vault_balance), base_program))
-    vm.set_account(user_base, account_with_program(token_account(user, mint, held), base_program))
+    def base_token_account(owner, balance):
+        account = account_with_program(token_account(owner, mint, balance), base_program)
+        if hook_mint is not None:
+            # Token-2022 accounts for a Hook mint carry TransferHookAccount,
+            # with the currently-transferring flag clear outside a callback.
+            extended = account.data + bytes([2, 15, 0, 1, 0, 0])
+            return Account(vm.minimum_balance_for_rent_exemption(len(extended)), extended, base_program)
+        return account
+
+    vm.set_account(curve_base, base_token_account(curve, vault_balance))
+    vm.set_account(user_base, base_token_account(user, held))
     volume = pda([b"user_volume_accumulator", bytes(user)])
     init = Instruction(PUMP, bytes([94, 6, 202, 115, 255, 96, 232, 183]), [
         AccountMeta(user, True, True), AccountMeta(user, False, False),
@@ -205,7 +221,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
         if legacy:
             metas = legacy_sell_metas()
         fee_base = ata(recipient, mint, base_program)
-        vm.set_account(fee_base, account_with_program(token_account(recipient, mint, 0), base_program))
+        vm.set_account(fee_base, base_token_account(recipient, 0))
         fee = held // 100
         gross = (held - fee) * virtual_quote // (virtual_base + held - fee)
         expected_quote = gross - bps_fee(gross, protocol_bps) - bps_fee(gross, creator_bps)
@@ -341,7 +357,7 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
     if not sell_after:
         return observed
     fee_base = ata(recipient, mint, base_program)
-    vm.set_account(fee_base, account_with_program(token_account(recipient, mint, 0), base_program))
+    vm.set_account(fee_base, base_token_account(recipient, 0))
     amount = tokens // 2
     fee = amount // 100
     initial_sol = vm.get_account(user).lamports
@@ -388,11 +404,30 @@ def main():
     modes.add_argument("--exact-out", action="store_true")
     modes.add_argument("--boundary-matrix", action="store_true")
     modes.add_argument("--native-rent-matrix", action="store_true")
+    modes.add_argument("--hook-matrix", action="store_true")
     args = parser.parse_args()
     if args.graduation_supported and args.graduation_rejection:
         parser.error("--graduation-supported conflicts with --graduation-rejection")
     router, pump = args.router.read_bytes(), args.pump.read_bytes()
-    if args.native_rent_matrix:
+    if args.hook_matrix:
+        if args.fee_program is None:
+            parser.error("--hook-matrix requires --fee-program")
+        fees = args.fee_program.read_bytes()
+        fixture = json.loads((Path(__file__).parent / "fixtures/token-hook-mints-20261008.json").read_text())
+        count = 0
+        for case in fixture["cases"]:
+            if case["reject_hook"]:
+                continue  # Active hooks are rejected by the cold SDK guard.
+            for legacy, exact_out in [(True, None), (False, None), (False, 100_000_000_000)]:
+                result = run_case(router, pump, fee_fixture=args.fee_fixture, fee_code=fees,
+                    token2022=True, hook_mint=bytes.fromhex(case["mint_hex"]),
+                    legacy=legacy, exact_out=exact_out, prepare=legacy, sell_after=True)
+                result["hook_case"] = case["name"]
+                print(json.dumps(result))
+                count += 1
+        assert count == 6
+        print(json.dumps({"disabled_hook_roundtrips_passed": count}))
+    elif args.native_rent_matrix:
         if args.fee_program is None:
             parser.error("--native-rent-matrix requires --fee-program")
         fees = args.fee_program.read_bytes()
