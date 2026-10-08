@@ -1455,6 +1455,44 @@ fn offline_adapter_amm_v4_and_cpmm_from_params() {
 
 #[test]
 fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
+    let wallet = Keypair::new();
+    let client = RouterClient::new(wallet.pubkey(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let wsol = crate::ata::ata(&wallet.pubkey(), &WSOL_MINT, &TOKEN_PROGRAM);
+    for use_v2 in [false, true] {
+        let mut fixture = dummy_pumpfun();
+        fixture.use_v2 = use_v2;
+        let market = RoutedMarket::new(Market::PumpFunInner(fixture));
+        assert!(client.prepare_buy_atas(&market, crate::BuyWith::Sol).is_empty());
+        assert_eq!(client.prepare_sell_atas(&market, crate::SellTo::Sol).len(), 1);
+        if use_v2 {
+            let buy = client.prepare_buy_atas(&market, crate::BuyWith::Wsol);
+            assert_eq!(buy.len(), 2);
+            assert_eq!(buy[0].accounts[1].pubkey, wsol);
+            assert_eq!(buy[1].accounts[1].pubkey,
+                crate::ata::ata(&client.fee_recipient, &WSOL_MINT, &TOKEN_PROGRAM));
+            let sell = client.prepare_sell_atas(&market, crate::SellTo::Wsol);
+            assert_eq!(sell.len(), 2);
+            assert_eq!(sell[1].accounts[1].pubkey, wsol);
+            for built in [
+                client.buy_with_opts(1_000, &market,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1)).unwrap(),
+                client.sell_with_opts(1_000, &market,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap(),
+            ] {
+                assert!(built.cleanup.is_empty());
+                assert!(built.route.as_ref().unwrap().accounts.iter().any(|a| a.pubkey == wsol));
+                let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    solana_sdk::hash::Hash::new_unique(),
+                );
+                tx.verify().unwrap();
+            }
+        } else {
+            assert!(client.buy_with_wsol(1_000, &market).is_err());
+            assert!(client.sell_to_wsol(1_000, &market).is_err());
+        }
+    }
     let mut pool = dummy_pumpfun();
     assert!(!pool.uses_v2());
     assert!(pool.is_native_sol_quote());

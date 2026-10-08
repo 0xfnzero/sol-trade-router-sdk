@@ -307,8 +307,13 @@ impl RouterClient {
         let mut ixs = Vec::new();
         match buy_with {
             BuyWith::Sol | BuyWith::Wsol => {
-                // PumpFun WSOL-quote pools settle in native SOL (V1 and V2).
-                if !matches!(&market.market, Market::PumpFunInner(p) if p.is_native_sol_quote()) {
+                // Native SOL needs no ATA; explicit V2 WSOL settlement does.
+                let needs_wsol = match &market.market {
+                    Market::PumpFunInner(p) if p.is_native_sol_quote() =>
+                        matches!(buy_with, BuyWith::Wsol) && p.uses_wsol_ata_settlement(),
+                    _ => true,
+                };
+                if needs_wsol {
                     ixs.push(self.create_wsol_ata());
                     ixs.push(create_ata(
                         &self.payer,
@@ -347,7 +352,12 @@ impl RouterClient {
         ));
         match sell_to {
             SellTo::Sol | SellTo::Wsol => {
-                if !matches!(&market.market, Market::PumpFunInner(p) if p.is_native_sol_quote()) {
+                let needs_wsol = match &market.market {
+                    Market::PumpFunInner(p) if p.is_native_sol_quote() =>
+                        matches!(sell_to, SellTo::Wsol) && p.uses_wsol_ata_settlement(),
+                    _ => true,
+                };
+                if needs_wsol {
                     ixs.push(self.create_wsol_ata());
                 }
                 if market.market.needs_sol_bridge() {

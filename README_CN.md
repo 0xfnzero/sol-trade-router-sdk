@@ -232,6 +232,10 @@ let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
 
+SOL 交易对的 Pump 曲线设置 `use_v2=true` 后，使用 `BuyWith::Wsol` 或
+`SellTo::Wsol` 准备对应的 WSOL ATA。原生 SOL 结算仍跳过这些账户；
+V1 曲线不支持 WSOL 结算。
+
 ### 5. 管理指令（部署后）
 
 ```rust

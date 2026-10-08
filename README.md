@@ -232,6 +232,10 @@ let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
 
+For SOL-paired Pump curves with `use_v2=true`, prepare `BuyWith::Wsol` or
+`SellTo::Wsol` to create the required WSOL ATAs. Native SOL settlement still
+skips them; V1 curves reject WSOL settlement.
+
 ### 5. Admin (after deploy)
 
 ```rust

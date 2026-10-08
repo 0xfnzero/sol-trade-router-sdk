@@ -1,0 +1,337 @@
+    Checking sol-trade-router-sdk v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/crates/sdk)
+warning: constant `PUMPSWAP_BUYBACK_FEE_RECIPIENT` is never used
+  --> crates/sdk/src/constants.rs:54:11
+   |
+54 | pub const PUMPSWAP_BUYBACK_FEE_RECIPIENT: Pubkey =
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PUMP_MAYHEM_FEE_RECIPIENT` is never used
+  --> crates/sdk/src/constants.rs:57:11
+   |
+57 | pub const PUMP_MAYHEM_FEE_RECIPIENT: Pubkey =
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_route_instruction` is never used
+   --> crates/sdk/src/route_ix.rs:157:8
+    |
+157 | pub fn build_route_instruction(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sol-trade-router-sdk` (lib) generated 4 warnings
+    Checking router_examples_common v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/common)
+    Checking touter_test v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/touter_test)
+    Checking grpc_event_listen v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/grpc_event_listen)
+    Checking pumpfun_sniper_trading v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_sniper_trading)
+    Checking pumpfun_copy_trading v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_copy_trading)
+    Checking pumpfun_shred_sniper v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_shred_sniper)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.54s
+   Compiling sol-trade-router-sdk v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/crates/sdk)
+warning: constant `PUMPSWAP_BUYBACK_FEE_RECIPIENT` is never used
+  --> crates/sdk/src/constants.rs:54:11
+   |
+54 | pub const PUMPSWAP_BUYBACK_FEE_RECIPIENT: Pubkey =
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PUMP_MAYHEM_FEE_RECIPIENT` is never used
+  --> crates/sdk/src/constants.rs:57:11
+   |
+57 | pub const PUMP_MAYHEM_FEE_RECIPIENT: Pubkey =
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_route_instruction` is never used
+   --> crates/sdk/src/route_ix.rs:157:8
+    |
+157 | pub fn build_route_instruction(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling router_examples_common v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/common)
+warning: `sol-trade-router-sdk` (lib) generated 4 warnings
+   Compiling grpc_event_listen v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/grpc_event_listen)
+   Compiling touter_test v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/touter_test)
+   Compiling pumpfun_sniper_trading v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_sniper_trading)
+   Compiling pumpfun_shred_sniper v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_shred_sniper)
+   Compiling pumpfun_copy_trading v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/examples/pumpfun_copy_trading)
+warning: `sol-trade-router-sdk` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.78s
+     Running unittests src/main.rs (target/debug/deps/grpc_event_listen-7af86797fc7f6cb6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/pumpfun_copy_trading-78d27cdcccec1c94)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/pumpfun_shred_sniper-48f8896f7853fb17)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/pumpfun_sniper_trading-b614b1ef77a29ed1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/router_examples_common-daabc72b79f459fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router-4ec99b694f39977d)
+
+running 15 tests
+test test_id ... ok
+test instructions::route::tests::exact_out_preserves_the_fee_floor_and_budget_ceiling ... ok
+test instructions::route::tests::token_output_is_bound_to_the_expected_mint_in_every_route_mode ... ok
+test instructions::route::tests::dynamic_quote_delta_and_amount_patch_use_only_newly_received_tokens ... ok
+test instructions::route::tests::dynamic_target_program_ids_match_mainnet_addresses ... ok
+test instructions::route::tests::dynamic_whirlpool_preserves_and_validates_supplemental_slice ... ok
+test instructions::route::tests::pumpswap_sell_is_a_dynamic_following_leg_only_with_exact_input_layout ... ok
+test dispatch_tests::retired_unbound_dynamic_tags_are_rejected ... ok
+test instructions::route::tests::dynamic_middle_accepts_supported_exact_input_data_and_patches_amount ... ok
+test instructions::route::tests::exact_in_rejects_overspending_understatement_and_unspent_budget ... ok
+test instructions::route::tests::dynamic_target_only_accepts_exact_input_swaps ... ok
+test instructions::route::tests::native_sol_settlement_reads_signer_lamports_and_rejects_other_recipients ... ok
+test instructions::route::tests::legacy_native_sol_header_reaches_leg_parsing ... ok
+test instructions::route::tests::stored_config_bump_recreates_the_canonical_pda ... ok
+test instructions::route::tests::every_route_header_rejects_a_substituted_output_mint_before_cpi ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router_sdk-3befd6f8d8ca9f77)
+
+running 174 tests
+test mainnet_router_tests::mainnet_router_adapter_amm_v4_params ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_adapter_cpmm_params_roundtrip ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_adapter_viasol_params ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_amm_v4_exact_out ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_amm_v4_from_fixture_pool ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_amm_v4_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_clmm_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_clmm_reverse_sell_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_cpmm_buy_sell_roundtrip ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_cpmm_cards_direct_and_route ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_cpmm_exact_out_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_cpmm_sell_route_simulate ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_cpmm_wsol_stonk_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_creates_many_unique_wallets_and_funds ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_damm_v2_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_dlmm_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_fault_bad_route_program_is_soft_or_hard ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_fee_bps_encodes_and_simulates ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_launchlab_from_curve_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_load_market_by_rpc_amm_v4_and_damm ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_load_market_by_rpc_cpmm ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_multi_wallet_cpmm_parallel_builds ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pool_guard_rejects_untrusted_amm ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_prepare_atas_then_minimal_route ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpfun_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpfun_sell_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpswap_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpswap_buy_sell_roundtrip ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpswap_exact_out_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpswap_from_live_buy_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_pumpswap_sell_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_stonk_viasol_curve_from_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_stonk_viasol_graduated ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_trading_client_build_and_simulate ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_router_tests::mainnet_router_trading_client_sell_build ... ignored, requires mainnet RPC; run explicitly with --ignored
+test adapter::from_params::tests::cpmm_params_round_trip_fields ... ok
+test mainnet_router_tests::mainnet_router_whirlpool_from_live_events ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_amm_v4_wrong_token_program_is_hard ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_clmm_empty_ticks_is_hard_or_reject ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_cpmm_wrong_observation_is_fault ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_dlmm_empty_bins ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_pumpfun_wrong_fee_recipient_is_fault ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_whirlpool_empty_ticks ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_wrong_discriminator_is_hard ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fault_wrong_pool_account_is_hard ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_amm_v4_account_load_buy_and_exact_out ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_amm_v4_usdc_and_usdt ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_cpmm_amount_sweep ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_cpmm_wsol_cards_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_cpmm_wsol_stonk ... ignored, requires mainnet RPC; run explicitly with --ignored
+test adapter::from_params::tests::via_sol_amm_v4_hop_builds_bridge ... ok
+test mainnet_sim_tests::mainnet_fixture_meteora_damm_v2 ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_fixture_pumpswap_pool_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_parser_checked_vs_unchecked ... ignored, requires mainnet RPC; run explicitly with --ignored
+test adapter::from_params::tests::via_sol_builds_bridge ... ok
+test mainnet_sim_tests::mainnet_parser_market_from_dex_event_coverage ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_amm_v4_reverse_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_clmm_token2022_prefer ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_cpmm_exact_out_and_reverse ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_cpmm_swap ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_creates_fresh_wallet_each_run ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_launchlab_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_launchlab_secondary_pool_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_launchlab_sell_soft_without_balance ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_meteora_damm_v2 ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_meteora_damm_v2_reverse_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_meteora_dlmm ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_meteora_dlmm_reverse_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_multi_dex_fixture_battery ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_multi_wallet_parallel_funding ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_orca_whirlpool ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_orca_whirlpool_reverse_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpfun_buy_then_sell_roundtrip_legs ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpfun_buy_v1 ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpfun_buy_v2 ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpfun_cashback_buy_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpfun_sell_soft_without_balance ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpswap_buy ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpswap_buy_sell_roundtrip ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_pumpswap_sell ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_raydium_amm_v4 ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_raydium_amm_v4_exact_out ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_raydium_clmm ... ignored, requires mainnet RPC; run explicitly with --ignored
+test mainnet_sim_tests::mainnet_sim_raydium_clmm_reverse_soft ... ignored, requires mainnet RPC; run explicitly with --ignored
+test offline_tests::offline_adapter_amm_v4_and_cpmm_from_params ... ok
+test offline_tests::offline_amm_v4_rejects_unset_mints ... ok
+test offline_tests::offline_amm_v4_v2_quotes_use_actual_swap_fee_fraction ... ok
+test offline_tests::offline_amm_v4_v2_rejects_token_2022_in_both_amount_modes ... ok
+test legs::tests::amm_v4_uses_swap_v2_without_openbook ... ok
+test legs::tests::damm_v2_includes_program_placeholder_and_sysvar ... ok
+test legs::tests::pumpfun_v1_trailing_buyback_is_writable ... ok
+test offline_tests::offline_cpmm_exact_input_flag_cannot_determine_canonical_direction ... ok
+test adapter::pumpfun_state::tests::invalid_owners_unimplemented_extensions_and_v3_states_fail_closed ... ok
+test offline_tests::offline_classify_zerobase_and_layout_codes ... ok
+test offline_tests::offline_amm_v4_in_for_out_roundtrip ... ok
+test offline_tests::offline_classify_soft_vs_hard ... ok
+test legs::tests::pumpfun_v2_account_counts_and_discriminators_match_idl ... ok
+test offline_tests::offline_create_unique_wallets ... ok
+test legs::tests::pumpswap_uses_observed_protocol_fee_recipient ... ok
+test offline_tests::offline_all_exact_out_and_reverse_legs ... ok
+test offline_tests::offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees ... ok
+test offline_tests::offline_dynamic_quote_buy_rejects_disconnected_pools ... ok
+test offline_tests::offline_fault_mutate_discriminator ... ok
+test offline_tests::offline_fee_and_slippage_helpers ... ok
+test offline_tests::offline_cpmm_quote_positive ... ok
+test offline_tests::offline_fault_mutate_pool_slot ... ok
+test offline_tests::offline_adapter_cpmm_and_route_ix_targets_router_program ... ok
+test offline_tests::offline_dynamic_route_accepts_whirlpool_supplemental_ticks_as_following_hop ... ok
+test legs::tests::concentrated_swap_layouts_match_idls ... ok
+test offline_tests::offline_damm_exact_out_uses_official_amount_order_and_quotes_bind_direction ... ok
+test offline_tests::offline_exact_out_legs_use_expected_discriminators ... ok
+test offline_tests::offline_launchlab_sell_leg_builds ... ok
+test offline_tests::offline_pool_guard_disabled_allows_all_dummy_markets ... ok
+test offline_tests::offline_leg_builders_emit_accounts ... ok
+test offline_tests::offline_pumpfun_quote_positive ... ok
+test adapter::pumpfun_state::tests::current_schedules_override_and_recipient_fields_match_official_idl ... ok
+test adapter::pumpfun_state::tests::v3_requires_fee_config_and_accepts_nested_but_not_completed_or_cashback ... ok
+test offline_tests::offline_fee_reduces_route_amount_in ... ok
+test offline_tests::offline_mainnet_sim_create_wallet_helper ... ok
+test offline_tests::offline_pumpswap_and_amm_quotes ... ok
+test offline_tests::offline_pool_guard_stonk_strict_blocks_untrusted_cpmm ... ok
+test offline_tests::offline_pumpswap_signed_reserves_match_current_quote_calculator ... ok
+test offline_tests::offline_quote_helpers_cover_concentrated_venues ... ok
+test offline_tests::offline_native_sol_sell_binds_payer_and_sol_mint_sentinel ... ok
+test offline_tests::offline_cpmm_quotes_differential_current_rust_sdk_creator_modes_and_transfer_fees ... ok
+test offline_tests::offline_pumpfun_exact_in_matches_official_idl_split_fee_correction ... ok
+test offline_tests::offline_pumpswap_leg_builds ... ok
+test offline_tests::offline_pumpswap_cashback_inserts_volume_ata ... ok
+test offline_tests::offline_pumpswap_mayhem_fallback_does_not_use_regular_recipient ... ok
+test offline_tests::offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket ... ok
+test offline_tests::offline_unknown_fee_state_is_rejected_and_known_zero_is_valid ... ok
+test offline_tests::offline_router_client_builds_pumpfun_buy ... ok
+test offline_tests::offline_router_client_builds_pumpswap_buy ... ok
+test offline_tests::offline_whirlpool_owner_overlay_preserves_independently_known_side ... ok
+test parser::tests::pumpfun_solscan_sentinel_maps_to_wsol ... ok
+test offline_tests::offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets ... ok
+test parser::tests::whirlpool_swap_requires_three_tick_arrays ... ok
+test offline_tests::offline_whirlpool_supplemental_ticks_match_official_remaining_accounts_idl ... ok
+test offline_tests::offline_via_sol_amm_v4_bridge_builds_route ... ok
+test pool_guard::tests::launchlab_pda_ok_stonk_platform ... ok
+test pool_guard::tests::cpmm_strict_needs_trust ... ok
+test pool_guard::tests::launchlab_rejects_wrong_pool_state ... ok
+test offline_tests::offline_router_builds_all_market_kinds ... ok
+test pool_guard::tests::pumpfun_rejects_non_pda_curve ... ok
+test offline_tests::offline_router_sell_builds_for_major_dexes ... ok
+test quote::tests::cpmm_creator_fee_on_input_combined_rounding ... ok
+test pool_guard::tests::launchlab_stonk_only_rejects_foreign_platform ... ok
+test quote::tests::fee_amount_matches_on_chain_floor ... ok
+test pool_guard::tests::pumpswap_requires_canonical_for_wsol ... ok
+test quote::tests::pumpfun_fee_additive ... ok
+test quote::tests::pumpswap_quotes_match_reference_integer_math ... ok
+test quote::tests::slippage_clamped_to_9999 ... ok
+test quote::tests::transfer_fee_ceiling ... ok
+test route_ix::tests::dynamic_route_rejects_unconnected_or_wrong_second_leg ... ok
+test quote::tests::meteora_damm_v2_rejects_reserve_approximation_and_unbound_quote ... ok
+test route_ix::tests::legacy_route_tag_and_account_layout_remain_unchanged ... ok
+test pumpfun_v3::tests::routes_bind_output_and_max_budget_with_setup_outside_debit ... ok
+test pumpfun_v3::tests::official_v3_account_layout_and_partial_fill_false ... ok
+test route_ix::tests::pumpswap_dynamic_following_leg_accepts_sell_but_not_other_instructions ... ok
+test trade::tests::route_amount_in_covers_spend_after_fee ... ok
+test pumpfun_v3::tests::exact_output_quote_and_encoding_follow_official_curve_and_pool_math ... ok
+test route_ix::tests::pumpswap_sell_builder_matches_dynamic_account_layout ... ok
+test offline_tests::offline_pumpfun_uses_v2_and_sell_v2_leg ... ok
+test route_ix::tests::three_hop_mode_switch_preserves_fixed_route_and_encodes_dynamic_accounts ... ok
+test route_ix::tests::reverse_two_hop_launchlab_sell_can_finish_on_each_supported_pool ... ok
+test route_ix::tests::dynamic_route_accepts_any_first_dex_and_both_supported_targets ... ok
+test pumpfun_v3::tests::official_quote_golden_vectors_cover_graduation_and_split_rounding ... ok
+test offline_tests::offline_routed_market_helpers ... ok
+test route_ix::tests::three_hop_buy_and_sell_accept_each_supported_usdc_quote_pool ... ok
+test quote::tests::cpmm_in_for_out_round_trips ... ok
+test offline_tests::offline_transfer_fee_and_ata_policy ... ok
+test offline_tests::offline_market_mint_helpers_cover_dexes ... ok
+test offline_tests::offline_route_exact_out_flag_sets_fee_asset_bit ... ok
+test offline_tests::offline_all_dex_leg_builders ... ok
+
+test result: ok. 93 passed; 0 failed; 81 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/main.rs (target/debug/deps/touter_test-1f2a85f6a7516f60)
+
+running 2 tests
+test tests::default_and_initialization_modes_never_send_without_the_send_flag ... ok
+test tests::orca_overrides_preserve_the_restored_legacy_header_and_target_mint ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests router_examples_common
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sol_trade_router
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sol_trade_router_sdk
+
+running 1 test
+test crates/sdk/src/lib.rs - (line 16) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
