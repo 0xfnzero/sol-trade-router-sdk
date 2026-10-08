@@ -746,7 +746,7 @@ impl RouterClient {
         match (&opts.buy_with, &market.market) {
             // —— PumpFun WSOL-quote: native SOL always uses V1 layout (sol-trade-sdk) ——
             (BuyWith::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
-                let expected = pumpfun_buy_token_out(pool, spend);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -758,7 +758,7 @@ impl RouterClient {
             }
             // —— PumpFun WSOL-quote + use_v2: settle via existing WSOL ATA ——
             (BuyWith::Wsol, Market::PumpFunInner(pool)) if pool.uses_wsol_ata_settlement() => {
-                let expected = pumpfun_buy_token_out(pool, spend);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -777,7 +777,7 @@ impl RouterClient {
                         "PumpFun WSOL-quote: use BuyWith::Sol (native) or BuyWith::Wsol (use_v2)"
                     ));
                 }
-                let expected = pumpfun_buy_token_out(pool, spend);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1061,7 +1061,7 @@ impl RouterClient {
         match (&opts.sell_to, &market.market) {
             // —— PumpFun WSOL-quote: native SOL always V1 ——
             (SellTo::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1073,7 +1073,7 @@ impl RouterClient {
             }
             // —— PumpFun WSOL-quote + use_v2: credit WSOL ATA ——
             (SellTo::Wsol, Market::PumpFunInner(pool)) if pool.uses_wsol_ata_settlement() => {
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1093,7 +1093,7 @@ impl RouterClient {
                 if *out_mint != pool.quote_mint {
                     return Err(anyhow!("PumpFun V2 receive mint must be pool quote"));
                 }
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1508,19 +1508,21 @@ impl RouterClient {
                 vec![meteora_damm_v2_swap_leg(
                     &self.payer,
                     &exact,
-                    spend, // max amount in
-                    amount_out,
+                    amount_out, // amount_0 = output in exact-out mode
+                    spend, // amount_1 = maximum input
                     input_mint,
                 )?],
                 amount_out,
             ));
         }
-        let expected = meteora_damm_v2_out(pool, spend, input_mint == pool.token_a_mint)?;
+        let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, spend, input_mint == pool.token_a_mint)? };
+        let mut exact = pool.clone();
+        exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
         Ok((
             vec![meteora_damm_v2_swap_leg(
                 &self.payer,
-                pool,
+                &exact,
                 spend,
                 min_out,
                 input_mint,
@@ -1544,12 +1546,14 @@ impl RouterClient {
         } else {
             return Err(anyhow!("Meteora DAMM V2 output mint does not match pool"));
         };
-        let expected = meteora_damm_v2_out(pool, sell_amt, input_mint == pool.token_a_mint)?;
+        let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, sell_amt, input_mint == pool.token_a_mint)? };
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
+        let mut exact = pool.clone();
+        exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
         Ok((
             vec![meteora_damm_v2_swap_leg(
                 &self.payer,
-                pool,
+                &exact,
                 sell_amt,
                 min_out,
                 input_mint,
@@ -1567,6 +1571,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1603,6 +1608,7 @@ impl RouterClient {
             pool.token_1_program,
             "Raydium CLMM",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1632,6 +1638,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1662,6 +1669,7 @@ impl RouterClient {
             pool.token_program_b,
             "Orca Whirlpool",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1685,6 +1693,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1721,6 +1730,7 @@ impl RouterClient {
             pool.token_y_program,
             "Meteora DLMM",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -2001,7 +2011,7 @@ impl RouterClient {
                 if pool.quote_mint != quote {
                     return Err(anyhow!("PumpFun V2 bridge quote mismatch"));
                 }
-                let expected = pumpfun_buy_token_out(pool, hop1_min);
+                let expected = match explicit_min_out { Some(min) => min, None => pumpfun_buy_token_out(pool, hop1_min)? };
                 let min = explicit_min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slippage_bps));
                 (pumpfun_buy_v2_leg(&payer, pool, hop1_min, min), expected)
@@ -2022,11 +2032,13 @@ impl RouterClient {
                 )
             }
             Market::MeteoraDammV2(pool) => {
-                let expected = meteora_damm_v2_out(pool, hop1_min, quote == pool.token_a_mint)?;
+                let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, hop1_min, quote == pool.token_a_mint)? };
                 let min = explicit_min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slippage_bps));
+                let mut exact = pool.clone();
+                exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
                 (
-                    meteora_damm_v2_swap_leg(&payer, pool, hop1_min, min, quote)?,
+                    meteora_damm_v2_swap_leg(&payer, &exact, hop1_min, min, quote)?,
                     expected,
                 )
             }
@@ -2185,7 +2197,7 @@ impl RouterClient {
                 if pool.quote_mint != quote {
                     return Err(anyhow!("PumpFun V2 bridge quote mismatch"));
                 }
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = pumpfun_sell_sol_out(pool, sell_amt)?;
                 let hop1_min = bridge_intermediate_min_out(expected);
                 (pumpfun_sell_v2_leg(&payer, pool, sell_amt, hop1_min), hop1_min)
             }
@@ -2207,14 +2219,17 @@ impl RouterClient {
                 let input = market.base_mint();
                 let expected = meteora_damm_v2_out(pool, sell_amt, input == pool.token_a_mint)?;
                 let hop1_min = bridge_intermediate_min_out(expected);
+                let mut exact = pool.clone();
+                exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
                 (
-                    meteora_damm_v2_swap_leg(&payer, pool, sell_amt, hop1_min, input)?,
+                    meteora_damm_v2_swap_leg(&payer, &exact, sell_amt, hop1_min, input)?,
                     hop1_min,
                 )
             }
             // Intermediate CL hop pins expected_out (slippage_bps=0); final hop applies slip.
             Market::RaydiumClmm(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2230,6 +2245,7 @@ impl RouterClient {
             }
             Market::Whirlpool(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2245,6 +2261,7 @@ impl RouterClient {
             }
             Market::MeteoraDlmm(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2315,6 +2332,13 @@ impl RouterClient {
     }
 }
 
+fn assert_quote_direction(quoted_input: Option<Pubkey>, input: Pubkey, explicit: Option<u64>) -> Result<()> {
+    if explicit.is_none() && quoted_input != Some(input) {
+        return Err(anyhow!("quote input mint/direction is missing or mismatched; refresh quote or provide min_out"));
+    }
+    Ok(())
+}
+
 fn concentrated_min_out(
     expected: Option<u64>,
     quoted_amount_in: Option<u64>,
@@ -2323,6 +2347,7 @@ fn concentrated_min_out(
     slippage_bps: u64,
     dex: &str,
 ) -> Result<u64> {
+    if let Some(min) = explicit { return Ok(min); }
     match quoted_amount_in {
         Some(qin) if qin == amount_in => {}
         Some(qin) => {

@@ -156,6 +156,13 @@ pub async fn load_routed_market_by_rpc(
         _ => mint,
     };
 
-    let market = to_routed_market_for_user(&extension, mint, user)?;
+    let mut market = to_routed_market_for_user(&extension, mint, user)?;
+    if let crate::market::Market::PumpFunInner(pool) = &mut market.market {
+        let expected_creator = match &extension {
+            DexParamEnum::PumpFun(p) => p.bonding_curve.creator,
+            _ => return Err(anyhow::anyhow!("PumpFun snapshot has incompatible params")),
+        };
+        super::pumpfun_state::refresh(rpc, pool, expected_creator).await?;
+    }
     Ok((extension, market))
 }

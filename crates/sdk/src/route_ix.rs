@@ -701,7 +701,7 @@ mod tests {
             quote_reserve: 0,
             virtual_quote_reserves: 0,
             lp_fee_bps: 0,
-            protocol_fee_bps: 0,
+            protocol_fee_bps: 95,
             creator_fee_bps: 0,
             is_cashback_coin: false,
             protocol_fee_recipient: Pubkey::new_unique(),

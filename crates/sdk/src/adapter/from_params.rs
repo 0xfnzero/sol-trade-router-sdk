@@ -41,7 +41,7 @@ impl TransferFeeConvert for sol_trade_sdk::trading::core::params::TokenTransferF
 
 #[inline]
 fn quote_or_wsol(quote_mint: Pubkey) -> Pubkey {
-    if quote_mint == Pubkey::default() {
+    if quote_mint == Pubkey::default() || quote_mint == sol_trade_sdk::constants::SOL_TOKEN_ACCOUNT {
         WSOL_MINT
     } else {
         quote_mint
@@ -78,6 +78,7 @@ pub fn bonk_to_launchlab(p: &BonkParams, base_mint: Pubkey) -> LaunchLabPool {
         real_quote: p.real_quote,
         total_base_sell: p.total_base_sell,
         curve_type: p.curve_type,
+        fee_rates_known: true,
         trade_fee_rate: p.trade_fee_rate,
         platform_fee_rate: p.platform_fee_rate,
         creator_fee_rate: p.creator_fee_rate,
@@ -99,6 +100,7 @@ pub fn cpmm_from_params(p: &RaydiumCpmmParams) -> CpmmPool {
         quote_token_program: token_program_or_spl(p.quote_token_program),
         base_reserve: p.base_reserve,
         quote_reserve: p.quote_reserve,
+        fee_rates_known: true,
         trade_fee_rate: p.trade_fee_rate,
         creator_fee_rate: p.creator_fee_rate,
         creator_fee_on: p.creator_fee_on,
@@ -127,18 +129,25 @@ pub fn pumpfun_from_params(
     } else {
         p.quote_mint
     });
+    if bc.complete {
+        return Err(anyhow!("completed PumpFun curves require migration/PumpFun V3 routing, unsupported by this adapter"));
+    }
     let use_v2 = quote_mint != WSOL_MINT;
     let bonding_curve_v2 = get_bonding_curve_v2_pda(&mint).unwrap_or_default();
     let user_volume_accumulator = get_user_volume_accumulator_pda(user).unwrap_or_default();
     Ok(PumpFunPool {
         mint,
-        mint_token_program: token_program_or_spl(p.token_program),
+        mint_token_program: if p.token_program == Pubkey::default() {
+            crate::constants::TOKEN_2022_PROGRAM
+        } else { p.token_program },
         quote_mint,
         quote_token_program: TOKEN_PROGRAM,
         use_v2,
         bonding_curve,
         associated_bonding_curve: p.associated_bonding_curve,
-        creator_vault: p.creator_vault,
+        creator_vault: sol_trade_sdk::instruction::utils::pumpfun::resolve_creator_vault_for_ix_with_fee_sharing(
+            &p.effective_creator_for_trade(), p.creator_vault, &mint, p.fee_sharing_creator_vault_if_active,
+        ).ok_or_else(|| anyhow!("PumpFun creator vault cannot be resolved"))?,
         fee_recipient: p.fee_recipient,
         buyback_fee_recipient: PUMPFUN_BUYBACK_FEE_RECIPIENT,
         global: PUMPFUN_GLOBAL,
@@ -153,7 +162,9 @@ pub fn pumpfun_from_params(
         virtual_sol_reserves: bc.virtual_sol_reserves,
         real_token_reserves: bc.real_token_reserves,
         protocol_fee_bps: 0,
-        has_creator: bc.creator != Pubkey::default(),
+        creator_fee_bps: 0,
+        fee_rates_known: false,
+        has_creator: p.effective_creator_for_trade() != Pubkey::default(),
         is_cashback_coin: bc.is_cashback_coin,
     })
 }
@@ -178,8 +189,10 @@ pub fn pumpswap_from_params(p: &PumpSwapParams) -> PumpSwapPool {
         protocol_fee_bps: fees.protocol_fee_basis_points,
         creator_fee_bps: fees.coin_creator_fee_basis_points,
         is_cashback_coin: p.is_cashback_coin,
-        protocol_fee_recipient: sol_trade_sdk::instruction::utils::pumpswap::accounts::PROTOCOL_FEE_RECIPIENT,
-        buyback_fee_recipient: PUMPFUN_BUYBACK_FEE_RECIPIENT,
+        protocol_fee_recipient: p.protocol_fee_recipient_override.unwrap_or(
+            sol_trade_sdk::instruction::utils::pumpswap::accounts::PROTOCOL_FEE_RECIPIENT
+        ),
+        buyback_fee_recipient: p.protocol_extra_fee_recipient_override.unwrap_or(PUMPFUN_BUYBACK_FEE_RECIPIENT),
     }
 }
 
@@ -222,10 +235,11 @@ pub fn damm_v2_from_params(p: &MeteoraDammV2Params) -> MeteoraDammV2Pool {
         token_b_reserve: 0,
         fee_bps: 0,
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
-        swap_mode: p.swap_mode,
+        swap_mode: crate::constants::METEORA_DAMM_V2_EXACT_IN,
         referral_token_account: p.referral_token_account,
-        include_rate_limiter_sysvar: p.include_rate_limiter_sysvar,
+        include_rate_limiter_sysvar: true, // harmless when inactive; required when the limiter applies
     }
 }
 
@@ -243,6 +257,7 @@ pub fn raydium_clmm_from_params(p: &RaydiumClmmParams) -> RaydiumClmmPool {
         tick_arrays: p.tick_arrays.clone(),
         tick_array_bitmap_extension: p.tick_array_bitmap_extension,
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         fee_bps: 0,
     }
@@ -259,6 +274,7 @@ pub fn whirlpool_from_params(p: &WhirlpoolParams) -> WhirlpoolPool {
         token_program_b: token_program_or_spl(p.token_program_b),
         tick_arrays: p.tick_arrays.clone(),
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         fee_bps: 0,
     }
@@ -277,6 +293,7 @@ pub fn dlmm_from_params(p: &MeteoraDlmmParams) -> MeteoraDlmmPool {
         oracle: p.oracle,
         bin_arrays: p.bin_arrays.clone(),
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         fee_bps: 0,
     }

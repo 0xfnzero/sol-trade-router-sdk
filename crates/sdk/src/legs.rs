@@ -693,6 +693,9 @@ pub fn meteora_damm_v2_swap_leg(
             pool.swap_mode
         ));
     }
+    if pool.swap_mode != METEORA_DAMM_V2_EXACT_IN && pool.swap_mode != METEORA_DAMM_V2_EXACT_OUT {
+        return Err(anyhow!("router DAMM V2 requires exact-in or exact-out; partial-fill mode is unsupported"));
+    }
     let (input_program, output_mint, output_program) = if input_mint == pool.token_a_mint {
         (
             pool.token_a_program,
@@ -1004,6 +1007,8 @@ mod tests {
             virtual_sol_reserves: 2_000_000,
             real_token_reserves: 900_000,
             protocol_fee_bps: 95,
+            creator_fee_bps: 30,
+            fee_rates_known: true,
             has_creator: true,
             is_cashback_coin: false,
         }
@@ -1056,6 +1061,7 @@ mod tests {
                 &key(2),
             )),
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 25,
         };
@@ -1078,6 +1084,7 @@ mod tests {
             token_program_b: TOKEN_PROGRAM,
             tick_arrays: vec![key(6), key(7), key(8)],
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 30,
         };
@@ -1106,6 +1113,7 @@ mod tests {
             oracle: key(6),
             bin_arrays: vec![key(7), key(8)],
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 20,
         };
@@ -1166,6 +1174,7 @@ mod tests {
             token_b_reserve: 1_000_000,
             fee_bps: 25,
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             swap_mode: METEORA_DAMM_V2_EXACT_IN,
             referral_token_account: None,

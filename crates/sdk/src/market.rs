@@ -29,6 +29,8 @@ pub struct LaunchLabPool {
     pub total_base_sell: u128,
     /// 0 = constant-product (only type we quote).
     pub curve_type: u8,
+    /// True only after current configuration and mint fee state have been supplied.
+    pub fee_rates_known: bool,
     pub trade_fee_rate: u64,
     pub platform_fee_rate: u64,
     pub creator_fee_rate: u64,
@@ -60,6 +62,8 @@ pub struct CpmmPool {
     pub quote_token_program: Pubkey,
     pub base_reserve: u64,
     pub quote_reserve: u64,
+    /// True only after current configuration and mint fee state have been supplied.
+    pub fee_rates_known: bool,
     pub trade_fee_rate: u64,
     pub creator_fee_rate: u64,
     /// 0 = always on input; 1 = on input when base_in; 2 = on input when quote_in.
@@ -151,8 +155,11 @@ pub struct PumpFunPool {
     /// Virtual *quote* reserves (lamports for WSOL quote; USDC units for USDC quote V2).
     pub virtual_sol_reserves: u64,
     pub real_token_reserves: u64,
-    /// 0 → use `95 + (has_creator ? 30 : 0)`; else override.
+    /// Actual charged protocol rate; zero is a valid rate when fee_rates_known.
     pub protocol_fee_bps: u64,
+    pub creator_fee_bps: u64,
+    /// False for params lacking current Global/FeeConfig rates; auto-quotes fail.
+    pub fee_rates_known: bool,
     pub has_creator: bool,
     /// Cashback coins need `user_volume_accumulator` on sell + track_volume=1 on buy.
     pub is_cashback_coin: bool,
@@ -262,8 +269,10 @@ pub struct MeteoraDammV2Pool {
     pub fee_bps: u64,
     /// Input size this `expected_out` was quoted for (required when using expected_out).
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
-    /// `swap2` mode: only `0` (exact-in) is supported by the router fee_source check.
+    /// `swap2` mode: 0 (exact-in) or 2 (exact-out); partial-fill mode 1 is rejected.
     pub swap_mode: u8,
     pub referral_token_account: Option<Pubkey>,
     pub include_rate_limiter_sysvar: bool,
@@ -283,6 +292,8 @@ pub struct RaydiumClmmPool {
     pub tick_arrays: Vec<Pubkey>,
     pub tick_array_bitmap_extension: Option<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }
@@ -298,6 +309,8 @@ pub struct WhirlpoolPool {
     pub token_program_b: Pubkey,
     pub tick_arrays: Vec<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }
@@ -315,6 +328,8 @@ pub struct MeteoraDlmmPool {
     pub oracle: Pubkey,
     pub bin_arrays: Vec<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }

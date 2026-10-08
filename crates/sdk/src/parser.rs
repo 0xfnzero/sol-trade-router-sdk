@@ -31,8 +31,8 @@ use crate::{
 /// Best-effort market snapshot from a single parser event.
 ///
 /// Returns `None` for non-trade / incomplete events. Concentrated-liquidity
-/// snapshots include `quoted_amount_in` + `expected_out` from the observed swap
-/// so the hot path can bind slippage without a second quote.
+/// snapshots retain account topology, but historical output is not a current
+/// quote. Supply an external amount/direction-bound quote or explicit min_out.
 ///
 /// Does **not** run wild-pool checks — use [`market_from_dex_event_checked`] when
 /// feeding aggregator / untrusted event streams.
@@ -41,7 +41,10 @@ pub fn market_from_dex_event(event: &DexEvent) -> Option<Market> {
         DexEvent::PumpFunTrade(e)
         | DexEvent::PumpFunBuy(e)
         | DexEvent::PumpFunSell(e)
-        | DexEvent::PumpFunBuyExactSolIn(e) => Some(Market::PumpFunInner(pumpfun_from_trade(e))),
+        | DexEvent::PumpFunBuyExactSolIn(e) => {
+            if e.ix_name.ends_with("_v3") { return None; }
+            Some(Market::PumpFunInner(pumpfun_from_trade(e)))
+        },
         DexEvent::PumpSwapBuy(e) => Some(Market::PumpSwapOuter(pumpswap_from_buy(e))),
         DexEvent::PumpSwapSell(e) => Some(Market::PumpSwapOuter(pumpswap_from_sell(e))),
         DexEvent::RaydiumLaunchlabTrade(e) => Some(Market::LaunchLabInner(launchlab_from_trade(e)?)),
@@ -131,7 +134,9 @@ pub fn pumpfun_from_trade(e: &PumpFunTradeEvent) -> PumpFunPool {
         virtual_sol_reserves: virtual_sol,
         real_token_reserves: e.real_token_reserves,
         protocol_fee_bps: e.fee_basis_points,
-        has_creator: e.creator != Pubkey::default() && e.creator_fee_basis_points > 0,
+        creator_fee_bps: e.creator_fee_basis_points,
+        fee_rates_known: !e.ix_name.ends_with("_v3"),
+        has_creator: e.creator != Pubkey::default(),
         is_cashback_coin: e.is_cashback_coin || e.cashback_fee_basis_points > 0,
     }
 }
@@ -153,7 +158,7 @@ pub fn pumpswap_from_buy(e: &PumpSwapBuyEvent) -> PumpSwapPool {
         virtual_quote_reserves: e.virtual_quote_reserves,
         lp_fee_bps: e.lp_fee_basis_points,
         protocol_fee_bps: e.protocol_fee_basis_points,
-        creator_fee_bps: e.coin_creator_fee_basis_points,
+        creator_fee_bps: e.coin_creator_fee_basis_points.saturating_add(e.cashback_fee_basis_points),
         is_cashback_coin: e.cashback_fee_basis_points > 0,
         protocol_fee_recipient: e.protocol_fee_recipient,
         buyback_fee_recipient: or_default(e.fee_recipient, PUMPFUN_BUYBACK_FEE_RECIPIENT),
@@ -177,7 +182,7 @@ pub fn pumpswap_from_sell(e: &PumpSwapSellEvent) -> PumpSwapPool {
         virtual_quote_reserves: e.virtual_quote_reserves,
         lp_fee_bps: e.lp_fee_basis_points,
         protocol_fee_bps: e.protocol_fee_basis_points,
-        creator_fee_bps: e.coin_creator_fee_basis_points,
+        creator_fee_bps: e.coin_creator_fee_basis_points.saturating_add(e.cashback_fee_basis_points),
         is_cashback_coin: e.cashback_fee_basis_points > 0,
         protocol_fee_recipient: e.protocol_fee_recipient,
         buyback_fee_recipient: or_default(e.fee_recipient, PUMPFUN_BUYBACK_FEE_RECIPIENT),
@@ -219,6 +224,7 @@ pub fn launchlab_from_trade(e: &RaydiumLaunchlabTradeEvent) -> Option<LaunchLabP
         real_quote: e.real_quote_after as u128,
         total_base_sell: e.total_base_sell as u128,
         curve_type: 0,
+        fee_rates_known: false,
         trade_fee_rate: 0,
         platform_fee_rate: 0,
         creator_fee_rate: 0,
@@ -227,53 +233,11 @@ pub fn launchlab_from_trade(e: &RaydiumLaunchlabTradeEvent) -> Option<LaunchLabP
     })
 }
 
-pub fn cpmm_from_swap(e: &RaydiumCpmmSwapEvent) -> Option<CpmmPool> {
-    if e.pool_id == Pubkey::default() {
-        return None;
-    }
-    let (base_mint, quote_mint, base_vault, quote_vault, base_tp, quote_tp, base_res, quote_res) =
-        if e.base_input {
-            (
-                e.input_token_mint,
-                e.output_token_mint,
-                e.input_vault,
-                e.output_vault,
-                e.input_token_program,
-                e.output_token_program,
-                e.input_vault_before.saturating_add(e.input_amount),
-                e.output_vault_before.saturating_sub(e.output_amount),
-            )
-        } else {
-            (
-                e.output_token_mint,
-                e.input_token_mint,
-                e.output_vault,
-                e.input_vault,
-                e.output_token_program,
-                e.input_token_program,
-                e.output_vault_before.saturating_sub(e.output_amount),
-                e.input_vault_before.saturating_add(e.input_amount),
-            )
-        };
-    Some(CpmmPool {
-        pool_state: e.pool_id,
-        amm_config: e.amm_config,
-        observation_state: e.observation_state,
-        base_mint,
-        quote_mint,
-        base_vault,
-        quote_vault,
-        base_token_program: tp_or_spl(base_tp),
-        quote_token_program: tp_or_spl(quote_tp),
-        base_reserve: base_res,
-        quote_reserve: quote_res,
-        trade_fee_rate: 0,
-        creator_fee_rate: 0,
-        creator_fee_on: 0,
-        enable_creator_fee: false,
-        base_transfer_fee: TokenTransferFee::default(),
-        quote_transfer_fee: TokenTransferFee::default(),
-    })
+/// A swap log does not identify canonical token0/token1, current AmmConfig
+/// rates or accrued vault fees. `base_input` means exact-in vs exact-out,
+/// not token0 vs token1 direction. Load/merge pool, config and mint state instead.
+pub fn cpmm_from_swap(_e: &RaydiumCpmmSwapEvent) -> Option<CpmmPool> {
+    None
 }
 
 pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
@@ -290,6 +254,7 @@ pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
         quote_token_program: TOKEN_PROGRAM,
         base_reserve: 0,
         quote_reserve: 0,
+        fee_rates_known: false,
         trade_fee_rate: 0,
         creator_fee_rate: 0,
         creator_fee_on: 0,
@@ -328,7 +293,6 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
         (e.output_mint, e.input_mint, e.output_vault, e.input_vault)
     };
     let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
-    let amount_out = if e.zero_for_one { e.amount_1 } else { e.amount_0 };
     // CLMM swap events do not carry per-mint token programs. Heuristic: a non-zero
     // transfer_fee on a side strongly implies Token-2022 for that mint; otherwise
     // default SPL. Bots with mint-owner cache should call [`clmm_apply_token_programs`].
@@ -355,7 +319,8 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
         tick_arrays: e.tick_arrays.clone(),
         tick_array_bitmap_extension: e.tick_array_bitmap_extension,
         quoted_amount_in: Some(amount_in).filter(|&a| a > 0),
-        expected_out: Some(amount_out).filter(|&a| a > 0),
+        quoted_input_mint: None,
+        expected_out: None, // observed historical output is not a current quote
         fee_bps: 0,
     })
 }
@@ -375,6 +340,7 @@ pub fn clmm_from_pool_state(e: &RaydiumClmmPoolStateAccountEvent) -> RaydiumClmm
         tick_arrays: Vec::new(),
         tick_array_bitmap_extension: None,
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         fee_bps: 0,
     }
@@ -398,7 +364,8 @@ pub fn whirlpool_from_swap(e: &OrcaWhirlpoolSwapEvent) -> Option<WhirlpoolPool> 
         token_program_b: tp_or_spl(e.token_program_b),
         tick_arrays: ticks.to_vec(),
         quoted_amount_in: Some(e.input_amount).filter(|&a| a > 0),
-        expected_out: Some(e.output_amount).filter(|&a| a > 0),
+        quoted_input_mint: None,
+        expected_out: None, // observed historical output is not a current quote
         fee_bps: 0,
     })
 }
@@ -415,6 +382,7 @@ pub fn whirlpool_from_account(e: &OrcaWhirlpoolAccountEvent) -> WhirlpoolPool {
         token_program_b: TOKEN_PROGRAM,
         tick_arrays: Vec::new(),
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         fee_bps: (w.fee_rate / 100) as u16, // hundredths of a bip → bps
     }
@@ -437,9 +405,12 @@ pub fn merge_whirlpool_swap(pool: &mut WhirlpoolPool, e: &OrcaWhirlpoolSwapEvent
         pool.token_program_a = e.token_program_a;
         pool.token_program_b = e.token_program_b;
     }
+    pool.expected_out = None;
+    pool.quoted_input_mint = None;
     if e.input_amount > 0 {
         pool.quoted_amount_in = Some(e.input_amount);
-        pool.expected_out = Some(e.output_amount);
+        pool.expected_out = None;
+        pool.quoted_input_mint = None;
     }
 }
 
@@ -457,10 +428,12 @@ pub fn merge_clmm_swap(pool: &mut RaydiumClmmPool, e: &RaydiumClmmSwapEvent) {
         pool.observation_state = e.observation_state;
     }
     let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
-    let amount_out = if e.zero_for_one { e.amount_1 } else { e.amount_0 };
+    pool.expected_out = None;
+    pool.quoted_input_mint = None;
     if amount_in > 0 {
         pool.quoted_amount_in = Some(amount_in);
-        pool.expected_out = Some(amount_out);
+        pool.expected_out = None;
+        pool.quoted_input_mint = None;
     }
 }
 
@@ -480,7 +453,8 @@ pub fn dlmm_from_swap(e: &MeteoraDlmmSwapEvent) -> Option<MeteoraDlmmPool> {
         oracle: e.oracle,
         bin_arrays: e.bin_arrays.clone(),
         quoted_amount_in: Some(e.amount_in).filter(|&a| a > 0),
-        expected_out: Some(e.amount_out).filter(|&a| a > 0),
+        quoted_input_mint: None,
+        expected_out: None, // observed historical output is not a current quote
         fee_bps: (e.fee_bps.min(u128::from(u16::MAX))) as u16,
     })
 }
@@ -501,10 +475,11 @@ pub fn damm_v2_from_swap(e: &MeteoraDammV2SwapEvent) -> Option<MeteoraDammV2Pool
         token_b_reserve: e.reserve_b_amount,
         fee_bps: 0,
         quoted_amount_in: Some(e.amount_in).filter(|&a| a > 0),
-        expected_out: Some(e.output_amount).filter(|&a| a > 0),
-        swap_mode: e.swap_mode,
+        quoted_input_mint: None,
+        expected_out: None, // observed historical output is not a current quote
+        swap_mode: crate::constants::METEORA_DAMM_V2_EXACT_IN,
         referral_token_account: e.referral_token_account,
-        include_rate_limiter_sysvar: false,
+        include_rate_limiter_sysvar: true,
     })
 }
 
@@ -564,7 +539,7 @@ mod tests {
         let pool = whirlpool_from_swap(&e).unwrap();
         assert_eq!(pool.tick_arrays.len(), 3);
         assert_eq!(pool.quoted_amount_in, Some(100));
-        assert_eq!(pool.expected_out, Some(90));
+        assert_eq!(pool.expected_out, None);
     }
 
     #[test]

@@ -74,6 +74,9 @@ pub struct LaunchLabBuyQuote {
 }
 
 fn launchlab_total_fee_rate(pool: &LaunchLabPool, share_fee_rate: u64) -> Result<u128> {
+    if !pool.fee_rates_known {
+        return Err(anyhow!("LaunchLab current Global/Platform/mint fee state is missing"));
+    }
     let rate = (pool.trade_fee_rate as u128)
         .saturating_add(pool.platform_fee_rate as u128)
         .saturating_add(pool.creator_fee_rate as u128)
@@ -273,11 +276,13 @@ mod tests {
             virtual_token_reserves: 1_000_000_000,
             virtual_sol_reserves: 30_000_000_000,
             real_token_reserves: 800_000_000,
-            protocol_fee_bps: 0,
+            protocol_fee_bps: 95,
+            creator_fee_bps: 30,
+            fee_rates_known: true,
             has_creator: true,
             is_cashback_coin: false,
         };
-        let out = pumpfun_buy_token_out(&pool, 1_000_000);
+        let out = pumpfun_buy_token_out(&pool, 1_000_000).unwrap();
         assert!(out > 0);
         // Additive fee yields more tokens than subtractive 1.25% would imply as under-estimate check
         let subtractive_net = 1_000_000u128 * 9875 / 10_000;
@@ -302,6 +307,7 @@ mod tests {
             quote_token_program: dummy_pubkey(9),
             base_reserve: 1_000_000,
             quote_reserve: 2_000_000,
+            fee_rates_known: true,
             trade_fee_rate: 2_500,
             creator_fee_rate: 10_000,
             creator_fee_on: 0,
@@ -329,6 +335,7 @@ mod tests {
             quote_token_program: dummy_pubkey(9),
             base_reserve: 1_000_000_000,
             quote_reserve: 2_000_000_000,
+            fee_rates_known: true,
             trade_fee_rate: 2_500,
             creator_fee_rate: 0,
             creator_fee_on: 0,
@@ -380,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn meteora_damm_v2_prefers_reserve_quote_over_stale_expected_out() {
+    fn meteora_damm_v2_rejects_reserve_approximation_and_unbound_quote() {
         let pool = MeteoraDammV2Pool {
             pool: dummy_pubkey(1),
             token_a_vault: dummy_pubkey(2),
@@ -393,13 +400,13 @@ mod tests {
             token_b_reserve: 2_000_000,
             fee_bps: 0,
             quoted_amount_in: None,
+            quoted_input_mint: None,
             expected_out: Some(1),
             swap_mode: 0,
             referral_token_account: None,
             include_rate_limiter_sysvar: false,
         };
-        let out = meteora_damm_v2_out(&pool, 100_000, true).unwrap();
-        assert!(out > 1, "reserve quote must beat stale expected_out, got {out}");
+        assert!(meteora_damm_v2_out(&pool, 100_000, true).is_err());
     }
 
     #[test]
@@ -426,6 +433,13 @@ fn creator_fee_on_input(pool: &CpmmPool, input_is_base: bool) -> Result<bool> {
 
 /// CPMM swap quote — matches sol-trade-sdk `compute_swap_amount` (creator + transfer fees).
 pub fn cpmm_out(pool: &CpmmPool, amount_in: u64, input_is_base: bool) -> Result<u64> {
+    if !pool.fee_rates_known {
+        return Err(anyhow!("CPMM current config and mint fee state is missing"));
+    }
+    if pool.trade_fee_rate as u128 + (if pool.enable_creator_fee { pool.creator_fee_rate as u128 } else { 0 }) >= FEE_DENOM
+        || pool.base_transfer_fee.basis_points > 10_000 || pool.quote_transfer_fee.basis_points > 10_000 {
+        return Err(anyhow!("invalid CPMM fee configuration"));
+    }
     if amount_in == 0 {
         return Err(anyhow!("amount_in is zero"));
     }
@@ -453,7 +467,9 @@ pub fn cpmm_out(pool: &CpmmPool, amount_in: u64, input_is_base: bool) -> Result<
         return Err(anyhow!("empty cpmm reserves"));
     }
 
-    let actual_in = amount_in.saturating_sub(in_fee.calculate(amount_in));
+    let actual_in = amount_in.checked_sub(in_fee.calculate(amount_in))
+        .ok_or_else(|| anyhow!("CPMM input fee exceeds amount"))?;
+    input_reserve.checked_add(actual_in).ok_or_else(|| anyhow!("CPMM input reserve overflows token balance"))?;
     let on_input = creator_fee_on_input(pool, input_is_base)?;
     let creator_rate = if pool.enable_creator_fee {
         pool.creator_fee_rate
@@ -525,64 +541,59 @@ pub fn cpmm_in_for_out(pool: &CpmmPool, amount_out: u64, input_is_base: bool) ->
 
 /// Protocol 95 bps + optional creator 30 bps (sol-trade-sdk).
 #[inline(always)]
+/// Historical default only; current quotes must use Global/FeeConfig rates.
 pub fn pumpfun_total_fee_bps(has_creator: bool) -> u64 {
     95 + if has_creator { 30 } else { 0 }
 }
 
-/// PumpFun buy — fee is **additive** (`amount * 10000 / (10000 + fee_bps)`).
-/// `lamports_in` / `virtual_sol_reserves` are in **quote mint units** (WSOL lamports
-/// or e.g. USDC micro-units for V2 non-WSOL curves).
-pub fn pumpfun_buy_token_out(pool: &PumpFunPool, lamports_in: u64) -> u64 {
-    if lamports_in == 0 || pool.virtual_token_reserves == 0 {
-        return 0;
+fn pumpfun_rates(pool: &PumpFunPool) -> Result<(u128, u128)> {
+    if !pool.fee_rates_known {
+        return Err(anyhow!("PumpFun current fee rates are missing; supply current rates or explicit min_out"));
     }
-    let fee_bps = if pool.protocol_fee_bps > 0 {
-        pool.protocol_fee_bps.min(10_000)
-    } else {
-        pumpfun_total_fee_bps(pool.has_creator)
-    } as u128;
-    let input = (lamports_in as u128)
-        .saturating_mul(10_000)
-        .checked_div(fee_bps + 10_000)
-        .unwrap_or(0);
-    // Official buy_exact_sol_in: tokens_out uses (net_sol - 1) in the constant-product.
-    let curve_in = input.saturating_sub(1);
-    if curve_in == 0 {
-        return 0;
+    let protocol = pool.protocol_fee_bps as u128;
+    let creator = if pool.has_creator { pool.creator_fee_bps as u128 } else { 0 };
+    if protocol + creator >= 10_000 {
+        return Err(anyhow!("invalid PumpFun fee rates"));
     }
-    let vtok = pool.virtual_token_reserves as u128;
-    let vsol = pool.virtual_sol_reserves as u128;
-    let denom = vsol.saturating_add(curve_in);
-    if denom == 0 {
-        return 0;
-    }
-    let tokens = curve_in
-        .saturating_mul(vtok)
-        .checked_div(denom)
-        .unwrap_or(0)
-        .min(pool.real_token_reserves as u128);
-    tokens.min(u64::MAX as u128) as u64
+    Ok((protocol, creator))
 }
 
-pub fn pumpfun_sell_sol_out(pool: &PumpFunPool, token_in: u64) -> u64 {
-    if token_in == 0 || pool.virtual_token_reserves == 0 {
-        return 0;
+/// Matches pump-sdk 3.2.0 buy_exact_sol_in IDL math for pre-graduation V1/V2 trades.
+/// Rates must come from the current Global/FeeConfig schedule or filled trade event.
+pub fn pumpfun_buy_token_out(pool: &PumpFunPool, quote_in: u64) -> Result<u64> {
+    let (protocol, creator) = pumpfun_rates(pool)?;
+    if quote_in == 0 || pool.virtual_token_reserves == 0 || pool.virtual_sol_reserves == 0 {
+        return Err(anyhow!("invalid PumpFun input or reserves"));
     }
-    let amount = token_in as u128;
-    let vtok = pool.virtual_token_reserves as u128;
-    let vsol = pool.virtual_sol_reserves as u128;
-    let denom = vtok.saturating_add(amount);
-    if denom == 0 {
-        return 0;
+    // buy_exact_sol_in IDL: invert total fees, correct split-ceil excess,
+    // then subtract one from net input (the generic SDK `buy` quote differs).
+    let mut net = quote_in as u128 * 10_000 / (10_000 + protocol + creator);
+    let total = net + compute_fee_bps(net, protocol) + compute_fee_bps(net, creator);
+    if total > quote_in as u128 {
+        net = net.checked_sub(total - quote_in as u128)
+            .ok_or_else(|| anyhow!("PumpFun input cannot cover fees"))?;
     }
-    let sol_cost = amount.saturating_mul(vsol).checked_div(denom).unwrap_or(0);
-    let fee_bps = if pool.protocol_fee_bps > 0 {
-        pool.protocol_fee_bps.min(10_000)
-    } else {
-        pumpfun_total_fee_bps(pool.has_creator)
-    } as u128;
-    let fee = compute_fee_bps(sol_cost, fee_bps);
-    sol_cost.saturating_sub(fee).min(u64::MAX as u128) as u64
+    let curve_in = net.checked_sub(1)
+        .ok_or_else(|| anyhow!("PumpFun input too small after fees"))?;
+    let tokens = curve_in * pool.virtual_token_reserves as u128
+        / (pool.virtual_sol_reserves as u128 + curve_in);
+    let tokens = tokens.min(pool.real_token_reserves as u128) as u64;
+    if tokens == 0 { return Err(anyhow!("PumpFun quote output rounds to zero")); }
+    Ok(tokens)
+}
+
+pub fn pumpfun_sell_sol_out(pool: &PumpFunPool, token_in: u64) -> Result<u64> {
+    let (protocol, creator) = pumpfun_rates(pool)?;
+    if token_in == 0 || pool.virtual_token_reserves == 0 || pool.virtual_sol_reserves == 0 {
+        return Err(anyhow!("invalid PumpFun input or reserves"));
+    }
+    let gross = token_in as u128 * pool.virtual_sol_reserves as u128
+        / (pool.virtual_token_reserves as u128 + token_in as u128);
+    // Official getFee rounds the protocol and creator buckets separately.
+    let fees = compute_fee_bps(gross, protocol) + compute_fee_bps(gross, creator);
+    u64::try_from(gross.checked_sub(fees)
+        .ok_or_else(|| anyhow!("PumpFun fees exceed output"))?)
+        .map_err(|_| anyhow!("PumpFun output exceeds u64"))
 }
 
 fn pumpswap_effective_quote(pool: &PumpSwapPool) -> Result<u64> {
@@ -724,46 +735,13 @@ pub fn meteora_damm_v2_out(
     amount_in: u64,
     input_is_a: bool,
 ) -> Result<u64> {
-    let (input_reserve, output_reserve) = if input_is_a {
-        (pool.token_a_reserve, pool.token_b_reserve)
-    } else {
-        (pool.token_b_reserve, pool.token_a_reserve)
-    };
-    // Prefer amount-aware CP quote. When fee_bps is unknown (0) but streamer
-    // provided a matching expected_out, use that — zero-fee CP would overstate.
-    if amount_in > 0 && input_reserve > 0 && output_reserve > 0 {
-        if pool.fee_bps == 0 {
-            if let Some(expected) = pool.expected_out {
-                if pool.quoted_amount_in == Some(amount_in) {
-                    return Ok(expected);
-                }
-            }
-        }
-        let net_in = (amount_in as u128)
-            .saturating_mul(10_000u128.saturating_sub(pool.fee_bps.min(10_000) as u128))
-            / 10_000;
-        return Ok(((output_reserve as u128).saturating_mul(net_in)
-            / (input_reserve as u128).saturating_add(net_in))
-        .min(u64::MAX as u128) as u64);
+    // DAMM v2 uses sqrt price, liquidity, fee schedulers/dynamic fees and
+    // transfer-fee state. Vault reserves alone are not an authoritative quote.
+    let input = if input_is_a { pool.token_a_mint } else { pool.token_b_mint };
+    if pool.quoted_input_mint != Some(input) {
+        return Err(anyhow!("Meteora DAMM V2 quote input mint/direction is missing or mismatched"));
     }
-    if let Some(expected) = pool.expected_out {
-        match pool.quoted_amount_in {
-            Some(qin) if qin == amount_in => return Ok(expected),
-            Some(qin) => {
-                return Err(anyhow!(
-                    "Meteora DAMM V2 expected_out quoted for {qin}, got amount_in {amount_in}"
-                ));
-            }
-            None => {
-                return Err(anyhow!(
-                    "Meteora DAMM V2 expected_out fallback needs quoted_amount_in"
-                ));
-            }
-        }
-    }
-    Err(anyhow!(
-        "Meteora DAMM V2 needs expected_out or non-zero reserves"
-    ))
+    snapshot_expected_out(pool.expected_out, pool.quoted_amount_in, amount_in, "Meteora DAMM V2")
 }
 
 fn snapshot_expected_out(

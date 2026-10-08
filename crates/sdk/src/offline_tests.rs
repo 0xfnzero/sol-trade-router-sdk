@@ -56,7 +56,9 @@ fn dummy_pumpfun() -> PumpFunPool {
         virtual_token_reserves: 1_000_000_000,
         virtual_sol_reserves: 30_000_000_000,
         real_token_reserves: 800_000_000,
-        protocol_fee_bps: 0,
+        protocol_fee_bps: 95,
+        creator_fee_bps: 30,
+        fee_rates_known: true,
         has_creator: true,
         is_cashback_coin: false,
     }
@@ -81,6 +83,7 @@ fn dummy_cpmm() -> CpmmPool {
         quote_token_program: TOKEN_PROGRAM,
         base_reserve: 1_000_000_000,
         quote_reserve: 50_000_000_000,
+        fee_rates_known: true,
         trade_fee_rate: 2500,
         creator_fee_rate: 0,
         creator_fee_on: 0,
@@ -133,6 +136,7 @@ fn dummy_launchlab() -> LaunchLabPool {
         real_quote: 5_000_000_000,
         total_base_sell: 793_100_000_000_000,
         curve_type: 0,
+        fee_rates_known: true,
         trade_fee_rate: 2500,
         platform_fee_rate: 0,
         creator_fee_rate: 0,
@@ -180,6 +184,7 @@ fn dummy_damm_v2() -> MeteoraDammV2Pool {
         token_b_reserve: 1_000_000_000,
         fee_bps: 25,
         quoted_amount_in: None,
+        quoted_input_mint: None,
         expected_out: None,
         swap_mode: 0,
         referral_token_account: None,
@@ -201,6 +206,7 @@ fn dummy_clmm() -> RaydiumClmmPool {
         tick_arrays: vec![Pubkey::new_unique(); 3],
         tick_array_bitmap_extension: Some(Pubkey::new_unique()),
         quoted_amount_in: Some(1_000_000),
+        quoted_input_mint: None,
         expected_out: Some(500_000),
         fee_bps: 25,
     }
@@ -217,6 +223,7 @@ fn dummy_whirlpool() -> WhirlpoolPool {
         token_program_b: TOKEN_PROGRAM,
         tick_arrays: vec![Pubkey::new_unique(); 3],
         quoted_amount_in: Some(1_000_000),
+        quoted_input_mint: None,
         expected_out: Some(400_000),
         fee_bps: 30,
     }
@@ -235,6 +242,7 @@ fn dummy_dlmm() -> MeteoraDlmmPool {
         oracle: Pubkey::new_unique(),
         bin_arrays: vec![Pubkey::new_unique(); 3],
         quoted_amount_in: Some(1_000_000),
+        quoted_input_mint: None,
         expected_out: Some(350_000),
         fee_bps: 20,
     }
@@ -267,9 +275,9 @@ fn offline_pumpfun_quote_positive() {
     let pool = dummy_pumpfun();
     let fee_bps = pumpfun_total_fee_bps(pool.has_creator);
     assert!(fee_bps >= 95);
-    let out = pumpfun_buy_token_out(&pool, 1_000_000);
+    let out = pumpfun_buy_token_out(&pool, 1_000_000).unwrap();
     assert!(out > 0);
-    let sol = pumpfun_sell_sol_out(&pool, out / 2);
+    let sol = pumpfun_sell_sol_out(&pool, out / 2).unwrap();
     assert!(sol > 0);
 }
 
@@ -294,8 +302,7 @@ fn offline_pumpswap_and_amm_quotes() {
     assert!(out > 0);
 
     let damm = dummy_damm_v2();
-    let out = meteora_damm_v2_out(&damm, 1_000_000, true).unwrap();
-    assert!(out > 0);
+    assert!(meteora_damm_v2_out(&damm, 1_000_000, true).is_err());
 }
 
 #[test]
@@ -860,18 +867,22 @@ fn offline_router_builds_all_market_kinds() {
         match &mut market.market {
             Market::RaydiumClmm(p) => {
                 p.quoted_amount_in = Some(1_000_000);
+                p.quoted_input_mint = Some(WSOL_MINT);
                 p.expected_out = Some(900_000);
             }
             Market::Whirlpool(p) => {
                 p.quoted_amount_in = Some(1_000_000);
+                p.quoted_input_mint = Some(WSOL_MINT);
                 p.expected_out = Some(900_000);
             }
             Market::MeteoraDlmm(p) => {
                 p.quoted_amount_in = Some(1_000_000);
+                p.quoted_input_mint = Some(WSOL_MINT);
                 p.expected_out = Some(900_000);
             }
             Market::MeteoraDammV2(p) => {
                 p.quoted_amount_in = Some(1_000_000);
+                p.quoted_input_mint = Some(WSOL_MINT);
                 p.expected_out = Some(900_000);
                 p.token_a_reserve = 10_000_000;
                 p.token_b_reserve = 10_000_000;
@@ -1049,6 +1060,7 @@ fn offline_quote_helpers_cover_concentrated_venues() {
     assert!(crate::quote::raydium_clmm_out(&clmm, 1_000).is_err()); // needs quoted match
     let mut clmm = clmm;
     clmm.quoted_amount_in = Some(1_000);
+    clmm.quoted_input_mint = Some(clmm.token_1_mint);
     clmm.expected_out = Some(900);
     assert_eq!(crate::quote::raydium_clmm_out(&clmm, 1_000).unwrap(), 900);
 
@@ -1065,7 +1077,11 @@ fn offline_quote_helpers_cover_concentrated_venues() {
     let mut damm = dummy_damm_v2();
     damm.token_a_reserve = 1_000_000;
     damm.token_b_reserve = 2_000_000;
-    assert!(crate::quote::meteora_damm_v2_out(&damm, 1_000, true).unwrap() > 0);
+    assert!(crate::quote::meteora_damm_v2_out(&damm, 1_000, true).is_err());
+    damm.quoted_amount_in = Some(1_000);
+    damm.expected_out = Some(1_234);
+    damm.quoted_input_mint = Some(damm.token_a_mint);
+    assert_eq!(crate::quote::meteora_damm_v2_out(&damm, 1_000, true).unwrap(), 1_234);
 }
 
 #[test]
@@ -1118,6 +1134,7 @@ fn offline_router_sell_builds_for_major_dexes() {
 
     let mut clmm = dummy_clmm();
     clmm.quoted_amount_in = Some(1_000);
+    clmm.quoted_input_mint = Some(clmm.token_1_mint);
     clmm.expected_out = Some(900);
     let clmm_m = RoutedMarket::new(Market::RaydiumClmm(clmm));
     assert!(client.sell_to_wsol(1_000, &clmm_m).is_ok());
@@ -1284,4 +1301,109 @@ fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
     pool.virtual_quote_reserves = 0;
     pool.lp_fee_bps = 20_000;
     assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err());
+}
+
+#[test]
+fn offline_pumpfun_exact_in_matches_official_idl_split_fee_correction() {
+    let mut pool = dummy_pumpfun();
+    pool.virtual_token_reserves = 1_000_000;
+    pool.virtual_sol_reserves = 1_000;
+    pool.real_token_reserves = 800_000;
+    pool.protocol_fee_bps = 95;
+    pool.creator_fee_bps = 30;
+    pool.fee_rates_known = true;
+    // pump 3.2.0 buy_exact_sol_in docs: budget=101 -> net=99, split
+    // fees=1+1, curve input=98; floor(98*1_000_000/(1000+98)).
+    assert_eq!(pumpfun_buy_token_out(&pool, 101).unwrap(), 89_253);
+    // budget=100 -> net=98, fees=1+1, curve input=97.
+    assert_eq!(pumpfun_buy_token_out(&pool, 100).unwrap(), 88_422);
+    // Tiny budget exposes the split-ceil correction skipped by the old code.
+    assert!(pumpfun_buy_token_out(&pool, 2).is_err());
+    // Sell gross=101; independently rounded fees are 1+1, not ceil(1.2625)=2
+    // in general. gross=100 uses 1+1 while combined ceil also 2; choose gross=1.
+    pool.virtual_sol_reserves = 1_001;
+    pool.virtual_token_reserves = 1_000;
+    assert!(pumpfun_sell_sol_out(&pool, 1).is_err()); // gross=1, two fees exceed gross
+    pool.fee_rates_known = false;
+    assert!(pumpfun_buy_token_out(&pool, 1_000).is_err());
+    assert!(pumpfun_sell_sol_out(&pool, 100).is_err());
+    let market = RoutedMarket::new(Market::PumpFunInner(pool));
+    let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    assert!(client.buy_with_opts(1_000, &market, TradeOpts::default().buy_with_sol().with_min_out(1)).is_ok());
+}
+
+#[test]
+fn offline_damm_exact_out_uses_official_amount_order_and_quotes_bind_direction() {
+    let mut pool = dummy_damm_v2();
+    let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    let market = RoutedMarket::new(Market::MeteoraDammV2(pool.clone()));
+    let built = client.buy_with_opts(1_000, &market,
+        TradeOpts::default().buy_with_wsol().with_fixed_output(99)).unwrap();
+    let route = built.route.unwrap();
+    let offset = route.data.windows(8).position(|w| w == crate::constants::METEORA_DAMM_V2_SWAP2).unwrap();
+    assert_eq!(u64::from_le_bytes(route.data[offset + 8..offset + 16].try_into().unwrap()), 99);
+    assert_eq!(u64::from_le_bytes(route.data[offset + 16..offset + 24].try_into().unwrap()), 1_000);
+    assert_eq!(route.data[offset + 24], 2);
+    pool.quoted_amount_in = Some(1_000);
+    pool.quoted_input_mint = Some(pool.token_a_mint);
+    pool.expected_out = Some(100);
+    assert_eq!(meteora_damm_v2_out(&pool, 1_000, true).unwrap(), 100);
+    assert!(meteora_damm_v2_out(&pool, 1_000, false).is_err());
+    pool.swap_mode = 1;
+    assert!(meteora_damm_v2_swap_leg(&client.payer, &pool, 1_000, 1, pool.token_a_mint).is_err());
+}
+
+#[test]
+fn offline_unknown_fee_state_is_rejected_and_known_zero_is_valid() {
+    let mut cpmm = dummy_cpmm();
+    cpmm.fee_rates_known = false;
+    assert!(cpmm_out(&cpmm, 10_000, true).is_err());
+    cpmm.fee_rates_known = true;
+    cpmm.trade_fee_rate = 0;
+    assert!(cpmm_out(&cpmm, 10_000, true).unwrap() > 0);
+    cpmm.trade_fee_rate = 1_000_000;
+    assert!(cpmm_out(&cpmm, 10_000, false).is_err());
+    let mut launch = dummy_launchlab();
+    launch.fee_rates_known = false;
+    assert!(crate::quote::launchlab_buy_base_out(&launch, 10_000).is_err());
+    let mut pump = dummy_pumpfun();
+    pump.protocol_fee_bps = 0;
+    pump.creator_fee_bps = 0;
+    assert!(pumpfun_buy_token_out(&pump, 10_000).unwrap() > 0);
+}
+
+#[test]
+fn offline_cpmm_exact_input_flag_cannot_determine_canonical_direction() {
+    let mut event = sol_parser_sdk::core::events::RaydiumCpmmSwapEvent::default();
+    event.pool_id = Pubkey::new_unique();
+    for exact_in in [true, false] {
+        event.base_input = exact_in;
+        assert!(crate::parser::cpmm_from_swap(&event).is_none());
+    }
+}
+
+#[test]
+fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
+    let k = Pubkey::new_unique;
+    let protocol = k();
+    let buyback = k();
+    let mut params = sol_trade_sdk::trading::core::params::PumpSwapParams::new(
+        k(), k(), WSOL_MINT, k(), k(), 1_000_000, 2_000_000, 0,
+        k(), k(), TOKEN_PROGRAM, TOKEN_PROGRAM, protocol, k(), true, 7,
+    );
+    params.protocol_fee_recipient_override = Some(protocol);
+    params.protocol_extra_fee_recipient_override = Some(buyback);
+    let pool = crate::adapter::pumpswap_from_params(&params);
+    assert_eq!(pool.creator_fee_bps, params.fee_basis_points.coin_creator_fee_basis_points);
+    for leg in [pumpswap_buy_leg(&k(), &pool, 10_000, 1).unwrap(),
+                pumpswap_sell_leg(&k(), &pool, 10_000, 1).unwrap()] {
+        assert_eq!(leg.accounts[9].pubkey, protocol);
+        assert_eq!(leg.accounts[leg.accounts.len() - 2].pubkey, buyback);
+    }
+    let mut event = sol_parser_sdk::core::events::PumpSwapBuyEvent::default();
+    event.coin_creator_fee_basis_points = 30;
+    event.cashback_fee_basis_points = 7;
+    assert_eq!(crate::parser::pumpswap_from_buy(&event).creator_fee_bps, 37);
 }

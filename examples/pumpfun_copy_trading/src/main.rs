@@ -156,7 +156,7 @@ async fn copy_hot_path(
     }
 
     let pool = sol_trade_router_sdk::pumpfun_from_trade(&e);
-    let amount_token = pumpfun_buy_token_out(&pool, warm.buy_sol_lamports);
+    let amount_token = pumpfun_buy_token_out(&pool, warm.buy_sol_lamports)?;
     if amount_token == 0 {
         return Err(anyhow!("quoted token out is 0"));
     }

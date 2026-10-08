@@ -2,6 +2,7 @@
 
 mod from_params;
 mod from_rpc;
+mod pumpfun_state;
 
 pub use from_params::{
     bonk_to_launchlab, cpmm_from_params, damm_v2_from_params, dlmm_from_params,
