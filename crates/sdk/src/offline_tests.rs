@@ -369,6 +369,67 @@ fn offline_all_dex_leg_builders() {
     supplemental_wp.tick_arrays.extend((0..3).map(|_| Pubkey::new_unique()));
     let router = RouterClient::new(user, Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
+    for template in [Market::CpmmOuter(dummy_cpmm()), Market::PumpSwapOuter(ps.clone()),
+        Market::MeteoraDammV2(damm.clone()), Market::RaydiumClmm(clmm.clone()),
+        Market::Whirlpool(wp.clone()), Market::MeteoraDlmm(dlmm.clone())] {
+        for wsol_side in 0..2 {
+            let mut market = template.clone();
+            let (a, b, ap, bp) = match &mut market {
+                Market::CpmmOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
+                    &mut p.base_token_program, &mut p.quote_token_program),
+                Market::PumpSwapOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
+                    &mut p.base_token_program, &mut p.quote_token_program),
+                Market::MeteoraDammV2(p) => (&mut p.token_a_mint, &mut p.token_b_mint,
+                    &mut p.token_a_program, &mut p.token_b_program),
+                Market::RaydiumClmm(p) => (&mut p.token_0_mint, &mut p.token_1_mint,
+                    &mut p.token_0_program, &mut p.token_1_program),
+                Market::Whirlpool(p) => (&mut p.mint_a, &mut p.mint_b,
+                    &mut p.token_program_a, &mut p.token_program_b),
+                Market::MeteoraDlmm(p) => (&mut p.token_x_mint, &mut p.token_y_mint,
+                    &mut p.token_x_program, &mut p.token_y_program),
+                _ => unreachable!(),
+            };
+            let token = Pubkey::new_unique();
+            (*a, *b, *ap, *bp) = if wsol_side == 0 {
+                (WSOL_MINT, token, crate::constants::TOKEN_2022_PROGRAM, TOKEN_PROGRAM)
+            } else { (token, WSOL_MINT, TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM) };
+            let inputs = [*a, *b];
+            for input in inputs {
+                let output = if input == inputs[0] { inputs[1] } else { inputs[0] };
+                let mut results = vec![match &market {
+                    Market::CpmmOuter(p) => cpmm_swap_leg(&user, p, 100, 1,
+                        input, output, Pubkey::new_unique(), Pubkey::new_unique()),
+                    Market::PumpSwapOuter(p) if input == p.base_mint => pumpswap_sell_leg(&user, p, 100, 1),
+                    Market::PumpSwapOuter(p) => pumpswap_buy_leg(&user, p, 100, 1),
+                    Market::MeteoraDammV2(p) => meteora_damm_v2_swap_leg(&user, p, 100, 1, input),
+                    Market::RaydiumClmm(p) => raydium_clmm_swap_leg(&user, p, 100, 1, input),
+                    Market::Whirlpool(p) => whirlpool_swap_leg(&user, p, 100, 1, input),
+                    Market::MeteoraDlmm(p) => meteora_dlmm_swap_leg(&user, p, 100, 1, input),
+                    _ => unreachable!(),
+                }];
+                if let Market::CpmmOuter(p) = &market {
+                    results.push(cpmm_swap_exact_out_leg(&user, p, 100, 1,
+                        input, output, Pubkey::new_unique(), Pubkey::new_unique()));
+                } else if let Market::PumpSwapOuter(p) = &market {
+                    if input == p.quote_mint {
+                        results.push(pumpswap_buy_exact_out_leg(&user, p, 1, 100));
+                    }
+                }
+                for result in results {
+                    assert!(result.err().expect("DEX leg accepted Token-2022 canonical WSOL")
+                        .to_string().contains("classic WSOL"));
+                }
+            }
+            let routed = RoutedMarket::new(market);
+            for result in [router.buy_with_opts(100, &routed,
+                TradeOpts::default().buy_with_token(routed.quote_mint()).with_min_out(1)),
+                router.sell_with_opts(100, &routed,
+                    TradeOpts::default().sell_to_token(routed.quote_mint()).with_min_out(1))] {
+                assert!(result.err().expect("Router accepted Token-2022 canonical WSOL")
+                    .to_string().contains("classic WSOL"));
+            }
+        }
+    }
     for template in [Market::RaydiumClmm(clmm.clone()),
         Market::Whirlpool(supplemental_wp), Market::MeteoraDlmm(dlmm.clone())] {
         let count = match &template {

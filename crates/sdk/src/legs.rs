@@ -40,6 +40,17 @@ pub(crate) fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<(
     Ok(())
 }
 
+fn require_mint_programs(mints: &[(Pubkey, Pubkey)], dex: &str) -> Result<()> {
+    for &(mint, program) in mints {
+        require_token_programs(&[program], dex)?;
+        // Token-2022's native mint has a different address from classic WSOL.
+        if mint == WSOL_MINT && program != TOKEN_PROGRAM {
+            return Err(anyhow!("{dex} canonical WSOL mint requires classic WSOL token program"));
+        }
+    }
+    Ok(())
+}
+
 fn require_array_addresses(addresses: &[Pubkey], dex: &str) -> Result<()> {
     if addresses.iter().any(|key| *key == Pubkey::default()) {
         return Err(anyhow!("{dex} snapshot has a missing liquidity array address"));
@@ -151,7 +162,8 @@ pub fn cpmm_swap_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "Raydium CPMM")?;
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
@@ -210,7 +222,8 @@ pub fn cpmm_swap_exact_out_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "Raydium CPMM")?;
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
@@ -468,7 +481,8 @@ pub fn pumpfun_sell_v2_leg(
 }
 
 fn pumpswap_accounts(user: &Pubkey, pool: &PumpSwapPool, is_buy: bool) -> Result<Vec<AccountMeta>> {
-    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "PumpSwap")?;
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "PumpSwap")?;
     let user_base = ata(user, &pool.base_mint, &pool.base_token_program);
     let user_quote = ata(user, &pool.quote_mint, &pool.quote_token_program);
     // Observed protocol fee recipient (mayhem or standard). Do not hardcode only
@@ -705,7 +719,8 @@ pub fn meteora_damm_v2_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.token_a_program, pool.token_b_program], "Meteora DAMM V2")?;
+    require_mint_programs(&[(pool.token_a_mint, pool.token_a_program),
+        (pool.token_b_mint, pool.token_b_program)], "Meteora DAMM V2")?;
     if pool.swap_mode == METEORA_DAMM_V2_PARTIAL_FILL {
         return Err(anyhow!(
             "Meteora DAMM V2 partial-fill unsupported (router requires exact-in/exact-out spend)"
@@ -784,7 +799,8 @@ pub fn raydium_clmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.token_0_program, pool.token_1_program], "Raydium CLMM")?;
+    require_mint_programs(&[(pool.token_0_mint, pool.token_0_program),
+        (pool.token_1_mint, pool.token_1_program)], "Raydium CLMM")?;
     let bitmap_pda = crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state);
     let mut bitmap = pool
         .tick_array_bitmap_extension
@@ -869,7 +885,8 @@ pub fn whirlpool_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.token_program_a, pool.token_program_b], "Orca Whirlpool")?;
+    require_mint_programs(&[(pool.mint_a, pool.token_program_a),
+        (pool.mint_b, pool.token_program_b)], "Orca Whirlpool")?;
     if pool.tick_arrays.len() < 3 {
         return Err(anyhow!(
             "Whirlpool swap_v2 requires 3 tick arrays (got {})",
@@ -953,7 +970,8 @@ pub fn meteora_dlmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
-    require_token_programs(&[pool.token_x_program, pool.token_y_program], "Meteora DLMM")?;
+    require_mint_programs(&[(pool.token_x_mint, pool.token_x_program),
+        (pool.token_y_mint, pool.token_y_program)], "Meteora DLMM")?;
     if pool.bin_arrays.is_empty() {
         return Err(anyhow!("Meteora DLMM snapshot has no bin arrays"));
     }
