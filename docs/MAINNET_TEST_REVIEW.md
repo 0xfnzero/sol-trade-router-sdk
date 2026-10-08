@@ -1,5 +1,7 @@
 # Mainnet test review — 2026-10-08
 
+Scope: source fixes and validation. Deployment is outside this task.
+
 Existing suites were updated in place. Network tests no longer return early and appear as passing offline tests: 81 router network cases are explicitly ignored by default, and an explicit live run fails on unavailable RPC, missing samples or unsuccessful execution. Positive execution cases use current pool/config loaders and funded WSOL inputs; instruction execution tests with minimum output 1 do not prove quote accuracy. Negative balance cases require balance errors, and fault cases require bank execution logs.
 
 ## Router results
@@ -10,13 +12,15 @@ Existing suites were updated in place. Network tests no longer return early and 
 | SDK offline tests | 93 passed; 81 network cases ignored |
 | Program / example tests | 15 / 2 passed |
 | Existing all-DEX builder test | 18 legs × legacy/v0/v1 = 54 fully signed paths; wire roundtrip and tampered-message rejection |
-| Direct mainnet suite | Latest complete run: 44 passed / one failed (286.77 seconds). The CLMM reverse case used a dust-sized fixed input; updated to the observed forward output and passed its targeted rerun. All 45 cases are aggregate verified; no complete green rerun after this last test correction is claimed. |
+| Direct mainnet suite | Final complete rerun: 45 passed, zero failed, zero ignored (343.54 seconds), using both fixed Git dependencies. |
 | Special live samples | Token-2022 CLMM and Pump cashback both pass using real cold-loaded state, original signed transaction parsing and successful bank execution. |
 | Current mainnet router | `mainnet_router_pumpswap_buy` fails with Custom(12), `InvalidLeg` |
 
 Current deployment `CmNFUmRJL7YcnVn22oZzwG5Xg5WJqbcHEc6BK5mzDNR8` has not been upgraded. Fresh confirmed ProgramData at slot 454491114 still matches the captured ELF (deployment slot 452320587, SHA-256 `88d0e3b52bd10dc69d107f3be3f166c846307e8225b1780881f89d63732f6f46`). Its PR #1 wire layout is incompatible with the repaired legacy header. The existing local ELF security suite now asserts the exact `InvalidLeg(12)` rejection and atomic rollback of the repaired header. The deployed ELF still accepts understated fees, budget overruns and wrong output mints under the short header. See `ROUTER_DEPLOYMENT_RECHECK.json`. Direct DEX simulation success does not establish router-deployment compatibility. Upgrade planning must consider SDK and program together; this review did not broadcast or deploy.
 
 Pump V3 cold loading retains the user's requested official default `supports_graduation=true`. The captured real program ELF's synthetic boundary results remain as documented in `PUMP_V3_DEPLOYMENT_RECHECK.json`; SDK construction support does not certify cross-graduation execution on the target deployment.
+
+Final-run evidence is summarized in [MAINNET_VALIDATION_SUMMARY.json](MAINNET_VALIDATION_SUMMARY.json), with file hashes and the exact tested source/dependency revisions. Raw evidence is retained locally in `../tools/validation/simulation-coverage-20261008/router-final`. The run parsed 475 original transaction records (471 unique signatures), all verified by Rust, and produced 55 bank responses: 38 successful and 17 expected negative/fault errors. All 54 required ephemeral authority signatures were also independently verified with solders. The funding-only transfer does not require a recipient signature; the public virtual funder remains unsigned. These 45 passed tests do not represent 55 successful swaps or fully signed broadcastable transactions.
 
 ## Shared SDK validation
 
@@ -43,3 +47,5 @@ The Pump V2 positive case prioritizes a supported current curve; mints with `Per
 The LaunchLab test formerly named `graduated_pool_events` only performed a regular buy; it is renamed `secondary_pool_buy` and does not claim graduation coverage. LaunchLab prioritizes a currently executable SOL-quoted candidate, and Token-2022 CLMM can discover its pool from either observed trade direction before loading arrays for the tested WSOL buy.
 
 Changed Rust test files pass targeted rustfmt checks and `git diff --check`; repository-wide cargo fmt still reports older formatting differences outside this supplement. The earlier supplement reviewed all eight files. This completion reviews all ten changed or added files, including the Cargo pin, test code, installation instructions and public evidence, zero skipped (100%).
+
+Final verification supplement: all three documentation/evidence files reviewed, zero skipped. No production logic changed after the tested revision.

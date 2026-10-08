@@ -1,0 +1,54 @@
+{
+  "checked_date": "2026-10-08",
+  "scope": "Source fixes and validation only; deployment is outside this task.",
+  "tested_router_revision": "4a0d679162a669d2731a2200d7c872ffec80868b",
+  "trade_revision": "bf4a01cd340ba8cc84d01cc7e1531fa2412a02a6",
+  "parser_revision": "51460a91ca3326663a59651ac0860744ac10fdc0",
+  "command": "SOLANA_RPC_URL=<mainnet RPC> ROUTER_TEST_EVIDENCE_DIR=<evidence directory> cargo test -p sol-trade-router-sdk mainnet_sim_tests:: -- --ignored --nocapture --test-threads=1",
+  "test_result": {
+    "passed": 45,
+    "failed": 0,
+    "ignored": 0,
+    "seconds": 343.54
+  },
+  "bank_simulations": {
+    "responses": 55,
+    "successful": 38,
+    "expected_error_responses": 17,
+    "authority_signatures_required": 54,
+    "authority_signatures_independently_verified": 54,
+    "funding_only_authority_not_required": 1,
+    "independent_verifier": "solders 0.29.0: reconstruct legacy message and verify recorded Ed25519 authority signatures",
+    "virtual_funder_signed": false,
+    "rpc_sig_verify": false
+  },
+  "original_transactions": {
+    "records": 475,
+    "unique_signatures": 471,
+    "all_signatures_verified_by_rust": true,
+    "min_slot": 454250524,
+    "max_slot": 454506491
+  },
+  "local_evidence_directory": "tools/validation/simulation-coverage-20261008/router-final",
+  "files": {
+    "signed-simulation.jsonl": {
+      "sha256": "4adf43b7a218366b4a4326a2ffb8a5913dc30b2adfd850eba6afd5431c9f1357",
+      "bytes": 185337
+    },
+    "simulation-result.jsonl": {
+      "sha256": "5409f2448db90e3d600eaaf29c5a4d53c5b4bff693d7873e6992d277ae45b697",
+      "bytes": 530560
+    },
+    "parsed-transaction.jsonl": {
+      "sha256": "29d1c6523fc8b19e6ba424ed7cb50cc4582e61fbd047856e7c69bce3cb29228a",
+      "bytes": 6768202
+    },
+    "run.log": {
+      "sha256": "c33f03f04d95a49f66cdefeba5de23a183582020fd1f819c39cd2f4ad0e4c19a",
+      "bytes": 41972
+    }
+  },
+  "broadcasts": 0,
+  "deployments": 0,
+  "note": "Negative-balance and fault cases assert expected errors; 45 passed cases does not mean 55 successful swaps. The funding-only transfer does not require the recipient signature. Simulations have an unsigned virtual funder."
+}
