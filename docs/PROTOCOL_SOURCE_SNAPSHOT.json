@@ -43,12 +43,18 @@
     {
       "repository": "https://github.com/0xfnzero/sol-trade-sdk",
       "version": "5.0.7",
-      "main_sha": "63b7370420a2a2018d6b64535daf52d9f839e02f"
+      "main_sha": "63b7370420a2a2018d6b64535daf52d9f839e02f",
+      "validation_fix_revision": "bf4a01cd340ba8cc84d01cc7e1531fa2412a02a6",
+      "validation_fix_pr": "https://github.com/0xfnzero/sol-trade-sdk/pull/123",
+      "resolution": "Root Cargo patch pins current protocol upgrades and CLMM initialized-array selection; downstream workspace roots must apply the same patch until release."
     },
     {
       "repository": "https://github.com/0xfnzero/sol-parser-sdk",
       "version": "0.7.10",
-      "main_sha": "07c9ff28971e637d43a239d7aff8ce1dd96d153b"
+      "main_sha": "07c9ff28971e637d43a239d7aff8ce1dd96d153b",
+      "validation_fix_revision": "51460a91ca3326663a59651ac0860744ac10fdc0",
+      "validation_fix_pr": "https://github.com/0xfnzero/sol-parser-sdk/pull/32",
+      "resolution": "Root Cargo patch uses this fixed revision until a published version contains the AMM V4 invocation-scope fix; downstream workspace roots must apply the patch too."
     }
   ],
   "additional_official_sources": [

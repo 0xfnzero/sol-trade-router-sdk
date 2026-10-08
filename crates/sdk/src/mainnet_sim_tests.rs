@@ -40,6 +40,10 @@ use crate::parser::{
 use crate::pool_guard::PoolGuardPolicy;
 use crate::quote::pumpswap_buy_base_out;
 
+// Recent successful SOL-quoted curve; current state and execution remain mandatory.
+const LIVE_LAUNCHLAB_SOL_POOL: Pubkey =
+    solana_sdk::pubkey!("BPg5LnXFrup6JXvrtKi1Zy1FxnEtGiNBja24BYQiByRi");
+
 fn setup_wsol_and_meme(
     wallet: &Pubkey,
     meme: Pubkey,
@@ -188,42 +192,49 @@ fn mainnet_sim_pumpfun_buy_v2() {
     }
     let filter = EventTypeFilter::include_only(vec![EventType::PumpFunTrade]);
     // Prefer native V2 trades; else force V2 leg on a live curve (layout coverage).
-    let found = try_event_window(&client, &[PUMPFUN_PROGRAM], filter, 150, |sig, ev| {
-        let (DexEvent::PumpFunTrade(e)
-        | DexEvent::PumpFunBuy(e)
-        | DexEvent::PumpFunBuyExactSolIn(e)) = ev
-        else {
-            return false;
-        };
-        if !e.is_buy || e.mint == Pubkey::default() {
-            return false;
-        }
-        if e.real_token_reserves == 0 || e.virtual_token_reserves == 0 {
-            return false;
-        }
-        let Some(mut pool) = crate::mainnet_sim::load_pumpfun_pool(&e.mint) else {
-            return false;
-        };
-        pool.use_v2 = true;
-        let wallet = create_wallet();
-        let user = wallet.pubkey();
-        let wrap = e.sol_amount.max(1_000_000).min(20_000_000);
-        let setup = setup_wsol_and_meme(&user, pool.mint, pool.mint_token_program, wrap);
-        let leg = pumpfun_buy_v2_leg(&user, &pool, wrap, 1);
-        println!(
-            "[pumpfun_buy_v2] sig={sig} wallet={user} mint={} forced_v2={}",
-            pool.mint,
-            !matches!(
-                e.ix_name.as_str(),
-                "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
-            )
-        );
-        assert_funded_ok(
-            "pumpfun_buy_v2",
-            simulate_legs_funded(&client, &wallet, setup, &[leg]),
-        );
-        true
-    });
+    let candidate = solana_sdk::pubkey!("2MZfT69MQ3Nujwhu6Rc5oa8WwdajxJfPihx97LawL4Cv");
+    let found = try_event_window(
+        &client,
+        &[candidate, PUMPFUN_PROGRAM],
+        filter,
+        150,
+        |sig, ev| {
+            let (DexEvent::PumpFunTrade(e)
+            | DexEvent::PumpFunBuy(e)
+            | DexEvent::PumpFunBuyExactSolIn(e)) = ev
+            else {
+                return false;
+            };
+            if !e.is_buy || e.mint == Pubkey::default() {
+                return false;
+            }
+            if e.real_token_reserves == 0 || e.virtual_token_reserves == 0 {
+                return false;
+            }
+            let Some(mut pool) = crate::mainnet_sim::load_pumpfun_pool(&e.mint) else {
+                return false;
+            };
+            pool.use_v2 = true;
+            let wallet = create_wallet();
+            let user = wallet.pubkey();
+            let wrap = e.sol_amount.max(1_000_000).min(20_000_000);
+            let setup = setup_wsol_and_meme(&user, pool.mint, pool.mint_token_program, wrap);
+            let leg = pumpfun_buy_v2_leg(&user, &pool, wrap, 1);
+            println!(
+                "[pumpfun_buy_v2] sig={sig} wallet={user} mint={} forced_v2={}",
+                pool.mint,
+                !matches!(
+                    e.ix_name.as_str(),
+                    "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
+                )
+            );
+            assert_funded_ok(
+                "pumpfun_buy_v2",
+                simulate_legs_funded(&client, &wallet, setup, &[leg]),
+            );
+            true
+        },
+    );
     soft_coverage("pumpfun_buy_v2", found);
 }
 
@@ -501,7 +512,11 @@ fn mainnet_sim_launchlab_buy() {
     let filter = EventTypeFilter::include_only(vec![EventType::RaydiumLaunchlabTrade]);
     let found = try_event_window(
         &client,
-        &[fixtures::CURVE_POOL, LAUNCHLAB_PROGRAM],
+        &[
+            LIVE_LAUNCHLAB_SOL_POOL,
+            fixtures::CURVE_POOL,
+            LAUNCHLAB_PROGRAM,
+        ],
         filter,
         100,
         |sig, ev| {
@@ -1323,7 +1338,15 @@ fn mainnet_sim_raydium_clmm_reverse_soft() {
             create_ata(&user, &user, &input, &in_tp),
             create_wsol_ata(&user),
         ];
-        let Ok(leg) = raydium_clmm_swap_leg(&user, &pool, 1_000, 0, input) else {
+        // Use the real forward output as reverse input: fixed raw units can
+        // round to zero before the token program reaches the balance check.
+        let amount = if e.zero_for_one {
+            e.amount_1
+        } else {
+            e.amount_0
+        }
+        .max(1_000);
+        let Ok(leg) = raydium_clmm_swap_leg(&user, &pool, amount, 0, input) else {
             return false;
         };
         println!("[clmm_reverse] sig={sig} wallet={user} (expect soft)");
@@ -1511,7 +1534,11 @@ fn mainnet_sim_launchlab_sell_soft_without_balance() {
     let filter = EventTypeFilter::include_only(vec![EventType::RaydiumLaunchlabTrade]);
     let found = try_event_window(
         &client,
-        &[fixtures::CURVE_POOL, LAUNCHLAB_PROGRAM],
+        &[
+            LIVE_LAUNCHLAB_SOL_POOL,
+            fixtures::CURVE_POOL,
+            LAUNCHLAB_PROGRAM,
+        ],
         filter,
         100,
         |sig, ev| {
@@ -1961,50 +1988,59 @@ fn mainnet_sim_pumpfun_cashback_buy_soft() {
         return;
     }
     let filter = EventTypeFilter::include_only(vec![EventType::PumpFunTrade]);
-    let found = try_event_window(&client, &[PUMPFUN_PROGRAM], filter, 150, |sig, ev| {
-        let (DexEvent::PumpFunTrade(e)
-        | DexEvent::PumpFunBuy(e)
-        | DexEvent::PumpFunBuyExactSolIn(e)) = ev
-        else {
-            return false;
-        };
-        if !e.is_buy || e.mint == Pubkey::default() {
-            return false;
-        }
-        if e.real_token_reserves == 0 || e.virtual_token_reserves == 0 {
-            return false;
-        }
-        let Some(pool) = crate::mainnet_sim::load_pumpfun_pool(&e.mint) else {
-            return false;
-        };
-        // Prefer live cashback flags; also accept fee-bps signal from the event.
-        if !pool.is_cashback_coin || pool.quote_mint != WSOL_MINT {
-            return false;
-        }
-        let wallet = create_wallet();
-        let user = wallet.pubkey();
-        let lamports = e.sol_amount.max(1_000_000).min(10_000_000);
-        let setup = setup_meme_only(&user, pool.mint, pool.mint_token_program);
-        let leg = if pool.uses_v2() {
-            let s = setup_wsol_and_meme(&user, pool.mint, pool.mint_token_program, lamports);
-            let leg = pumpfun_buy_v2_leg(&user, &pool, lamports, 1);
-            println!("[pumpfun_cashback] sig={sig} wallet={user} v2=true");
+    // Public RPC account scan: incomplete curve with cashback flag set.
+    // Keep cold-state checks: the fixture can migrate or change before a later run.
+    let cashback_curve = solana_sdk::pubkey!("2MZfT69MQ3Nujwhu6Rc5oa8WwdajxJfPihx97LawL4Cv");
+    let found = try_event_window(
+        &client,
+        &[cashback_curve, PUMPFUN_PROGRAM],
+        filter,
+        150,
+        |sig, ev| {
+            let (DexEvent::PumpFunTrade(e)
+            | DexEvent::PumpFunBuy(e)
+            | DexEvent::PumpFunBuyExactSolIn(e)) = ev
+            else {
+                return false;
+            };
+            if !e.is_buy || e.mint == Pubkey::default() {
+                return false;
+            }
+            if e.real_token_reserves == 0 || e.virtual_token_reserves == 0 {
+                return false;
+            }
+            let Some(pool) = crate::mainnet_sim::load_pumpfun_pool(&e.mint) else {
+                return false;
+            };
+            // Require the actual cold-loaded cashback flag; event fee hints are insufficient.
+            if !pool.is_cashback_coin || pool.quote_mint != WSOL_MINT {
+                return false;
+            }
+            let wallet = create_wallet();
+            let user = wallet.pubkey();
+            let lamports = e.sol_amount.max(1_000_000).min(10_000_000);
+            let setup = setup_meme_only(&user, pool.mint, pool.mint_token_program);
+            let leg = if pool.uses_v2() {
+                let s = setup_wsol_and_meme(&user, pool.mint, pool.mint_token_program, lamports);
+                let leg = pumpfun_buy_v2_leg(&user, &pool, lamports, 1);
+                println!("[pumpfun_cashback] sig={sig} wallet={user} v2=true");
+                assert_funded_ok(
+                    "pumpfun_cashback",
+                    simulate_legs_funded(&client, &wallet, s, &[leg]),
+                );
+                return true;
+            } else {
+                let user_ata = ata(&user, &pool.mint, &pool.mint_token_program);
+                pumpfun_buy_leg(&user, &pool, lamports, 1, user_ata)
+            };
+            println!("[pumpfun_cashback] sig={sig} wallet={user} v2=false");
             assert_funded_ok(
                 "pumpfun_cashback",
-                simulate_legs_funded(&client, &wallet, s, &[leg]),
+                simulate_legs_funded(&client, &wallet, setup, &[leg]),
             );
-            return true;
-        } else {
-            let user_ata = ata(&user, &pool.mint, &pool.mint_token_program);
-            pumpfun_buy_leg(&user, &pool, lamports, 1, user_ata)
-        };
-        println!("[pumpfun_cashback] sig={sig} wallet={user} v2=false");
-        assert_funded_ok(
-            "pumpfun_cashback",
-            simulate_legs_funded(&client, &wallet, setup, &[leg]),
-        );
-        true
-    });
+            true
+        },
+    );
     soft_coverage("pumpfun_cashback", found);
 }
 
@@ -2016,48 +2052,60 @@ fn mainnet_sim_clmm_token2022_prefer() {
         return;
     }
     let filter = EventTypeFilter::include_only(vec![EventType::RaydiumClmmSwap]);
-    let found = try_event_window(&client, &[RAYDIUM_CLMM_PROGRAM], filter, 150, |sig, ev| {
-        let DexEvent::RaydiumClmmSwap(e) = ev else {
-            return false;
-        };
-        let Some(mut pool) = clmm_from_swap(e) else {
-            return false;
-        };
-        if e.input_mint != WSOL_MINT {
-            return false;
-        }
-        if !fill_clmm_token_programs(&client, &mut pool) {
-            return false;
-        }
-        let out_tp = if e.output_mint == pool.token_0_mint {
-            pool.token_0_program
-        } else {
-            pool.token_1_program
-        };
-        // Prefer Token-2022 meme legs — classic SPL already covered elsewhere.
-        if out_tp != TOKEN_2022_PROGRAM {
-            return false;
-        }
-        let wallet = create_wallet();
-        let user = wallet.pubkey();
-        let amount = e.amount_0.max(e.amount_1).max(100_000).min(2_000_000);
-        let setup = setup_wsol_and_meme(&user, e.output_mint, out_tp, amount);
-        let Ok(leg) = raydium_clmm_swap_leg(&user, &pool, amount, 0, WSOL_MINT) else {
-            return false;
-        };
-        println!("[clmm_token2022] sig={sig} wallet={user} out_tp={out_tp}");
-        assert_funded_ok(
-            "clmm_token2022",
-            simulate_legs_funded(&client, &wallet, setup, &[leg]),
-        );
-        true
-    });
+    // Active WSOL / PUMP Token-2022 pool discovered through Raydium's official
+    // pool API. Validate all roles against current RPC state, not API metadata.
+    let pool_address = solana_sdk::pubkey!("45ssPkUQs1ssbeDqxD2mZrMdJYAXF7GyQyhS5xDXuWC5");
+    let found = try_event_window(
+        &client,
+        &[pool_address, RAYDIUM_CLMM_PROGRAM],
+        filter,
+        150,
+        |sig, ev| {
+            let DexEvent::RaydiumClmmSwap(e) = ev else {
+                return false;
+            };
+            let Some(pool) = clmm_from_swap(e) else {
+                return false;
+            };
+            let output = if e.input_mint == WSOL_MINT {
+                e.output_mint
+            } else if e.output_mint == WSOL_MINT {
+                e.input_mint
+            } else {
+                return false;
+            };
+            // The observed trade may sell; cold-load arrays for our WSOL buy.
+            let pool = crate::mainnet_sim::load_clmm_pool(&pool.pool_state, &WSOL_MINT, &output);
+            let out_tp = if output == pool.token_0_mint {
+                pool.token_0_program
+            } else {
+                pool.token_1_program
+            };
+            // Prefer Token-2022 meme legs — classic SPL already covered elsewhere.
+            if out_tp != TOKEN_2022_PROGRAM {
+                return false;
+            }
+            let wallet = create_wallet();
+            let user = wallet.pubkey();
+            let amount = 100_000; // raw WSOL input; output quantities have different decimals
+            let setup = setup_wsol_and_meme(&user, output, out_tp, amount);
+            let Ok(leg) = raydium_clmm_swap_leg(&user, &pool, amount, 1, WSOL_MINT) else {
+                return false;
+            };
+            println!("[clmm_token2022] sig={sig} wallet={user} out_tp={out_tp}");
+            assert_funded_ok(
+                "clmm_token2022",
+                simulate_legs_funded(&client, &wallet, setup, &[leg]),
+            );
+            true
+        },
+    );
     soft_coverage("clmm_token2022", found);
 }
 
 #[test]
 #[ignore = "requires mainnet RPC; run explicitly with --ignored"]
-fn mainnet_sim_launchlab_graduated_pool_events() {
+fn mainnet_sim_launchlab_secondary_pool_buy() {
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -2065,7 +2113,11 @@ fn mainnet_sim_launchlab_graduated_pool_events() {
     let filter = EventTypeFilter::include_only(vec![EventType::RaydiumLaunchlabTrade]);
     let found = try_event_window(
         &client,
-        &[fixtures::GRAD_POOL, LAUNCHLAB_PROGRAM],
+        &[
+            LIVE_LAUNCHLAB_SOL_POOL,
+            fixtures::GRAD_POOL,
+            LAUNCHLAB_PROGRAM,
+        ],
         filter,
         80,
         |sig, ev| {
@@ -2096,17 +2148,17 @@ fn mainnet_sim_launchlab_graduated_pool_events() {
             };
             let leg = launchlab_buy_leg(&user, &pool, amount, 0, base_ata, quote_ata);
             println!(
-                "[launchlab_grad] sig={sig} wallet={user} pool={}",
+                "[launchlab_secondary_buy] sig={sig} wallet={user} pool={}",
                 pool.pool_state
             );
             assert_funded_ok(
-                "launchlab_grad",
+                "launchlab_secondary_buy",
                 simulate_legs_funded(&client, &wallet, setup, &[leg]),
             );
             true
         },
     );
-    soft_coverage("launchlab_grad", found);
+    soft_coverage("launchlab_secondary_buy", found);
 }
 
 #[test]

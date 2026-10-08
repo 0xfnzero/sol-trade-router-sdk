@@ -143,7 +143,8 @@ def main():
         print(json.dumps({k: v for k, v in result.items() if k != "logs"}))
     if old:
         result = run_case(code, "pre_pr_tag2_header", 1, 1, bound_mint=True)
-        assert not result["success"], result
+        assert not result["success"] and result["custom_error"] == 12, result
+        assert result["input_spent"] == result["fee_paid"] == 0, result
         print(json.dumps({k: v for k, v in result.items() if k != "logs"}))
     print("PASS: " + hashlib.sha256(code).hexdigest())
 

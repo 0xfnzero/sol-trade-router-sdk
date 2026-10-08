@@ -1,0 +1,17 @@
+{
+  "program": "CmNFUmRJL7YcnVn22oZzwG5Xg5WJqbcHEc6BK5mzDNR8",
+  "programdata": "G5EqPYzAZcDZ8xcZ28ZYgsdUUGUQTQfq8Y4DkCTYL23S",
+  "slot": 454491114,
+  "deployment_slot": 452320587,
+  "upgrade_authority": "CzjYCxfENUJm9BD6M3Qn61gaw8re5RM1MqXnBqfY13tN",
+  "elf_sha256": "88d0e3b52bd10dc69d107f3be3f166c846307e8225b1780881f89d63732f6f46",
+  "captured_elf_sha256": "88d0e3b52bd10dc69d107f3be3f166c846307e8225b1780881f89d63732f6f46",
+  "matches_captured_elf": true,
+  "broadcasts": 0,
+  "abi_probe": {
+    "environment": "LiteSVM, captured deployment ELF, ephemeral local accounts",
+    "pr1_short_tag2": "accepted",
+    "repaired_legacy_tag2": "Custom(12) InvalidLeg; atomic rollback verified",
+    "log": "router-deployed-abi-final.log"
+  }
+}

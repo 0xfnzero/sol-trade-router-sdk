@@ -83,17 +83,23 @@
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "fix/router-safety-regressions", package = "sol-trade-router-sdk" }
 # 仅在代码里 `use sol_parser_sdk::...`（订 gRPC/Shred）时再声明：
-sol-parser-sdk = "0.7.6"
+sol-parser-sdk = "=0.7.10"
+
+[patch.crates-io]
+sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "bf4a01cd340ba8cc84d01cc7e1531fa2412a02a6" }
+sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
 ```
 
-间接依赖（crates.io，自动拉取）：
+解析器和 CLMM 加载器修复尚未发布到 crates.io。Cargo 只读取使用方 workspace 根目录的 `[patch]`，所以 git/path 使用方也需要加入上面的固定提交补丁。本仓库使用相同的固定提交，不依赖浮动依赖分支。详见[验证与部署状态](docs/MAINNET_TEST_REVIEW.md)。修复版 SDK 需要兼容的升级版链上 router；当前主网部署仍拒绝恢复的旧指令头。
+
+自动解析的 SDK 依赖：
 
 | Crate | 版本 | 作用 |
 |-------|------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS 提交、参数、基础设施（已 re-export） |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred 事件（只有订阅时才需直接依赖） |
+| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.7` + 固定 Git 提交 | SWQoS 提交、参数、基础设施（已 re-export） |
+| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.10` + 固定 Git 提交 | gRPC / Shred 事件（只有订阅时才需直接依赖） |
 
 一般**不必**再写 `sol-trade-sdk`：交易相关类型从 `sol_trade_router_sdk::*` 即可导入。
 

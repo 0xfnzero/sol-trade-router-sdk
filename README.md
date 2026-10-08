@@ -81,17 +81,23 @@ This workspace client crate is currently **`publish = false`**. Depend on a git 
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "fix/router-safety-regressions", package = "sol-trade-router-sdk" }
 # Streaming bots only — declare if you `use sol_parser_sdk::...`:
-sol-parser-sdk = "0.7.6"
+sol-parser-sdk = "=0.7.10"
+
+[patch.crates-io]
+sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "bf4a01cd340ba8cc84d01cc7e1531fa2412a02a6" }
+sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
 ```
 
-Transitive crates.io deps (pulled automatically):
+The parser and CLMM loader fixes are not yet crates.io releases. Cargo only reads `[patch]` from the consuming workspace root, so git/path consumers must include the pinned patch above as well. The checkout uses the same pinned revisions; no floating dependency branch is used. See [validation and deployment status](docs/MAINNET_TEST_REVIEW.md). The repaired router SDK must be used with a compatible upgraded router program; the current mainnet deployment still rejects its restored legacy header.
+
+Resolved SDK dependencies (pulled automatically):
 
 | Crate | Version | Role |
 |-------|---------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS submit, params, infra (re-exported) |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred events (direct dep only if you subscribe) |
+| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.7` + fixed Git revision | SWQoS submit, params, infra (re-exported) |
+| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.10` + fixed Git revision | gRPC / Shred events (direct dep only if you subscribe) |
 
 Do **not** add `sol-trade-sdk` to your `Cargo.toml` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
 

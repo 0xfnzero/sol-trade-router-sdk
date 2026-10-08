@@ -54,3 +54,9 @@ Program deployment is a separate action from merging these source changes.
 
 Recent protocol ABI changes, upgraded dependency pins and deployment evidence
 are tracked in [Protocol version review](PROTOCOL_VERSION_REVIEW.md).
+
+Direct-protocol cases include real Pump cashback and WSOL/Token-2022
+CLMM pools; final rerun status is tracked in `MAINNET_TEST_REVIEW.md`. This does not certify the current
+router deployment: its freshly read ELF still accepts the PR #1 short header
+and rejects the repaired legacy header with `InvalidLeg(12)`. See
+`MAINNET_TEST_REVIEW.md` and `ROUTER_DEPLOYMENT_RECHECK.json`.
