@@ -240,6 +240,8 @@ pub fn cpmm_from_swap(_e: &RaydiumCpmmSwapEvent) -> Option<CpmmPool> {
     None
 }
 
+/// Preserve the token programs recorded in PoolState, including Token-2022.
+/// Reserves, current config and mint fee state still require an external overlay.
 pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
     let s = &e.pool_state;
     CpmmPool {
@@ -250,8 +252,8 @@ pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
         quote_mint: s.token_1_mint,
         base_vault: s.token_0_vault,
         quote_vault: s.token_1_vault,
-        base_token_program: TOKEN_PROGRAM,
-        quote_token_program: TOKEN_PROGRAM,
+        base_token_program: s.token_0_program,
+        quote_token_program: s.token_1_program,
         base_reserve: 0,
         quote_reserve: 0,
         fee_rates_known: false,

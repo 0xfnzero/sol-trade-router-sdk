@@ -1093,6 +1093,75 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         .expect("Route ix must target router PROGRAM_ID");
     assert_eq!(route.data[0], crate::route_ix::TAG_ROUTE);
     assert_eq!(&route.data[19..51], meme.as_ref());
+
+    // Parse current PoolState bytes, then preserve each side's actual token program.
+    use sol_parser_sdk::{accounts::{raydium_cpmm, token::AccountData},
+        core::events::EventMetadata};
+    let token_2022 = crate::constants::TOKEN_2022_PROGRAM;
+    for (mint_0, mint_1, program_0, program_1) in [
+        (meme, Pubkey::new_unique(), TOKEN_PROGRAM, TOKEN_PROGRAM),
+        (meme, Pubkey::new_unique(), token_2022, TOKEN_PROGRAM),
+        (meme, Pubkey::new_unique(), TOKEN_PROGRAM, token_2022),
+        (meme, Pubkey::new_unique(), token_2022, token_2022),
+        (WSOL_MINT, meme, TOKEN_PROGRAM, token_2022),
+        (meme, WSOL_MINT, token_2022, TOKEN_PROGRAM),
+    ] {
+        let mut data = vec![0; 8 + raydium_cpmm::POOL_STATE_SIZE];
+        data[..8].copy_from_slice(raydium_cpmm::discriminators::POOL_STATE);
+        for (i, key) in [Pubkey::new_unique(), Pubkey::new_unique(),
+            Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(),
+            mint_0, mint_1, program_0, program_1, Pubkey::new_unique()]
+            .into_iter().enumerate() {
+            data[8 + i * 32..8 + (i + 1) * 32].copy_from_slice(key.as_ref());
+        }
+        let event = raydium_cpmm::parse_pool_state(&AccountData {
+            pubkey: Pubkey::new_unique(), executable: false, lamports: 1,
+            owner: RAYDIUM_CPMM_PROGRAM, rent_epoch: 0, data,
+        }, EventMetadata::default()).unwrap();
+        let mut market = crate::parser::market_from_dex_event(&event).unwrap();
+        let Market::CpmmOuter(pool) = &mut market else { panic!("wrong parsed venue") };
+        assert_eq!(pool.base_token_program, program_0, "PoolState token-0 program discarded");
+        assert_eq!(pool.quote_token_program, program_1, "PoolState token-1 program discarded");
+        assert!(!pool.fee_rates_known);
+        assert_eq!((pool.base_reserve, pool.quote_reserve), (0, 0));
+        // Account event lacks vault/config/mint-fee snapshots; supplement synthetic
+        // current state before construction rather than making incomplete data tradable.
+        pool.base_reserve = 1_000_000_000;
+        pool.quote_reserve = 50_000_000_000;
+        pool.trade_fee_rate = 2_500;
+        pool.fee_rates_known = true;
+        let routed = RoutedMarket::new(market);
+        let target = routed.meme_mint();
+        let quote = routed.quote_mint();
+        let target_ata = crate::ata::ata(&payer.pubkey(), &target, &routed.meme_token_program());
+        let quote_ata = crate::ata::ata(&payer.pubkey(), &quote, &routed.quote_token_program());
+        for (side, built) in [
+            client.buy_with_opts(10_000, &routed,
+                TradeOpts::default().buy_with_token(quote).with_min_out(1)).unwrap(),
+            client.sell_with_opts(10_000, &routed,
+                TradeOpts::default().sell_to_token(quote).with_min_out(1)).unwrap(),
+        ].into_iter().enumerate() {
+            let route = built.route.as_ref().unwrap();
+            assert_eq!(route.accounts[3].pubkey, if side == 0 { quote_ata } else { target_ata });
+            assert_eq!(route.accounts[4].pubkey, if side == 0 { target_ata } else { quote_ata });
+            assert_eq!(&route.data[19..51], if side == 0 { target.as_ref() } else { quote.as_ref() });
+            assert_eq!(route.data[18], 1); // One CPMM CPI after six fixed Router accounts.
+            assert_eq!(route.accounts[6 + 4].pubkey, if side == 0 { quote_ata } else { target_ata });
+            assert_eq!(route.accounts[6 + 5].pubkey, if side == 0 { target_ata } else { quote_ata });
+            assert_eq!(route.accounts[6 + 8].pubkey, if side == 0 {
+                routed.quote_token_program() } else { routed.meme_token_program() });
+            assert_eq!(route.accounts[6 + 9].pubkey, if side == 0 {
+                routed.meme_token_program() } else { routed.quote_token_program() });
+            for key in [target_ata, quote_ata, program_0, program_1] {
+                assert!(route.accounts.iter().any(|a| a.pubkey == key));
+            }
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &built.into_instructions(), Some(&payer.pubkey()), &[&payer],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+    }
 }
 
 #[test]
