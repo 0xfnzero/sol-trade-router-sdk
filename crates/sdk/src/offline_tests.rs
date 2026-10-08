@@ -1191,6 +1191,42 @@ fn offline_router_client_builds_pumpswap_buy() {
 
 #[test]
 fn offline_classify_soft_vs_hard() {
+    let target = RAYDIUM_CPMM_PROGRAM;
+    let other = crate::constants::ASSOCIATED_TOKEN_PROGRAM;
+    let setup_failure = format!("InstructionError; logs=Program {other} invoke [1] | Program {other} failed: custom program error: 0x1");
+    assert!(std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_fault(
+        "setup_failure_is_not_dex_coverage", target, Some(SimVerdict::Hard(setup_failure))
+    )).is_err());
+    for verdict in [None, Some(SimVerdict::Ok),
+        Some(SimVerdict::Hard("RPC unavailable".into())),
+        Some(SimVerdict::Soft(format!("error; logs=Program {target} invoke [1] | Program {target} success | Program {other} invoke [1] | Program {other} failed: error"))),
+        Some(SimVerdict::Hard(format!("error; logs=Program {target} failed: error"))),
+        Some(SimVerdict::Hard(format!("error; logs=Program log: Program {target} invoke [1] | Program log: Program {target} failed: error")))] {
+        assert!(std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_fault(
+            "unrelated_failure", target, verdict)).is_err());
+    }
+    let mut logs = vec![format!("Program {target} invoke [1]")];
+    logs.extend((0..20).map(|i| format!("Program log: diagnostic {i}")));
+    logs.push(format!("Program {other} invoke [2]"));
+    logs.push(format!("Program {other} failed: custom program error: 0x1"));
+    logs.push(format!("Program {target} failed: custom program error: 0x1"));
+    // Keep the DEX invocation even when more than 12 diagnostic lines follow.
+    let verdict = crate::mainnet_sim::classify_response(Some("InstructionError"), Some(logs));
+    crate::mainnet_sim_tests::assert_funded_fault("nested_dex_failure", target, Some(verdict));
+    let logs = format!("error; logs=Program {target} invoke [1] | Program {target} failed: error");
+    crate::mainnet_sim_tests::assert_funded_fault("hard_dex_failure", target, Some(SimVerdict::Hard(logs)));
+    for verdict in [None, Some(SimVerdict::Ok), Some(SimVerdict::Hard("RPC unavailable".into())),
+        Some(SimVerdict::Soft(format!("error; logs=Program {target} invoke [1] | Program {target} failed: error"))),
+        Some(SimVerdict::Hard(format!("error; logs=Program {other} invoke [1] | Program {other} failed: error")))] {
+        assert!(std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_hard(
+            "hard_failure_needs_target", target, verdict)).is_err());
+    }
+    let logs = format!("error; logs=Program {target} invoke [1] | Program {target} failed: error");
+    crate::mainnet_sim_tests::assert_funded_hard("hard_target_failure", target, Some(SimVerdict::Hard(logs)));
+    for verdict in [SimVerdict::Soft("insufficient funds".into()), SimVerdict::Hard("RPC error".into())] {
+        assert!(std::panic::catch_unwind(|| crate::mainnet_sim::assert_sim_ok("fund_only", verdict)).is_err());
+    }
+    crate::mainnet_sim::assert_sim_ok("fund_only", SimVerdict::Ok);
     assert!(matches!(
         classify_err("Error: insufficient funds"),
         SimVerdict::Soft(_)

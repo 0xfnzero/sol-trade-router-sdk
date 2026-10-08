@@ -455,19 +455,14 @@ fn sim_config() -> RpcSimulateTransactionConfig {
     }
 }
 
-fn classify_response(err: Option<impl std::fmt::Debug>, logs: Option<Vec<String>>) -> SimVerdict {
+pub(crate) fn classify_response(err: Option<impl std::fmt::Debug>, logs: Option<Vec<String>>) -> SimVerdict {
     match err {
         None => SimVerdict::Ok,
         Some(e) => {
+            // Fault assertions need the target invocation as well as the final
+            // failure; long inner-CPI diagnostics can push it out of a tail slice.
             let logs = logs
                 .unwrap_or_default()
-                .into_iter()
-                .rev()
-                .take(12)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
                 .join(" | ");
             classify_err(&format!("{e:?}; logs={logs}"))
         }

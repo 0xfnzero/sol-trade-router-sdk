@@ -87,22 +87,31 @@ fn assert_funded_ok(scenario: &str, verdict: Option<SimVerdict>) {
     }
 }
 
-fn assert_funded_hard(scenario: &str, verdict: Option<SimVerdict>) {
+pub(crate) fn assert_funded_hard(scenario: &str, program: Pubkey, verdict: Option<SimVerdict>) {
     match verdict {
         None => panic!("[{scenario}] required funder / RPC for coverage, none available"),
+        Some(v @ SimVerdict::Hard(_)) => assert_funded_fault(scenario, program, Some(v)),
         Some(v) => assert_sim_hard(scenario, v),
     }
 }
 
-/// Fault injection: Soft (e.g. tickarray) or Hard both prove we hit the DEX; Ok is a miss.
-fn assert_funded_fault(scenario: &str, verdict: Option<SimVerdict>) {
+/// Fault injection must reach and fail the specified DEX, not just setup or funding.
+pub(crate) fn assert_funded_fault(scenario: &str, program: Pubkey, verdict: Option<SimVerdict>) {
     match verdict {
         None => panic!("[{scenario}] required funder / RPC for coverage, none available"),
         Some(SimVerdict::Ok) => panic!("[{scenario}] expected Soft/Hard fault, got Ok"),
         Some(SimVerdict::Soft(m) | SimVerdict::Hard(m)) => {
+            let logs = m.split_once("; logs=").map(|(_, logs)| logs).unwrap_or("");
+            let invoke = format!("Program {program} invoke [");
+            let failure = format!("Program {program} failed: ");
+            let mut invoked = false;
+            let reached_failure = logs.split(" | ").any(|line| {
+                if line.starts_with(&invoke) { invoked = true; }
+                invoked && line.starts_with(&failure)
+            });
             assert!(
-                m.contains(" failed:") && m.contains("invoke ["),
-                "[{scenario}] execution fault required, got: {m}"
+                reached_failure,
+                "[{scenario}] invocation and failure of {program} required, got: {m}"
             );
             println!("[{scenario}] fault accepted: {m}");
         }
@@ -121,14 +130,7 @@ fn mainnet_sim_creates_fresh_wallet_each_run() {
     let a = create_wallet();
     let b = create_wallet();
     assert_ne!(a.pubkey(), b.pubkey());
-    // Fund-only transfer after virtual whale debit — Ok or Soft.
-    match simulate_with_fresh_wallet(&client, &a, vec![]) {
-        None => panic!("[wallet] required funder for coverage, none available"),
-        Some(SimVerdict::Ok | SimVerdict::Soft(_)) => {
-            println!("[wallet] fund-only simulate accepted for {}", a.pubkey());
-        }
-        Some(SimVerdict::Hard(m)) => panic!("fund-only sim should not HARD: {m}"),
-    }
+    assert_funded_ok("wallet_fund_only", simulate_with_fresh_wallet(&client, &a, vec![]));
 }
 
 #[test]
@@ -1001,7 +1003,7 @@ fn mainnet_fault_wrong_discriminator_is_hard() {
     }
     println!("[fault_wrong_disc] account-load wallet={user}");
     assert_funded_hard(
-        "fault_wrong_disc",
+        "fault_wrong_disc", RAYDIUM_CPMM_PROGRAM,
         simulate_legs_funded(&client, &wallet, setup, &[leg]),
     );
 }
@@ -1025,7 +1027,7 @@ fn mainnet_fault_wrong_pool_account_is_hard() {
     }
     println!("[fault_pumpswap_pool] account-load wallet={user}");
     assert_funded_hard(
-        "fault_pumpswap_pool",
+        "fault_pumpswap_pool", PUMPSWAP_PROGRAM,
         simulate_legs_funded(&client, &wallet, setup, &[leg]),
     );
 }
@@ -1492,7 +1494,7 @@ fn mainnet_fault_amm_v4_wrong_token_program_is_hard() {
         raydium_amm_v4_swap_leg(&user, &pool, 100_000, 1, WSOL_MINT).expect("valid control leg");
     leg.accounts[0].pubkey = TOKEN_2022_PROGRAM;
     assert_funded_hard(
-        "fault_amm_v4_tp",
+        "fault_amm_v4_tp", RAYDIUM_AMM_V4_PROGRAM,
         simulate_legs_funded(&client, &wallet, setup, &[leg]),
     );
 }
@@ -1542,7 +1544,7 @@ fn mainnet_fault_clmm_empty_ticks_is_hard_or_reject() {
         };
         println!("[fault_clmm_ticks] sig={sig} wallet={user}");
         assert_funded_fault(
-            "fault_clmm_ticks",
+            "fault_clmm_ticks", RAYDIUM_CLMM_PROGRAM,
             simulate_legs_funded(&client, &wallet, setup, &[leg]),
         );
         true
@@ -1813,7 +1815,7 @@ fn mainnet_fault_pumpfun_wrong_fee_recipient_is_fault() {
         let leg = pumpfun_buy_leg(&user, &pool, lamports, 1, user_ata);
         println!("[fault_pumpfun_fee] sig={sig} wallet={user}");
         assert_funded_fault(
-            "fault_pumpfun_fee",
+            "fault_pumpfun_fee", PUMPFUN_PROGRAM,
             simulate_legs_funded(&client, &wallet, setup, &[leg]),
         );
         true
@@ -2277,7 +2279,7 @@ fn mainnet_fault_whirlpool_empty_ticks() {
             };
             println!("[fault_whirlpool_ticks] sig={sig} wallet={user}");
             assert_funded_fault(
-                "fault_whirlpool_ticks",
+                "fault_whirlpool_ticks", ORCA_WHIRLPOOL_PROGRAM,
                 simulate_legs_funded(&client, &wallet, setup, &[leg]),
             );
             true
@@ -2325,7 +2327,7 @@ fn mainnet_fault_dlmm_empty_bins() {
         };
         println!("[fault_dlmm_bins] sig={sig} wallet={user}");
         assert_funded_fault(
-            "fault_dlmm_bins",
+            "fault_dlmm_bins", METEORA_DLMM_PROGRAM,
             simulate_legs_funded(&client, &wallet, setup, &[leg]),
         );
         true
@@ -2364,7 +2366,7 @@ fn mainnet_fault_cpmm_wrong_observation_is_fault() {
     .expect("leg");
     println!("[fault_cpmm_obs] wallet={user}");
     assert_funded_fault(
-        "fault_cpmm_obs",
+        "fault_cpmm_obs", RAYDIUM_CPMM_PROGRAM,
         simulate_legs_funded(&client, &wallet, setup, &[leg]),
     );
 }

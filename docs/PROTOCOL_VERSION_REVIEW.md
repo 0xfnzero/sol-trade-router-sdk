@@ -697,3 +697,42 @@ Cached caller state must still be current; these checks do not ensure freshness.
 Evidence: tools/validation/simulation-coverage-20261009/launchlab-sell-liquidity-followup/.
 Review coverage: 6 changed/added files reviewed, zero skipped (100%), including
 both Rust files, documentation, official-source snapshot and both evidence logs.
+
+
+### Simulation fault target assertions — 2026-10-09
+
+The live fault helper previously accepted any runtime invocation plus failure.
+A failed ATA setup transaction therefore counted as successful coverage of an
+injected CPMM/CLMM/Pump/Whirlpool/DLMM fault even when the target DEX never ran.
+The existing offline classification test reproduces this before the fix: the
+helper prints fault accepted for an ATA-only failure, causing the new assertion
+to fail. Hard-only fault tests also accepted unrelated hard/transport failures.
+
+All eight live execution-fault call sites now supply the expected DEX program.
+Both fault helper variants require its runtime invocation followed by its runtime
+failure; setup failures, missing logs, transport failures, unrelated failures and
+successful simulations reject. Hard-only scenarios additionally retain their
+Hard requirement. Builder rejection remains explicitly separate from simulated
+DEX rejection and is not promoted to execution coverage.
+
+Keep the complete logs returned by RPC during classification instead of only the
+last 12 lines: lengthy inner-CPI diagnostics otherwise lose the target invocation.
+The wallet fund-only scenario now uses the existing strict success assertion;
+Soft failure no longer counts as successful funding. No new simulation/signing
+suite was added. The existing offline classification test covers ATA-only failure,
+unavailable/Ok results, target success followed by another failure, missing
+invocation, Program log text resembling runtime logs, nested failure with more
+than 12 lines, both valid fault classifications, hard-only constraints and strict
+fund-only success. These are synthetic log regressions, not live executions.
+
+All 110 offline tests pass (93 SDK, 15 program, 2 example); 81 live cases and one
+doctest remain ignored there. An explicit rerun of
+mainnet_fault_cpmm_wrong_observation_is_fault failed at get_slot after three RPC
+transport attempts. No DEX invocation occurred; record it as unavailable, not
+passing. Dependencies, protocol instruction builders and on-chain source/binary
+are unchanged. No deploy or broadcast. Existing mainnet header/tag 7 limitations
+and outstanding fresh-bank validation remain.
+
+Evidence: tools/validation/simulation-coverage-20261009/fault-target-coverage-followup/.
+Review coverage: 7 changed/added files reviewed, zero skipped (100%), including
+all three Rust files, documentation and all three evidence logs.
