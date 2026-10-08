@@ -6,7 +6,7 @@ use crate::{
     constants::*,
     legs::Leg,
     market::PumpFunPool,
-    quote::{fee_amount, pumpfun_sell_sol_out},
+    quote::{fee_amount, pumpfun_sell_sol_out, validate_router_fee_bps},
     route_ix::{build_route_instruction_ex, RouteAccounts},
 };
 use anyhow::{anyhow, bail, Result};
@@ -356,7 +356,8 @@ impl PumpFunV3Pool {
 
     /// Protected single V3 buy. The router charges its fee on the declared max
     /// budget and enforces debit <= budget; V3 may leave rounding dust unspent.
-    /// `fee_bps` must match the current router config. Minimum is caller-supplied.
+    /// `fee_bps` must match the current router config and be at most 1_000.
+    /// Minimum is caller-supplied.
     pub fn build_buy_route(
         &self,
         router: &Pubkey,
@@ -379,9 +380,7 @@ impl PumpFunV3Pool {
         minimum: u64,
         exact_out: bool,
     ) -> Result<PumpFunV3Trade> {
-        if fee_bps > 10_000 {
-            bail!("invalid router fee rate");
-        }
+        validate_router_fee_bps(fee_bps)?;
         let spend = budget
             .checked_sub(fee_amount(budget, fee_bps))
             .filter(|v| *v > 0)
@@ -440,6 +439,7 @@ impl PumpFunV3Pool {
 
     /// Exact output protected by the declared maximum quote budget. Router fees
     /// are calculated on that maximum, as for all router exact-output trades.
+    /// `fee_bps` must match the current router config and be at most 1_000.
     pub fn build_buy_exact_out_route(
         &self,
         router: &Pubkey,
@@ -452,6 +452,7 @@ impl PumpFunV3Pool {
         self.build_buy_route_inner(router, user, fee_recipient, maximum, fee_bps, amount, true)
     }
 
+    /// Protected V3 sell; `fee_bps` must match the config and be at most 1_000.
     pub fn build_sell_route(
         &self,
         router: &Pubkey,
@@ -461,9 +462,7 @@ impl PumpFunV3Pool {
         fee_bps: u16,
         minimum: u64,
     ) -> Result<PumpFunV3Trade> {
-        if fee_bps > 10_000 {
-            bail!("invalid router fee rate");
-        }
+        validate_router_fee_bps(fee_bps)?;
         let spend = amount
             .checked_sub(fee_amount(amount, fee_bps))
             .filter(|v| *v > 0)
@@ -719,6 +718,20 @@ mod tests {
         let mut p = pool();
         let user = Pubkey::new_unique();
         let fee = Pubkey::new_unique();
+        for bps in [1_001, 9_999, 10_000, u16::MAX] {
+            for result in [
+                p.build_buy_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1),
+                p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1),
+                p.build_sell_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1),
+            ] {
+                assert!(result.err().expect("invalid router fee accepted").to_string().contains("router fee"));
+            }
+        }
+        for bps in [0, 1_000] {
+            assert!(p.build_buy_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
+            assert!(p.build_buy_exact_out_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
+            assert!(p.build_sell_route(&PROGRAM_ID, &user, &fee, 10_000, bps, 1).is_ok());
+        }
         p.needs_curve_extension = true;
         p.needs_volume_initialization = true;
         let buy = p

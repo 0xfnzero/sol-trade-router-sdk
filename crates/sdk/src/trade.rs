@@ -32,7 +32,7 @@ use crate::{
         apply_slippage_min_out, cpmm_in_for_out, cpmm_out, fee_amount, launchlab_buy_quote,
         launchlab_sell_quote_out, meteora_damm_v2_out, pumpfun_buy_token_out, pumpfun_sell_sol_out,
         pumpswap_buy_base_out, pumpswap_sell_quote_out, raydium_amm_v4_in_for_out,
-        raydium_amm_v4_out,
+        raydium_amm_v4_out, validate_router_fee_bps,
     },
     route_ix::{
         build_route_instruction_ex, sol_fee_program, token_fee_program, RouteAccounts,
@@ -226,9 +226,10 @@ pub struct RouterClient {
     pub program_id: Pubkey,
     pub fee_recipient: Pubkey,
     /// Must match on-chain config (used for local fee netting).
-    /// Mismatch with `cfg.fee_bps` causes `FeeSourceMismatch` on-chain.
+    /// A mismatch invalidates the net-input quote and may reject the route.
     /// Must match on-chain `RouterConfig.fee_bps`. Client computes spend /
     /// `route_amount_in` with this value; the program charges `cfg.fee_bps`.
+    /// High-level builders reject values above the config limit (1_000 bps).
     pub fee_bps: u16,
     /// Reject wild / non-canonical pools before building legs.
     pub pool_guard: PoolGuardPolicy,
@@ -404,6 +405,7 @@ impl RouterClient {
         market: &RoutedMarket,
         opts: TradeOpts,
     ) -> Result<BuiltTrade> {
+        validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
@@ -632,6 +634,7 @@ impl RouterClient {
         market: &RoutedMarket,
         opts: TradeOpts,
     ) -> Result<BuiltTrade> {
+        validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));

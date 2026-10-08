@@ -1351,6 +1351,28 @@ fn offline_fee_reduces_route_amount_in() {
         RouterClient::new(payer, fee_recv, 500).with_pool_guard(PoolGuardPolicy::disabled());
     let market = RoutedMarket::new(Market::CpmmOuter(dummy_cpmm()));
     let amount = 1_000_000u64;
+    for bps in [1_001, 9_999, 10_000, u16::MAX] {
+        let invalid = RouterClient::new(payer, fee_recv, bps)
+            .with_pool_guard(PoolGuardPolicy::disabled());
+        for input in [1, amount] {
+            for result in [
+                invalid.buy_with_opts(input, &market,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1)),
+                invalid.sell_with_opts(input, &market,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1)),
+            ] {
+                assert!(result.err().expect("invalid router fee accepted").to_string().contains("router fee"));
+            }
+        }
+    }
+    for bps in [0, 1_000] {
+        let valid = RouterClient::new(payer, fee_recv, bps)
+            .with_pool_guard(PoolGuardPolicy::disabled());
+        assert!(valid.buy_with_opts(amount, &market,
+            TradeOpts::default().buy_with_wsol().with_min_out(1)).is_ok());
+        assert!(valid.sell_with_opts(amount, &market,
+            TradeOpts::default().sell_to_wsol().with_min_out(1)).is_ok());
+    }
     let built = client
         .buy_with_opts(amount, &market, TradeOpts::default().buy_with_wsol())
         .unwrap();

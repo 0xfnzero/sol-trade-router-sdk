@@ -15,6 +15,15 @@ pub const MAX_SLIPPAGE_BPS: u64 = 9_999;
 
 const FEE_DENOM: u128 = 1_000_000;
 
+/// Match the router config's MAX_FEE_BPS (10%). Keep quote arithmetic generic,
+/// but reject impossible platform configuration before constructing a trade.
+pub(crate) fn validate_router_fee_bps(fee_bps: u16) -> Result<()> {
+    if fee_bps > 1_000 {
+        return Err(anyhow!("router fee exceeds the on-chain maximum of 1_000 bps"));
+    }
+    Ok(())
+}
+
 #[inline(always)]
 pub fn clamp_slippage_bps(slippage_bps: u64) -> u64 {
     slippage_bps.min(MAX_SLIPPAGE_BPS)
