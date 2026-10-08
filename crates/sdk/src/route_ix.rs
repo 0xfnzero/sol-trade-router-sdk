@@ -149,8 +149,8 @@ pub struct RouteAccounts {
     pub output_token_account: Pubkey,
     /// System program for SOL fee, or SPL Token / Token-2022 for token fee.
     pub fee_program: Pubkey,
-    /// Retained for API compatibility; not currently passed on-chain (Token
-    /// transfer CPI does not require the mint account).
+    /// Fee-source mint. Token-2022 routes append it after the leg/program metas
+    /// for checked fee transfers, without moving any existing account index.
     pub fee_mint: Pubkey,
 }
 
@@ -209,7 +209,6 @@ pub fn build_route_instruction_ex(
     metas.push(AccountMeta::new(accounts.fee_source, false));
     metas.push(AccountMeta::new(accounts.output_token_account, false));
     metas.push(AccountMeta::new_readonly(accounts.fee_program, false));
-    let _ = accounts.fee_mint;
 
     for leg in legs {
         data.extend_from_slice(leg.program_id.as_ref());
@@ -233,6 +232,7 @@ pub fn build_route_instruction_ex(
         }
     }
 
+    append_fee_mint(&mut metas, &accounts);
     Instruction {
         program_id: *program_id,
         accounts: metas,
@@ -314,7 +314,6 @@ pub fn build_dynamic_route_instruction(
     metas.push(AccountMeta::new(accounts.output_token_account, false));
     metas.push(AccountMeta::new_readonly(accounts.fee_program, false));
     metas.push(AccountMeta::new(intermediate_token_account, false));
-    let _ = accounts.fee_mint;
 
     for leg in [first_leg, second_leg] {
         data.extend_from_slice(leg.program_id.as_ref());
@@ -327,6 +326,7 @@ pub fn build_dynamic_route_instruction(
     if second_leg.program_id != first_leg.program_id {
         metas.push(AccountMeta::new_readonly(second_leg.program_id, false));
     }
+    append_fee_mint(&mut metas, &accounts);
     Ok(Instruction {
         program_id: *program_id,
         accounts: metas,
@@ -445,7 +445,6 @@ pub fn build_three_hop_route_instruction(
     metas.push(AccountMeta::new_readonly(accounts.fee_program, false));
     metas.push(AccountMeta::new(first_intermediate, false));
     metas.push(AccountMeta::new(second_intermediate, false));
-    let _ = accounts.fee_mint;
 
     for leg in legs {
         data.extend_from_slice(leg.program_id.as_ref());
@@ -464,11 +463,20 @@ pub fn build_three_hop_route_instruction(
         seen[seen_n] = leg.program_id;
         seen_n += 1;
     }
+    append_fee_mint(&mut metas, &accounts);
     Ok(Instruction {
         program_id: *program_id,
         accounts: metas,
         data,
     })
+}
+
+fn append_fee_mint(metas: &mut Vec<AccountMeta>, accounts: &RouteAccounts) {
+    if accounts.fee_program == TOKEN_2022_PROGRAM
+        && !metas.iter().any(|meta| meta.pubkey == accounts.fee_mint)
+    {
+        metas.push(AccountMeta::new_readonly(accounts.fee_mint, false));
+    }
 }
 
 pub fn sol_fee_program() -> Pubkey {
@@ -622,6 +630,15 @@ mod tests {
                 assert_eq!(ix.accounts[6].pubkey, quote);
                 assert_eq!(ix.accounts[7].pubkey, quote);
                 assert_eq!(&ix.data[59..91], first_program.as_ref());
+                let mut token_2022_accounts = route_accounts();
+                token_2022_accounts.fee_program = TOKEN_2022_PROGRAM;
+                let fee_mint = token_2022_accounts.fee_mint;
+                let checked = build_dynamic_route_instruction(
+                    &crate::PROGRAM_ID, token_2022_accounts, quote,
+                    100, 80, 7, &Pubkey::new_unique(), &first, second,
+                ).unwrap();
+                assert_eq!(checked.accounts[7].pubkey, quote);
+                assert_eq!(checked.accounts.last(), Some(&AccountMeta::new_readonly(fee_mint, false)));
             }
         }
     }
@@ -750,7 +767,7 @@ mod tests {
             10,
             FEE_ASSET_TOKEN,
             &Pubkey::new_from_array([5; 32]),
-            &[first],
+            &[first.clone()],
         );
         // Wire fixture for baseline 472d57c: input=100, minimum=10,
         // fee_asset=1, output mint=[5;32], one leg ([3;32], one account, [1,2,3]).
@@ -760,6 +777,22 @@ mod tests {
         assert_eq!(ix.data[0], TAG_ROUTE);
         assert_eq!(ix.data[18], 1);
         assert_eq!(ix.accounts[6].pubkey, first_account); // no extra intermediate account
+        let mut token_2022 = build_route_instruction(
+            &crate::PROGRAM_ID,
+            RouteAccounts {
+                payer,
+                fee_destination: ix.accounts[2].pubkey,
+                fee_source: ix.accounts[3].pubkey,
+                output_token_account: ix.accounts[4].pubkey,
+                fee_program: TOKEN_2022_PROGRAM,
+                fee_mint: WSOL_MINT,
+            },
+            100, 10, FEE_ASSET_TOKEN, &Pubkey::new_from_array([5; 32]), &[first],
+        );
+        assert_eq!(token_2022.data, ix.data);
+        assert_eq!(token_2022.accounts.pop(), Some(AccountMeta::new_readonly(WSOL_MINT, false)));
+        token_2022.accounts[5] = ix.accounts[5].clone();
+        assert_eq!(token_2022.accounts, ix.accounts);
     }
 
     #[test]
@@ -1005,6 +1038,14 @@ mod tests {
         assert_eq!(dynamic.accounts[6].pubkey, usdc);
         assert_eq!(dynamic.accounts[7].pubkey, quote);
         assert_eq!(dynamic.accounts[8].pubkey, usdc);
+        let mut token_2022_accounts = route_accounts();
+        token_2022_accounts.fee_program = TOKEN_2022_PROGRAM;
+        let checked = build_three_hop_route_instruction(
+            &crate::PROGRAM_ID, token_2022_accounts, usdc, quote,
+            500, 400, 300, 100, &Pubkey::new_unique(), &legs, true,
+        ).unwrap();
+        assert_eq!(checked.accounts[8].pubkey, usdc);
+        assert_eq!(checked.accounts.last(), Some(&AccountMeta::new_readonly(WSOL_MINT, false)));
 
         legs[0].accounts.push(AccountMeta::new(quote, false));
         assert!(build_three_hop_route_instruction(

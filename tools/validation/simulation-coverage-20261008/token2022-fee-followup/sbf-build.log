@@ -1,0 +1,5 @@
+[2026-10-08T12:53:56.974366000Z WARN  cargo_build_sbf] Package 'sol-trade-router' has two crate types defined: cdylib and lib. This setting precludes link-time optimizations (LTO). Use cdylib for programs to be deployed and rlib for packages to be imported by other programs as libraries.
+   Compiling sol-trade-router v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/programs/sol-trade-router)
+    Finished `release` profile [optimized] target(s) in 0.77s
+[2026-10-08T12:53:57.834253000Z WARN  cargo_build_sbf::post_processing] The following functions are undefined and not known syscalls ["sol_try_find_program_address", "sol_get_sysvar", "sol_invoke_signed_c", "sol_create_program_address", "sol_panic_", "sol_memcpy_"].
+[2026-10-08T12:53:57.834272000Z WARN  cargo_build_sbf::post_processing]          Calling them will trigger a run-time error.

@@ -7,7 +7,7 @@
 //! 3. `[writable]` fee_source (SOL: user; Token: user ATA owned by user)
 //! 4. `[writable]` user_output_token (token account, or user for native SOL)
 //! 5. `[]` fee_program (System for SOL fee; SPL Token / Token-2022 for token fee)
-//!    6.. : remaining — concatenated per-leg AccountMetas, then optional DEX program ids
+//!    6.. : remaining — per-leg metas, optional DEX program ids and fee mint
 //!
 //! # Data (after 1-byte tag stripped by entrypoint)
 //! ```text
@@ -616,9 +616,46 @@ fn process_inner(
                 if token_mint(fee_destination)? != token_mint(fee_source)? {
                     return Err(RouterError::InvalidFeeAsset.into());
                 }
-                // Program id already verified above (Token / Token-2022).
-                TokenTransfer::new(fee_source, fee_destination, user, fee)
-                    .invoke_with_unverified_program(fee_program.address())?;
+                // Token-2022 extensions such as TransferFeeAmount require the
+                // mint even for a platform fee. Locate it among leg accounts or
+                // the SDK's trailing metas, keeping all route ABIs unchanged.
+                let mint_address = token_mint(fee_source)?;
+                let mint = remaining.iter().find(|acc| acc.address() == &mint_address);
+                if let Some(mint) = mint.filter(|_| addr_eq(fee_program.address(), &TOKEN_2022_PROGRAM_ID)) {
+                    if mint.owner() != fee_program.address() {
+                        return Err(RouterError::InvalidFeeAsset.into());
+                    }
+                    let decimals = {
+                        let mint_data = mint.try_borrow()?;
+                        if mint_data.len() < 82 || mint_data[45] != 1 {
+                            return Err(RouterError::InvalidFeeAsset.into());
+                        }
+                        mint_data[44]
+                    };
+                    let mut transfer_data = [0u8; 10];
+                    transfer_data[0] = 12; // SPL Token TransferChecked
+                    transfer_data[1..9].copy_from_slice(&fee.to_le_bytes());
+                    transfer_data[9] = decimals;
+                    let metas = [
+                        InstructionAccount::new(fee_source.address(), true, false),
+                        InstructionAccount::new(mint.address(), false, false),
+                        InstructionAccount::new(fee_destination.address(), true, false),
+                        InstructionAccount::new(user.address(), false, true),
+                    ];
+                    invoke_with_slice(
+                        &InstructionView {
+                            program_id: fee_program.address(),
+                            accounts: &metas,
+                            data: &transfer_data,
+                        },
+                        &[fee_source.clone(), mint.clone(), fee_destination.clone(), user.clone()],
+                    )?;
+                } else {
+                    // Preserve old clients using extension-free token accounts.
+                    // Token-2022 itself rejects unchecked extension transfers.
+                    TokenTransfer::new(fee_source, fee_destination, user, fee)
+                        .invoke_with_unverified_program(fee_program.address())?;
+                }
             }
             _ => return Err(RouterError::InvalidFeeAsset.into()),
         }
