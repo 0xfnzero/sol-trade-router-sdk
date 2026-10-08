@@ -287,6 +287,21 @@ fn offline_cpmm_quote_positive() {
     let out = cpmm_out(&pool, 1_000_000, true).expect("cpmm out");
     assert!(out > 0);
     assert!(out < pool.base_reserve);
+    // The quote API may return zero; automatic trade construction must reject it.
+    let mut tiny = dummy_cpmm();
+    tiny.base_reserve = 1_000;
+    tiny.quote_reserve = 1_000;
+    assert_eq!(cpmm_out(&tiny, 1, true).unwrap(), 0);
+    assert_eq!(cpmm_out(&tiny, 1, false).unwrap(), 0);
+    let market = RoutedMarket {
+        market: Market::CpmmOuter(tiny),
+        bridge: None,
+    };
+    let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    for result in [client.buy_with_sol(1, &market), client.sell_to_sol(1, &market)] {
+        assert!(result.unwrap_err().to_string().contains("zero output"));
+    }
 }
 
 #[test]
@@ -567,6 +582,30 @@ fn offline_router_client_builds_pumpfun_buy() {
         .expect("buy build");
     let ixs = built.into_instructions();
     assert!(!ixs.is_empty());
+    let mut pf = dummy_pumpfun();
+    pf.virtual_token_reserves = 1_000;
+    pf.virtual_sol_reserves = 1_000;
+    pf.real_token_reserves = 800;
+    pf.protocol_fee_bps = 0;
+    pf.creator_fee_bps = 0;
+    let tiny = RoutedMarket {
+        market: Market::PumpFunInner(pf),
+        bridge: None,
+    };
+    // One raw output unit must survive automatic slippage rounding.
+    let buy = client.buy_with_sol(3, &tiny).unwrap().route.unwrap();
+    assert_eq!(u64::from_le_bytes(buy.data[9..17].try_into().unwrap()), 1);
+    let sell = client.sell_to_sol(2, &tiny).unwrap().route.unwrap();
+    assert_eq!(u64::from_le_bytes(sell.data[9..17].try_into().unwrap()), 1);
+    assert!(client.buy_with_sol(2, &tiny).is_err());
+    assert!(client.sell_to_sol(1, &tiny)
+        .unwrap_err().to_string().contains("zero output"));
+    // Explicit thresholds remain authoritative, including a caller-selected zero.
+    let explicit = client
+        .buy_with_opts(2, &tiny, TradeOpts::default().buy_with_sol().with_min_out(0))
+        .unwrap()
+        .route.unwrap();
+    assert_eq!(u64::from_le_bytes(explicit.data[9..17].try_into().unwrap()), 0);
 }
 
 #[test]

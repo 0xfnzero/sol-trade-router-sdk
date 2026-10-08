@@ -45,6 +45,8 @@ pub struct TradeOpts {
     /// Slippage in basis points (default 100 = 1%).
     pub slippage_bps: u64,
     /// Explicit DEX minimum output, primarily for complex Meteora DAMM V2 curves.
+    /// None uses automatic quoting with a positive floor; Some(0) explicitly
+    /// allows zero output and bypasses the automatic quote guard.
     pub min_out: Option<u64>,
     /// Exact-out target. When set, `amount_in` on buy/sell is the **max input budget**
     /// and capable venues use exact-out legs (CPMM / AmmV4 / PumpSwap / DAMM V2).
@@ -463,6 +465,9 @@ impl RouterClient {
 
         let (legs, min_out, swap_spent) =
             self.build_buy_legs(spend, market, &opts, &mut setup, &mut touched)?;
+        if opts.min_out.is_none() && min_out == 0 {
+            return Err(anyhow!("automatic buy quote rounds to zero output; increase input"));
+        }
         let route_amount_in = if swap_spent == spend {
             amount_in
         } else {
@@ -687,6 +692,9 @@ impl RouterClient {
 
         let (legs, min_out, output_ata) =
             self.build_sell_legs(sell_amt, market, &opts, &mut setup, &mut touched)?;
+        if opts.min_out.is_none() && min_out == 0 {
+            return Err(anyhow!("automatic sell quote rounds to zero output; increase input"));
+        }
 
         let (expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
             // Native SOL credit — router checks payer lamport Δ.

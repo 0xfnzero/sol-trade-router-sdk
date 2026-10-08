@@ -10,7 +10,7 @@ use crate::{
     transfer_fee::TokenTransferFee,
 };
 
-/// Max slippage 99.99% — matches sol-trade-sdk (prevents min_out = 0 at 100%).
+/// Max slippage 99.99%. Positive quotes retain at least one raw output unit.
 pub const MAX_SLIPPAGE_BPS: u64 = 9_999;
 
 const FEE_DENOM: u128 = 1_000_000;
@@ -20,11 +20,18 @@ pub fn clamp_slippage_bps(slippage_bps: u64) -> u64 {
     slippage_bps.min(MAX_SLIPPAGE_BPS)
 }
 
+/// Apply the clamped tolerance in raw token units. Positive quotes retain one
+/// unit when flooring would otherwise remove the entire output requirement.
 #[inline(always)]
 pub fn apply_slippage_min_out(amount: u64, slippage_bps: u64) -> u64 {
     let slip = clamp_slippage_bps(slippage_bps) as u128;
     let out = (amount as u128).saturating_mul(10_000u128.saturating_sub(slip)) / 10_000u128;
-    out.min(u64::MAX as u128) as u64
+    let out = out.min(u64::MAX as u128) as u64;
+    if amount == 0 {
+        0
+    } else {
+        out.max(1)
+    }
 }
 
 #[inline(always)]
@@ -239,6 +246,14 @@ mod tests {
             apply_slippage_min_out(1_000_000, 9_999)
         );
         assert_ne!(apply_slippage_min_out(1_000_000, 9_999), 0);
+        for amount in [1, 2, 9_999, u64::MAX] {
+            for slip in [0, 1, 500, 9_999, 10_000, u64::MAX] {
+                let minimum = apply_slippage_min_out(amount, slip);
+                assert!((1..=amount).contains(&minimum));
+            }
+        }
+        assert_eq!(apply_slippage_min_out(1, 500), 1);
+        assert_eq!(apply_slippage_min_out(0, 500), 0);
     }
 
     #[test]
