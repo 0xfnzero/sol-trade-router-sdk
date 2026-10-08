@@ -250,6 +250,10 @@ Use exact-input sizing or a supported fixed-output target; the latter takes prec
 `TradeBuyParams` / `TradeSellParams` must name the selected market target in `mint`,
 and `dex_type` must match `extension_params`. Build-only methods reject mismatches too.
 
+For native SOL buys, an explicit `close_input_token_ata=true` closes a touched WSOL ATA
+after the route, returning its rent and all remaining WSOL as SOL. Direct native-SOL
+PumpFun routes do not touch or close the WSOL ATA.
+
 ### 5. Admin (after deploy)
 
 ```rust

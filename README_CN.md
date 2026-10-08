@@ -250,6 +250,9 @@ Router 交易及余额查询始终使用标准 ATA，覆盖 Token 和 Token-2022
 `TradeBuyParams` / `TradeSellParams` 的 `mint` 必须对应市场选定的目标代币，
 `dex_type` 必须匹配 `extension_params`；仅构建指令的接口也会拒绝不匹配的请求。
 
+原生 SOL 买入设置 `close_input_token_ata=true` 时，会在路由后关闭实际使用的 WSOL ATA，
+返还租金并将账户内全部剩余 WSOL 转回 SOL。直接使用原生 SOL 的 PumpFun 路径不会关闭 WSOL ATA。
+
 ### 5. 管理指令（部署后）
 
 ```rust

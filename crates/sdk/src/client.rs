@@ -578,7 +578,7 @@ fn buy_ata_policy(params: &TradeBuyParams) -> AtaPolicy {
         create_quote: params.create_input_token_ata
             && !matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         close_wsol: params.close_input_token_ata
-            && matches!(asset, BuyWith::Wsol),
+            && matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         close_meme: false,
         close_quote: false,
     }
