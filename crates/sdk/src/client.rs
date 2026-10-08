@@ -260,14 +260,19 @@ impl TradingClient {
     }
 
     /// Build Route instructions without submitting (simulate / custom send).
+    /// Validates protocol type and binds the requested mint to the routed target.
     /// Regular Pump `use_exact_sol_amount=false` sizing is unsupported unless
     /// a supported fixed-output target takes precedence; it returns an error.
     pub fn build_buy_instructions(&self, params: &TradeBuyParams) -> Result<Vec<Instruction>> {
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!("Invalid protocol params for Trade (dex={:?})", params.dex_type));
+        }
         let market = to_routed_market_for_user(
             &params.extension_params,
             params.mint,
             &self.payer.pubkey(),
         )?;
+        validate_requested_mint(&market, params.mint)?;
         let opts = buy_opts_from_params(params)?;
         Ok(self
             .router
@@ -275,12 +280,17 @@ impl TradingClient {
             .into_instructions())
     }
 
+    /// Build sell instructions after validating protocol type and requested mint.
     pub fn build_sell_instructions(&self, params: &TradeSellParams) -> Result<Vec<Instruction>> {
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!("Invalid protocol params for Trade (dex={:?})", params.dex_type));
+        }
         let market = to_routed_market_for_user(
             &params.extension_params,
             params.mint,
             &self.payer.pubkey(),
         )?;
+        validate_requested_mint(&market, params.mint)?;
         let opts = sell_opts_from_params(params)?;
         Ok(self
             .router
@@ -618,6 +628,15 @@ pub(crate) fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpt
         opts = opts.with_fixed_output(fixed);
     }
     Ok(opts)
+}
+
+// Bind user intent after market resolution, before fee/leg construction.
+fn validate_requested_mint(market: &RoutedMarket, mint: Pubkey) -> Result<()> {
+    if market.meme_mint() != mint {
+        return Err(anyhow!("requested mint {} does not match routed target {}",
+            mint, market.meme_mint()));
+    }
+    Ok(())
 }
 
 /// Validate that `dex_type` matches `extension_params` (mirrors trade-sdk).

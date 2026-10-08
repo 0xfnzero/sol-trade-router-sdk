@@ -1597,6 +1597,67 @@ fn offline_adapter_amm_v4_and_cpmm_from_params() {
         },
     };
     assert_eq!(cpmm_from_params(&cp).pool_state, cpmm.pool_state);
+    let wallet = std::sync::Arc::new(Keypair::new());
+    let infrastructure = std::sync::Arc::new(sol_trade_sdk::TradingInfrastructure {
+        rpc: std::sync::Arc::new(sol_trade_sdk::common::SolanaRpcClient::new(
+            "https://example.invalid".into())),
+        swqos_clients: std::sync::Arc::new(Vec::new()),
+        config: sol_trade_sdk::common::InfrastructureConfig::new(
+            "https://example.invalid".into(), Vec::new(),
+            solana_commitment_config::CommitmentConfig::processed()),
+        max_sender_concurrency: 1, effective_core_ids: std::sync::Arc::new(Vec::new()),
+    });
+    let client = crate::TradingClient::from_infrastructure(
+        wallet.clone(), infrastructure, Pubkey::new_unique(), 100, false)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    use sol_trade_sdk::trading::{core::params::DexParamEnum, factory::DexType};
+    for (dex, extension, mint) in [
+        (DexType::RaydiumAmmV4, DexParamEnum::RaydiumAmmV4(p), amm.pc_mint),
+        (DexType::RaydiumCpmm, DexParamEnum::RaydiumCpmm(cp), cpmm.base_mint),
+    ] {
+        let buy: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
+            dex, sol_trade_sdk::TradeTokenType::WSOL, mint,
+            sol_trade_sdk::BuyAmount::ExactInput(10_000), extension.clone(),
+            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+        ).into();
+        let sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
+            dex, sol_trade_sdk::TradeTokenType::WSOL, mint,
+            sol_trade_sdk::SellAmount::ExactInput(10_000), extension.clone(),
+            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
+        ).into();
+        for wrong_mint in [Pubkey::new_unique(), WSOL_MINT] {
+            let mut wrong_buy = buy.clone();
+            wrong_buy.mint = wrong_mint;
+            let mut wrong_sell = sell.clone();
+            wrong_sell.mint = wrong_mint;
+            for result in [client.build_buy_instructions(&wrong_buy),
+                client.build_sell_instructions(&wrong_sell)] {
+                assert!(result.err().expect("requested mint was ignored")
+                    .to_string().contains("requested mint"));
+            }
+        }
+        let mut wrong_buy = buy.clone();
+        wrong_buy.dex_type = DexType::PumpFun;
+        let mut wrong_sell = sell.clone();
+        wrong_sell.dex_type = DexType::PumpFun;
+        for result in [client.build_buy_instructions(&wrong_buy),
+            client.build_sell_instructions(&wrong_sell)] {
+            assert!(result.err().expect("protocol type was ignored")
+                .to_string().contains("Invalid protocol params"));
+        }
+        for (side, instructions) in [client.build_buy_instructions(&buy).unwrap(),
+            client.build_sell_instructions(&sell).unwrap()].into_iter().enumerate() {
+            let route = instructions.iter().find(|ix| ix.program_id == client.router.program_id).unwrap();
+            assert_eq!(route.accounts[if side == 0 { 4 } else { 3 }].pubkey,
+                crate::ata::ata(&wallet.pubkey(), &mint, &TOKEN_PROGRAM));
+            assert_eq!(&route.data[19..51], if side == 0 { mint.as_ref() } else { WSOL_MINT.as_ref() });
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &instructions, Some(&wallet.pubkey()), &[wallet.as_ref()],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+        }
+    }
 }
 
 #[test]

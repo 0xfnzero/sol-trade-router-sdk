@@ -247,6 +247,9 @@ PumpFun/PumpSwap `BuyAmount::WithMaxInput` (`use_exact_sol_amount=false`)
 is not implemented by the high-level Router client and returns an error.
 Use exact-input sizing or a supported fixed-output target; the latter takes precedence.
 
+`TradeBuyParams` / `TradeSellParams` must name the selected market target in `mint`,
+and `dex_type` must match `extension_params`. Build-only methods reject mismatches too.
+
 ### 5. Admin (after deploy)
 
 ```rust
