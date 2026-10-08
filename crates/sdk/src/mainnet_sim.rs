@@ -8,11 +8,9 @@
 
 #![cfg(test)]
 
-use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_config::{
-    RpcSimulateTransactionConfig, RpcTransactionConfig,
-};
 use solana_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
+use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::{RpcSimulateTransactionConfig, RpcTransactionConfig};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     instruction::Instruction,
@@ -20,7 +18,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
+    transaction::{Transaction, VersionedTransaction},
 };
 use solana_system_interface::instruction as system_instruction;
 use solana_transaction_status::UiTransactionEncoding;
@@ -28,10 +26,7 @@ use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
 
-use crate::constants::{
-    PUMPSWAP_BUYBACK_FEE_RECIPIENT, PUMPSWAP_PROGRAM, PUMPSWAP_PROTOCOL_FEE_RECIPIENT,
-    PUMP_MAYHEM_FEE_RECIPIENT, TOKEN_2022_PROGRAM, TOKEN_PROGRAM,
-};
+use crate::constants::{TOKEN_2022_PROGRAM, TOKEN_PROGRAM};
 use crate::legs::Leg;
 
 /// Known high-balance mainnet accounts — simulation fee-payer / virtual funder only.
@@ -61,10 +56,8 @@ pub mod fixtures {
 
     pub const PUMPSWAP_POOL: Pubkey = pubkey!("539m4mVWt6iduB6W8rDGPMarzNCMesuqY5eUTiiYHAgR");
     pub const PUMPSWAP_BASE: Pubkey = pubkey!("pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn");
-    pub const PUMPSWAP_SEED_POOL: Pubkey =
-        pubkey!("9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA");
-    pub const PUMPSWAP_SEED_BASE: Pubkey =
-        pubkey!("2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv");
+    pub const PUMPSWAP_SEED_POOL: Pubkey = pubkey!("9qKxzRejsV6Bp2zkefXWCbGvg61c3hHei7ShXJ4FythA");
+    pub const PUMPSWAP_SEED_BASE: Pubkey = pubkey!("2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv");
 
     pub const AMM_V4_WSOL_USDT: Pubkey = pubkey!("7XawhbbxtsRcQA8KTkHT9f9nc6d69UwqCDh6U5EEbEmX");
     pub const AMM_V4_WSOL_USDC: Pubkey = pubkey!("58oQChx4yWmvKdwLLZzBi4ChoCc2fqCUWBkwMihLYQo2");
@@ -75,11 +68,6 @@ pub mod fixtures {
         pubkey!("7dVri3qjYD3uobSZL3Zth8vSCgU6r6R2nvFsh7uVfDte");
 }
 
-pub fn enabled() -> bool {
-    std::env::var("RUN_MAINNET_SIM").as_deref() == Ok("1")
-        || std::env::var("RUN_MAINNET_TESTS").as_deref() == Ok("1")
-}
-
 pub fn rpc_url() -> String {
     std::env::var("SOLANA_RPC_URL")
         .or_else(|_| std::env::var("RPC_URL"))
@@ -87,7 +75,11 @@ pub fn rpc_url() -> String {
 }
 
 pub fn rpc() -> RpcClient {
-    RpcClient::new_with_commitment(rpc_url(), CommitmentConfig::confirmed())
+    RpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    )
 }
 
 /// Create a fresh ephemeral wallet for each simulation (never uses a real private key).
@@ -174,7 +166,7 @@ pub fn assert_route_ix(built: &crate::trade::BuiltTrade, label: &str) {
 
 /// Simulate a full [`BuiltTrade`] (setup + Route + cleanup) with a freshly funded wallet.
 ///
-/// When the router program is not deployed, missing-program errors classify as Soft.
+/// Missing programs or execution failures never count as successful simulation.
 pub fn simulate_built_trade(
     client: &RpcClient,
     wallet: &Keypair,
@@ -228,12 +220,16 @@ where
     E: std::fmt::Display,
 {
     let mut last_err: Option<E> = None;
-    for attempt in 0..6u32 {
+    for attempt in 0..3u32 {
         match f() {
             Ok(v) => return Ok(v),
             Err(err) => {
                 let transient = is_transient_rpc_error(&err);
-                println!("[{label}] rpc attempt={} err={err}", attempt + 1);
+                println!(
+                    "[{label}] rpc attempt={} err={}",
+                    attempt + 1,
+                    redact_rpc(&err.to_string())
+                );
                 if !transient {
                     return Err(err);
                 }
@@ -250,12 +246,14 @@ where
 pub fn require_rpc(client: &RpcClient) -> bool {
     match rpc_retry("get_slot", || client.get_slot()) {
         Ok(slot) => {
-            println!("[mainnet_sim] rpc ok slot={slot} url={}", rpc_url());
+            println!("[mainnet_sim] rpc ok slot={slot}");
             true
         }
         Err(err) => {
-            println!("[mainnet_sim] SKIP: RPC unavailable after retries: {err}");
-            false
+            panic!(
+                "mainnet test was requested but RPC is unavailable: {}",
+                redact_rpc(&err.to_string())
+            )
         }
     }
 }
@@ -421,10 +419,7 @@ fn custom_program_error_code(lower: &str) -> Option<u64> {
     const PREFIX: &str = "custom program error: 0x";
     let idx = lower.find(PREFIX)?;
     let rest = &lower[idx + PREFIX.len()..];
-    let hex: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_hexdigit())
-        .collect();
+    let hex: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
     if hex.is_empty() {
         return None;
     }
@@ -460,7 +455,12 @@ fn classify_response(err: Option<impl std::fmt::Debug>, logs: Option<Vec<String>
 }
 
 /// Simulate raw instructions with an explicit fee payer (no funding).
-pub fn simulate_ixs(client: &RpcClient, fee_payer: &Pubkey, ixs: &[Instruction]) -> SimVerdict {
+fn simulate_ixs_signed(
+    client: &RpcClient,
+    fee_payer: &Pubkey,
+    ixs: &[Instruction],
+    wallet: Option<&Keypair>,
+) -> SimVerdict {
     if ixs.is_empty() {
         return SimVerdict::Hard("no instructions".into());
     }
@@ -475,8 +475,45 @@ pub fn simulate_ixs(client: &RpcClient, fee_payer: &Pubkey, ixs: &[Instruction])
     };
     let mut tx = Transaction::new_with_payer(ixs, Some(fee_payer));
     tx.message.recent_blockhash = blockhash;
-    match rpc_retry("simulate", || client.simulate_transaction_with_config(&tx, sim_config())) {
-        Ok(resp) => classify_response(resp.value.err, resp.value.logs),
+    let mut tx: VersionedTransaction = tx.into();
+    if bincode::serialized_size(&tx).expect("transaction size") > 1232 {
+        let message = solana_message::v1::Message::try_compile_with_config(
+            fee_payer,
+            ixs,
+            blockhash,
+            solana_message::v1::TransactionConfig::empty()
+                .with_compute_unit_limit(1_400_000)
+                .with_loaded_accounts_data_size_limit(64 * 1024 * 1024),
+        )
+        .expect("compile V1 simulation transaction");
+        tx = VersionedTransaction {
+            signatures: vec![Signature::default(); message.header.num_required_signatures as usize],
+            message: solana_message::VersionedMessage::V1(message),
+        };
+    }
+    let authority_signed = wallet
+        .map(|wallet| sign_and_verify_authority(&mut tx, wallet))
+        .unwrap_or(false);
+    // The real trade authority signs the exact message. The virtual funding
+    // prefix uses a public funder whose key we do not own, so RPC sigVerify stays
+    // false. Report this distinction rather than claiming full RPC verification.
+    record_evidence(
+        "signed-simulation",
+        &serde_json::json!({
+            "transaction": tx, "authority": wallet.map(|w| w.pubkey().to_string()),
+            "authority_signature_verified": authority_signed, "rpc_sig_verify": false, "virtual_funder_signed": false,
+        }),
+    );
+    match rpc_retry("simulate", || {
+        client.simulate_transaction_with_config(&tx, sim_config())
+    }) {
+        Ok(resp) => {
+            record_evidence(
+                "simulation-result",
+                &serde_json::json!({"transaction": tx, "authority_signature": tx.signatures.iter().find(|signature| **signature != Signature::default()).map(ToString::to_string), "response": resp}),
+            );
+            classify_response(resp.value.err, resp.value.logs)
+        }
         Err(e) => {
             if is_transient_rpc_error(&e) {
                 SimVerdict::Soft(format!("transient rpc simulate: {e}"))
@@ -490,7 +527,7 @@ pub fn simulate_ixs(client: &RpcClient, fee_payer: &Pubkey, ixs: &[Instruction])
 /// Create ephemeral wallet, virtually fund it, prepend fund ix, then simulate.
 ///
 /// `business` must use `wallet.pubkey()` as the trade authority / signer.
-/// Returns `None` when no funder can be reached (caller should soft-skip).
+/// Returns `None` when virtual funding is unavailable; explicit tests must fail.
 pub fn simulate_with_fresh_wallet(
     client: &RpcClient,
     wallet: &Keypair,
@@ -504,7 +541,7 @@ pub fn simulate_with_fresh_wallet(
         SIM_FUND_LAMPORTS,
     ));
     ixs.extend(business);
-    Some(simulate_ixs(client, &funder, &ixs))
+    Some(simulate_ixs_signed(client, &funder, &ixs, Some(wallet)))
 }
 
 pub fn simulate_legs_funded(
@@ -527,7 +564,7 @@ pub fn simulate_legs_funded(
 pub fn assert_sim_ok(scenario: &str, verdict: SimVerdict) {
     match verdict {
         SimVerdict::Ok => println!("[{scenario}] simulate OK"),
-        SimVerdict::Soft(m) => println!("[{scenario}] soft fail (accepted): {m}"),
+        SimVerdict::Soft(m) => panic!("[{scenario}] simulation did not succeed: {m}"),
         SimVerdict::Hard(m) => panic!("[{scenario}] HARD simulate failure: {m}"),
     }
 }
@@ -572,7 +609,9 @@ pub fn recent_sigs_deep(client: &RpcClient, address: &Pubkey, target: usize) -> 
         if list.is_empty() {
             break;
         }
-        let last_sig = list.last().and_then(|s| Signature::from_str(&s.signature).ok());
+        let last_sig = list
+            .last()
+            .and_then(|s| Signature::from_str(&s.signature).ok());
         let mut got_any = false;
         for s in list {
             if s.err.is_some() {
@@ -602,14 +641,81 @@ pub fn recent_sigs_deep(client: &RpcClient, address: &Pubkey, target: usize) -> 
 
 /// Parse a tx with retries; no event-type filter (match in caller).
 pub fn parse_tx_events(client: &RpcClient, sig: &Signature) -> Vec<sol_parser_sdk::DexEvent> {
-    match rpc_retry("parse_tx", || {
-        sol_parser_sdk::parse_transaction_from_rpc(client, sig, None)
-    }) {
-        Ok(v) => v,
-        Err(err) => {
-            println!("[mainnet_sim] parse_tx({sig}) err={err}");
-            Vec::new()
-        }
+    let tx = rpc_retry("get_latest_transaction", || {
+        client.get_transaction_with_config(
+            sig,
+            RpcTransactionConfig {
+                encoding: Some(UiTransactionEncoding::Base64),
+                commitment: Some(CommitmentConfig::confirmed()),
+                max_supported_transaction_version: Some(1),
+            },
+        )
+    })
+    .unwrap_or_else(|err| panic!("latest transaction {sig}: {}", redact_rpc(&err.to_string())));
+    let wire = tx
+        .transaction
+        .transaction
+        .decode()
+        .expect("RPC returned decodable transaction");
+    wire.verify_and_hash_message()
+        .expect("latest on-chain transaction has valid signatures");
+    assert_eq!(
+        wire.signatures.first(),
+        Some(sig),
+        "RPC returned a different signature"
+    );
+    let events =
+        sol_parser_sdk::parse_rpc_transaction(&tx, None).expect("latest transaction parser");
+    for event in &events {
+        assert_eq!(event.metadata().signature, *sig, "parsed event signature");
+        assert_eq!(event.metadata().slot, tx.slot, "parsed event slot");
+    }
+    record_evidence(
+        "parsed-transaction",
+        &serde_json::json!({"signature": sig.to_string(),
+        "slot": tx.slot, "signature_verified": true, "event_count": events.len(), "transaction": tx}),
+    );
+    events
+}
+
+fn redact_rpc(text: &str) -> String {
+    text.replace(&rpc_url(), "[RPC]")
+}
+
+pub fn record_evidence(kind: &str, value: &serde_json::Value) {
+    use std::io::Write;
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let Ok(directory) = std::env::var("ROUTER_TEST_EVIDENCE_DIR") else {
+        return;
+    };
+    let _guard = LOCK.lock().expect("evidence lock");
+    std::fs::create_dir_all(&directory).expect("create evidence directory");
+    let path = std::path::Path::new(&directory).join(format!("{kind}.jsonl"));
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("open evidence");
+    writeln!(file, "{}", value).expect("write evidence");
+}
+
+/// Cryptographically verify the ephemeral authority, without signing the public
+/// virtual funder's slot. Fund-only scenarios do not require an authority signer.
+pub fn sign_and_verify_authority(tx: &mut VersionedTransaction, wallet: &Keypair) -> bool {
+    let n = tx.message.header().num_required_signatures as usize;
+    if let Some(index) = tx.message.static_account_keys()[..n]
+        .iter()
+        .position(|k| *k == wallet.pubkey())
+    {
+        let message = tx.message.serialize();
+        tx.signatures[index] = wallet.sign_message(&message);
+        assert!(
+            tx.signatures[index].verify(wallet.pubkey().as_ref(), &message),
+            "trade authority signature invalid"
+        );
+        true
+    } else {
+        false
     }
 }
 
@@ -640,18 +746,6 @@ pub fn require_coverage(label: &str, found: bool) {
     );
 }
 
-fn account_data(client: &RpcClient, key: &Pubkey) -> Option<sol_parser_sdk::accounts::AccountData> {
-    let acc = rpc_retry("get_account", || client.get_account(key)).ok()?;
-    Some(sol_parser_sdk::accounts::AccountData {
-        pubkey: *key,
-        executable: acc.executable,
-        lamports: acc.lamports,
-        owner: acc.owner,
-        rent_epoch: acc.rent_epoch,
-        data: acc.data,
-    })
-}
-
 /// SPL / Token-2022 token account amount (offset 64).
 pub fn token_account_amount(client: &RpcClient, token_account: &Pubkey) -> Option<u64> {
     let acc = rpc_retry("get_account", || client.get_account(token_account)).ok()?;
@@ -663,105 +757,45 @@ pub fn token_account_amount(client: &RpcClient, token_account: &Pubkey) -> Optio
     Some(u64::from_le_bytes(buf))
 }
 
-fn pumpswap_creator_vault_authority(coin_creator: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[b"creator_vault", coin_creator.as_ref()], &PUMPSWAP_PROGRAM).0
-}
-
 /// Load PumpSwap pool snapshot from on-chain account + vault balances (no recent swap needed).
-pub fn load_pumpswap_pool(client: &RpcClient, pool: &Pubkey) -> Option<crate::market::PumpSwapPool> {
-    use sol_parser_sdk::accounts::parse_pumpswap_pool;
-    use sol_parser_sdk::DexEvent;
-    use sol_parser_sdk::EventMetadata;
-
-    let data = account_data(client, pool)?;
-    let DexEvent::PumpSwapPoolAccount(ev) = parse_pumpswap_pool(&data, EventMetadata::default())?
-    else {
-        return None;
-    };
-    let p = ev.pool;
-    let base_tp = mint_token_program_opt(client, &p.base_mint)?;
-    let quote_tp = mint_token_program_opt(client, &p.quote_mint)?;
-    let base_reserve = token_account_amount(client, &p.pool_base_token_account).unwrap_or(0);
-    let quote_reserve = token_account_amount(client, &p.pool_quote_token_account).unwrap_or(0);
-    if base_reserve == 0 || quote_reserve == 0 {
-        println!("[mainnet_sim] load_pumpswap {pool}: empty vaults");
-        return None;
-    }
-    let authority = pumpswap_creator_vault_authority(&p.coin_creator);
-    let creator_ata = crate::ata::ata(&authority, &p.quote_mint, &quote_tp);
-    Some(crate::market::PumpSwapPool {
-        pool: *pool,
-        base_mint: p.base_mint,
-        quote_mint: p.quote_mint,
-        pool_base_token_account: p.pool_base_token_account,
-        pool_quote_token_account: p.pool_quote_token_account,
-        base_token_program: base_tp,
-        quote_token_program: quote_tp,
-        coin_creator_vault_ata: creator_ata,
-        coin_creator_vault_authority: authority,
-        coin_creator: p.coin_creator,
-        base_reserve,
-        quote_reserve,
-        virtual_quote_reserves: p.virtual_quote_reserves,
-        lp_fee_bps: 25,
-        protocol_fee_bps: 5,
-        creator_fee_bps: p.creator_fee_bps,
-        is_cashback_coin: p.is_cashback_coin,
-        protocol_fee_recipient: if p.is_mayhem_mode {
-            PUMP_MAYHEM_FEE_RECIPIENT
-        } else {
-            PUMPSWAP_PROTOCOL_FEE_RECIPIENT
-        },
-        buyback_fee_recipient: PUMPSWAP_BUYBACK_FEE_RECIPIENT,
-    })
+pub fn load_pumpswap_pool(
+    client: &RpcClient,
+    pool: &Pubkey,
+) -> Option<crate::market::PumpSwapPool> {
+    use sol_trade_sdk::trading::core::params::PumpSwapParams;
+    let _ = client;
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    );
+    let params = runtime
+        .block_on(PumpSwapParams::from_pool_address_by_rpc(&rpc, pool))
+        .unwrap_or_else(|err| {
+            panic!(
+                "current PumpSwap pool {pool}: {}",
+                redact_rpc(&err.to_string())
+            )
+        });
+    Some(crate::adapter::pumpswap_from_params(&params))
 }
 
-/// Load Raydium CPMM pool from on-chain pool_state + vault balances.
+/// Current config, creator fees and epoch-sensitive mint transfer fees are
+/// loaded by the current Rust SDK; zero rates must not become guessed defaults.
 pub fn load_cpmm_pool(client: &RpcClient, pool: &Pubkey) -> Option<crate::market::CpmmPool> {
-    use sol_parser_sdk::accounts::raydium_cpmm::parse_pool_state;
-    use sol_parser_sdk::DexEvent;
-    use sol_parser_sdk::EventMetadata;
-
-    let data = account_data(client, pool)?;
-    let DexEvent::RaydiumCpmmPoolStateAccount(ev) =
-        parse_pool_state(&data, EventMetadata::default())?
-    else {
-        return None;
-    };
-    let mut pool = crate::parser::cpmm_from_pool_state(&ev);
-    pool.base_token_program = mint_token_program_opt(client, &pool.base_mint)?;
-    pool.quote_token_program = mint_token_program_opt(client, &pool.quote_mint)?;
-    let base_raw = token_account_amount(client, &pool.base_vault).unwrap_or(0);
-    let quote_raw = token_account_amount(client, &pool.quote_vault).unwrap_or(0);
-    // Best-effort: subtract protocol/fund/creator fees already in account state.
-    let s = &ev.pool_state;
-    pool.base_reserve = base_raw
-        .saturating_sub(s.protocol_fees_token_0)
-        .saturating_sub(s.fund_fees_token_0)
-        .saturating_sub(s.creator_fees_token_0);
-    pool.quote_reserve = quote_raw
-        .saturating_sub(s.protocol_fees_token_1)
-        .saturating_sub(s.fund_fees_token_1)
-        .saturating_sub(s.creator_fees_token_1);
-    if pool.base_reserve == 0 || pool.quote_reserve == 0 {
-        println!("[mainnet_sim] load_cpmm {}: empty effective reserves", pool.pool_state);
-        return None;
-    }
-    // Fetch trade fee from amm_config when possible.
-    if let Some(cfg_data) = account_data(client, &pool.amm_config) {
-        if let Some(DexEvent::RaydiumCpmmAmmConfigAccount(cfg)) =
-            sol_parser_sdk::accounts::raydium_cpmm::parse_amm_config(
-                &cfg_data,
-                EventMetadata::default(),
-            )
-        {
-            pool.trade_fee_rate = cfg.amm_config.trade_fee_rate;
-        }
-    }
-    if pool.trade_fee_rate == 0 {
-        pool.trade_fee_rate = 2500;
-    }
-    Some(pool)
+    use sol_trade_sdk::trading::core::params::RaydiumCpmmParams;
+    let _ = client;
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    );
+    let params = runtime
+        .block_on(RaydiumCpmmParams::from_pool_address_by_rpc(&rpc, pool))
+        .unwrap_or_else(|err| panic!("current CPMM pool {pool}: {}", redact_rpc(&err.to_string())));
+    Some(crate::adapter::cpmm_from_params(&params))
 }
 
 #[allow(dead_code)]
@@ -778,7 +812,10 @@ pub fn tx_fee_payer(client: &RpcClient, sig: &Signature) -> Option<Pubkey> {
     .ok()?;
     match tx.transaction.transaction {
         EncodedTransaction::Json(ui) => match ui.message {
-            UiMessage::Raw(m) => m.account_keys.first().and_then(|k| Pubkey::from_str(k).ok()),
+            UiMessage::Raw(m) => m
+                .account_keys
+                .first()
+                .and_then(|k| Pubkey::from_str(k).ok()),
             UiMessage::Parsed(m) => m
                 .account_keys
                 .first()
@@ -820,10 +857,7 @@ pub fn token_account_mint(client: &RpcClient, token_account: &Pubkey) -> Option<
 }
 
 /// Fill AMM V4 coin/pc mints, reserves, and token_program from vault accounts.
-pub fn fill_amm_v4_mints(
-    client: &RpcClient,
-    pool: &mut crate::market::RaydiumAmmV4Pool,
-) -> bool {
+pub fn fill_amm_v4_mints(client: &RpcClient, pool: &mut crate::market::RaydiumAmmV4Pool) -> bool {
     let Some(coin) = token_account_mint(client, &pool.token_coin) else {
         return false;
     };
@@ -850,12 +884,12 @@ pub fn fill_amm_v4_mints(
     true
 }
 
-/// Soft-skip when live event scan finds nothing (public RPC prune / quiet pool).
+/// Fail explicit live runs when no matching fixture or event was exercised.
 pub fn soft_coverage(label: &str, found: bool) {
     if found {
         println!("[{label}] live coverage ok");
     } else {
-        println!("[{label}] soft skip: no matching live events/fixtures after deep scan");
+        panic!("[{label}] no matching live events/fixtures; coverage was not executed");
     }
 }
 
@@ -864,40 +898,23 @@ pub fn load_amm_v4_pool(
     client: &RpcClient,
     amm: &Pubkey,
 ) -> Option<crate::market::RaydiumAmmV4Pool> {
-    use sol_trade_sdk::instruction::utils::raydium_amm_v4_types::amm_info_decode;
-
-    let acc = rpc_retry("get_account(amm_v4)", || client.get_account(amm)).ok()?;
-    let info = amm_info_decode(&acc.data)?;
-    let coin_reserve = token_account_amount(client, &info.token_coin).unwrap_or(0);
-    let pc_reserve = token_account_amount(client, &info.token_pc).unwrap_or(0);
-    if coin_reserve == 0 || pc_reserve == 0 {
-        println!("[mainnet_sim] load_amm_v4 {amm}: empty vaults");
-        return None;
-    }
-    let token_program = mint_token_program_opt(client, &info.coin_mint).unwrap_or(TOKEN_PROGRAM);
-    Some(crate::market::RaydiumAmmV4Pool {
-        amm: *amm,
-        coin_mint: info.coin_mint,
-        pc_mint: info.pc_mint,
-        token_coin: info.token_coin,
-        token_pc: info.token_pc,
-        token_program,
-        amm_open_orders: info.open_orders,
-        amm_target_orders: info.target_orders,
-        serum_program: info.serum_dex,
-        serum_market: info.market,
-        serum_bids: Pubkey::default(),
-        serum_asks: Pubkey::default(),
-        serum_event_queue: Pubkey::default(),
-        serum_coin_vault_account: Pubkey::default(),
-        serum_pc_vault_account: Pubkey::default(),
-        serum_vault_signer: Pubkey::default(),
-        coin_reserve,
-        pc_reserve,
-        trade_fee_numerator: info.fees.trade_fee_numerator,
-        swap_fee_numerator: info.fees.swap_fee_numerator,
-        swap_fee_denominator: info.fees.swap_fee_denominator,
-    })
+    use sol_trade_sdk::trading::core::params::RaydiumAmmV4Params;
+    let _ = client;
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    );
+    let params = runtime
+        .block_on(RaydiumAmmV4Params::from_amm_address_by_rpc(&rpc, *amm))
+        .unwrap_or_else(|err| {
+            panic!(
+                "current AMM V4 pool {amm}: {}",
+                redact_rpc(&err.to_string())
+            )
+        });
+    Some(crate::adapter::raydium_amm_v4_from_params(&params))
 }
 
 /// Overlay mint owners onto a CLMM snapshot (Token-2022 safe ATAs).
@@ -943,4 +960,92 @@ pub fn overlay_leg_keys(leg: &mut Leg, onchain: &[Pubkey]) {
             leg.accounts[i].pubkey = onchain[i];
         }
     }
+}
+
+/// Match the requested venue so nested swaps cannot satisfy another protocol's coverage.
+pub fn is_trade_for_program(event: &sol_parser_sdk::DexEvent, program: Pubkey) -> bool {
+    use crate::constants::*;
+    use sol_parser_sdk::DexEvent::*;
+    match event {
+        PumpFunTrade(_) | PumpFunBuy(_) | PumpFunSell(_) | PumpFunBuyExactSolIn(_) => {
+            program == PUMPFUN_PROGRAM
+        }
+        PumpSwapBuy(_) | PumpSwapSell(_) => program == PUMPSWAP_PROGRAM,
+        RaydiumCpmmSwap(_) => program == RAYDIUM_CPMM_PROGRAM,
+        RaydiumAmmV4Swap(_) => program == RAYDIUM_AMM_V4_PROGRAM,
+        RaydiumClmmSwap(_) => program == RAYDIUM_CLMM_PROGRAM,
+        OrcaWhirlpoolSwap(_) => program == ORCA_WHIRLPOOL_PROGRAM,
+        MeteoraDlmmSwap(_) => program == METEORA_DLMM_PROGRAM,
+        MeteoraDammV2Swap(_) => program == METEORA_DAMM_V2_PROGRAM,
+        RaydiumLaunchlabTrade(_) => program == LAUNCHLAB_PROGRAM,
+        _ => false,
+    }
+}
+
+/// Empty input ATAs must fail with a balance error, not an unrelated ABI failure.
+pub fn assert_sim_balance_failure(scenario: &str, verdict: Option<SimVerdict>) {
+    let Some(SimVerdict::Soft(message) | SimVerdict::Hard(message)) = verdict else {
+        panic!("[{scenario}] expected an unfunded-input failure");
+    };
+    let lower = message.to_lowercase();
+    assert!(
+        lower.contains("insufficient funds")
+            || lower.contains("insufficientfunds")
+            || lower.contains("notenoughtokenstosell")
+            || lower.contains("insufficient token")
+            || lower.contains("error: insufficient balance")
+            || (scenario == "launchlab_sell"
+                && lower.contains("sell_exact_in.rs:16")
+                && lower.contains("requiregteviolated")
+                && lower.contains("left: 0")),
+        "[{scenario}] expected a balance failure, got: {message}"
+    );
+}
+
+/// Refresh the curve, mint owner, creator and fee recipients before live trades.
+pub fn load_pumpfun_pool(mint: &Pubkey) -> Option<crate::market::PumpFunPool> {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    );
+    let loaded = runtime.block_on(crate::adapter::load_routed_market_by_rpc(
+        &rpc,
+        crate::adapter::LoadMarketRequest::PumpFun { mint: *mint },
+        &Pubkey::new_unique(),
+    ));
+    match loaded {
+        Ok((_, market)) => match market.market {
+            crate::market::Market::PumpFunInner(pool) => Some(pool),
+            _ => panic!("unexpected Pump market"),
+        },
+        Err(err) if err.to_string().contains("completed PumpFun") => None,
+        Err(err) => panic!(
+            "current Pump curve {mint}: {}",
+            redact_rpc(&err.to_string())
+        ),
+    }
+}
+
+/// Load current tick arrays for the requested direction, including reverse trades.
+pub fn load_clmm_pool(
+    pool: &Pubkey,
+    input: &Pubkey,
+    output: &Pubkey,
+) -> crate::market::RaydiumClmmPool {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let rpc = sol_trade_sdk::common::SolanaRpcClient::new_with_timeout_and_commitment(
+        rpc_url(),
+        Duration::from_secs(12),
+        CommitmentConfig::confirmed(),
+    );
+    let params = runtime
+        .block_on(
+            sol_trade_sdk::trading::core::params::RaydiumClmmParams::from_pool_address_by_rpc(
+                &rpc, pool, input, output,
+            ),
+        )
+        .unwrap_or_else(|err| panic!("current CLMM pool {pool}: {}", redact_rpc(&err.to_string())));
+    crate::adapter::raydium_clmm_from_params(&params)
 }

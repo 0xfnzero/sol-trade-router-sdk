@@ -9,9 +9,8 @@ use solana_sdk::signer::Signer;
 
 use crate::ata::AtaPolicy;
 use crate::constants::{
-    METEORA_DAMM_V2_PROGRAM, METEORA_DLMM_PROGRAM, ORCA_WHIRLPOOL_PROGRAM, PUMPFUN_PROGRAM,
-    PUMPSWAP_PROGRAM, RAYDIUM_AMM_V4_PROGRAM, RAYDIUM_CLMM_PROGRAM, RAYDIUM_CPMM_PROGRAM,
-    TOKEN_PROGRAM, WSOL_MINT,
+    PUMPFUN_PROGRAM, PUMPSWAP_PROGRAM, RAYDIUM_AMM_V4_PROGRAM, RAYDIUM_CPMM_PROGRAM, TOKEN_PROGRAM,
+    WSOL_MINT,
 };
 use crate::legs::{
     cpmm_swap_exact_out_leg, cpmm_swap_leg, launchlab_buy_leg, launchlab_sell_leg,
@@ -25,12 +24,12 @@ use crate::market::{
     CpmmPool, LaunchLabPool, Market, MeteoraDammV2Pool, MeteoraDlmmPool, PumpFunPool, PumpSwapPool,
     RaydiumAmmV4Pool, RaydiumClmmPool, RoutedMarket, WhirlpoolPool,
 };
+use crate::pool_guard::PoolGuardPolicy;
 use crate::quote::{
     apply_slippage_min_out, clamp_slippage_bps, cpmm_out, fee_amount, meteora_damm_v2_out,
     pumpfun_buy_token_out, pumpfun_sell_sol_out, pumpfun_total_fee_bps, pumpswap_buy_base_out,
     pumpswap_sell_quote_out, raydium_amm_v4_out,
 };
-use crate::pool_guard::PoolGuardPolicy;
 use crate::trade::{RouterClient, TradeOpts};
 use crate::transfer_fee::TokenTransferFee;
 
@@ -336,89 +335,192 @@ fn offline_leg_builders_emit_accounts() {
 
 #[test]
 fn offline_all_dex_leg_builders() {
-    let user = Pubkey::new_unique();
-
+    let wallet = Keypair::new();
+    let user = wallet.pubkey();
     let pf = dummy_pumpfun();
-    let ata = crate::ata::ata(&user, &pf.mint, &TOKEN_PROGRAM);
-    assert_eq!(
-        pumpfun_buy_leg(&user, &pf, 1000, 0, ata).program_id,
-        PUMPFUN_PROGRAM
-    );
-    assert_eq!(
-        pumpfun_sell_leg(&user, &pf, 1000, 0, ata).program_id,
-        PUMPFUN_PROGRAM
-    );
+    let meme_ata = crate::ata::ata(&user, &pf.mint, &TOKEN_PROGRAM);
     let pf2 = dummy_pumpfun_v2();
-    assert_eq!(
-        pumpfun_buy_v2_leg(&user, &pf2, 1000, 0).program_id,
-        PUMPFUN_PROGRAM
-    );
-
     let ps = dummy_pumpswap();
-    assert_eq!(
-        pumpswap_buy_leg(&user, &ps, 1000, 0).unwrap().program_id,
-        PUMPSWAP_PROGRAM
-    );
-    assert_eq!(
-        pumpswap_sell_leg(&user, &ps, 1000, 0).unwrap().program_id,
-        PUMPSWAP_PROGRAM
-    );
-
     let ll = dummy_launchlab();
     let base_ata = crate::ata::ata(&user, &ll.base_mint, &TOKEN_PROGRAM);
     let quote_ata = crate::ata::ata(&user, &ll.quote_mint, &TOKEN_PROGRAM);
-    assert!(
-        launchlab_buy_leg(&user, &ll, 1000, 0, base_ata, quote_ata)
-            .accounts
-            .len()
-            >= 14
-    );
-    assert!(
-        launchlab_sell_leg(&user, &ll, 1000, 0, base_ata, quote_ata)
-            .accounts
-            .len()
-            >= 14
-    );
-
     let amm = dummy_amm_v4();
-    assert_eq!(
-        raydium_amm_v4_swap_leg(&user, &amm, 1000, 0, WSOL_MINT)
-            .unwrap()
-            .program_id,
-        RAYDIUM_AMM_V4_PROGRAM
-    );
-
     let damm = dummy_damm_v2();
-    assert_eq!(
-        meteora_damm_v2_swap_leg(&user, &damm, 1000, 0, WSOL_MINT)
-            .unwrap()
-            .program_id,
-        METEORA_DAMM_V2_PROGRAM
-    );
-
     let clmm = dummy_clmm();
-    assert_eq!(
-        raydium_clmm_swap_leg(&user, &clmm, 1000, 0, WSOL_MINT)
-            .unwrap()
-            .program_id,
-        RAYDIUM_CLMM_PROGRAM
-    );
-
     let wp = dummy_whirlpool();
-    assert_eq!(
-        whirlpool_swap_leg(&user, &wp, 1000, 0, WSOL_MINT)
-            .unwrap()
-            .program_id,
-        ORCA_WHIRLPOOL_PROGRAM
-    );
-
     let dlmm = dummy_dlmm();
-    assert_eq!(
-        meteora_dlmm_swap_leg(&user, &dlmm, 1000, 0, WSOL_MINT)
-            .unwrap()
-            .program_id,
-        METEORA_DLMM_PROGRAM
-    );
+    let cpmm = dummy_cpmm();
+    let input = crate::ata::ata(&user, &cpmm.base_mint, &cpmm.base_token_program);
+    let output = crate::ata::ata(&user, &cpmm.quote_mint, &cpmm.quote_token_program);
+    let mut curve = pf.clone();
+    curve.bonding_curve =
+        Pubkey::find_program_address(&[b"bonding-curve", curve.mint.as_ref()], &PUMPFUN_PROGRAM).0;
+    curve.associated_bonding_curve =
+        crate::ata::ata(&curve.bonding_curve, &curve.mint, &TOKEN_PROGRAM);
+    let pf3 = crate::pumpfun_v3::PumpFunV3Pool {
+        curve,
+        complete: false,
+        supports_graduation: true,
+        real_quote_reserves: 1_000_000,
+        curve_base_token_balance: 1_000_000_000,
+        pool_migration_fee: 1_000,
+        mayhem_mode: false,
+        depth: 0,
+        needs_curve_extension: false,
+        needs_volume_initialization: false,
+    };
+    let cases = [
+        ("pumpfun_v3_buy", pf3.buy_leg(&user, 1000, 1).unwrap()),
+        ("pumpfun_v3_sell", pf3.sell_leg(&user, 1000, 1).unwrap()),
+        (
+            "pumpfun_v3_exact_out",
+            pf3.buy_exact_out_leg(&user, 1, 1000).unwrap(),
+        ),
+        (
+            "pumpswap_exact_out",
+            pumpswap_buy_exact_out_leg(&user, &ps, 1, 1000).unwrap(),
+        ),
+        (
+            "pumpfun_v1_buy",
+            pumpfun_buy_leg(&user, &pf, 1000, 1, meme_ata),
+        ),
+        (
+            "pumpfun_v1_sell",
+            pumpfun_sell_leg(&user, &pf, 1000, 1, meme_ata),
+        ),
+        ("pumpfun_v2_buy", pumpfun_buy_v2_leg(&user, &pf2, 1000, 1)),
+        ("pumpfun_v2_sell", pumpfun_sell_v2_leg(&user, &pf2, 1000, 1)),
+        (
+            "pumpswap_buy",
+            pumpswap_buy_leg(&user, &ps, 1000, 1).unwrap(),
+        ),
+        (
+            "pumpswap_sell",
+            pumpswap_sell_leg(&user, &ps, 1000, 1).unwrap(),
+        ),
+        (
+            "launchlab_buy",
+            launchlab_buy_leg(&user, &ll, 1000, 1, base_ata, quote_ata),
+        ),
+        (
+            "launchlab_sell",
+            launchlab_sell_leg(&user, &ll, 1000, 1, base_ata, quote_ata),
+        ),
+        (
+            "cpmm",
+            cpmm_swap_leg(
+                &user,
+                &cpmm,
+                1000,
+                1,
+                cpmm.base_mint,
+                cpmm.quote_mint,
+                input,
+                output,
+            )
+            .unwrap(),
+        ),
+        (
+            "amm_v4",
+            raydium_amm_v4_swap_leg(&user, &amm, 1000, 1, WSOL_MINT).unwrap(),
+        ),
+        (
+            "damm_v2",
+            meteora_damm_v2_swap_leg(&user, &damm, 1000, 1, WSOL_MINT).unwrap(),
+        ),
+        (
+            "clmm",
+            raydium_clmm_swap_leg(&user, &clmm, 1000, 1, WSOL_MINT).unwrap(),
+        ),
+        (
+            "whirlpool",
+            whirlpool_swap_leg(&user, &wp, 1000, 1, WSOL_MINT).unwrap(),
+        ),
+        (
+            "dlmm",
+            meteora_dlmm_swap_leg(&user, &dlmm, 1000, 1, WSOL_MINT).unwrap(),
+        ),
+    ];
+    for (label, leg) in cases {
+        let expected_program = match label {
+            name if name.starts_with("pumpfun_") => PUMPFUN_PROGRAM,
+            name if name.starts_with("pumpswap_") => PUMPSWAP_PROGRAM,
+            name if name.starts_with("launchlab_") => crate::constants::LAUNCHLAB_PROGRAM,
+            "cpmm" => RAYDIUM_CPMM_PROGRAM,
+            "amm_v4" => RAYDIUM_AMM_V4_PROGRAM,
+            "damm_v2" => crate::constants::METEORA_DAMM_V2_PROGRAM,
+            "clmm" => crate::constants::RAYDIUM_CLMM_PROGRAM,
+            "whirlpool" => crate::constants::ORCA_WHIRLPOOL_PROGRAM,
+            "dlmm" => crate::constants::METEORA_DLMM_PROGRAM,
+            _ => panic!("unregistered leg: {label}"),
+        };
+        assert_eq!(leg.program_id, expected_program, "{label} program");
+        if label.starts_with("launchlab_") {
+            assert!(leg.accounts.len() >= 14);
+        }
+        use solana_message::{v0, VersionedMessage};
+        use solana_sdk::{
+            hash::Hash,
+            instruction::Instruction,
+            transaction::{Transaction, VersionedTransaction},
+        };
+        let ix = Instruction {
+            program_id: leg.program_id,
+            accounts: leg.accounts,
+            data: leg.data,
+        };
+        let hash = Hash::new_unique();
+        let legacy =
+            Transaction::new_signed_with_payer(&[ix.clone()], Some(&user), &[&wallet], hash);
+        legacy.verify().expect(label);
+        let wire = bincode::serialize(&legacy).expect(label);
+        let mut restored: Transaction = bincode::deserialize(&wire).expect(label);
+        assert_eq!(restored, legacy, "{label} legacy wire roundtrip");
+        restored.verify().expect(label);
+        restored.message.recent_blockhash = Hash::new_unique();
+        assert!(
+            restored.verify().is_err(),
+            "{label} tampered legacy signature"
+        );
+        let v0 = v0::Message::try_compile(&user, &[ix.clone()], &[], hash).expect(label);
+        let tx = VersionedTransaction::try_new(VersionedMessage::V0(v0), &[&wallet]).expect(label);
+        tx.verify_and_hash_message().expect(label);
+        let wire = bincode::serialize(&tx).expect(label);
+        let mut decoded: VersionedTransaction = bincode::deserialize(&wire).expect(label);
+        decoded.verify_and_hash_message().expect(label);
+        assert_eq!(decoded, tx, "{label} signed wire roundtrip");
+        decoded.message.set_recent_blockhash(Hash::new_unique());
+        assert!(
+            decoded.verify_and_hash_message().is_err(),
+            "{label} modified message signature must fail"
+        );
+        let message = solana_message::v1::Message::try_compile_with_config(
+            &user,
+            &[ix],
+            hash,
+            solana_message::v1::TransactionConfig::empty().with_compute_unit_limit(1_400_000),
+        )
+        .expect(label);
+        let v1 =
+            VersionedTransaction::try_new(VersionedMessage::V1(message), &[&wallet]).expect(label);
+        v1.verify_and_hash_message().expect(label);
+        let wire = wincode::serialize(&v1).expect(label);
+        let mut restored: VersionedTransaction = wincode::deserialize(&wire).expect(label);
+        assert_eq!(restored, v1, "{label} signed V1 wire roundtrip");
+        restored.verify_and_hash_message().expect(label);
+        restored.message.set_recent_blockhash(Hash::new_unique());
+        assert!(
+            restored.verify_and_hash_message().is_err(),
+            "{label} tampered V1 signature"
+        );
+        crate::mainnet_sim::record_evidence(
+            "offline-signed-trades",
+            &serde_json::json!({
+                "case": label, "legacy_signatures_verified": true, "v0_signatures_verified": true, "v1_signatures_verified": true, "v1_transaction": v1,
+                "wire_roundtrip_verified": true, "tampered_message_rejected": true, "transaction": tx,
+            }),
+        );
+    }
 }
 
 #[test]
@@ -470,8 +572,8 @@ fn offline_router_client_builds_pumpfun_buy() {
 #[test]
 fn offline_router_client_builds_pumpswap_buy() {
     let payer = Pubkey::new_unique();
-    let client =
-        RouterClient::new(payer, Pubkey::new_unique(), 50).with_pool_guard(PoolGuardPolicy::disabled());
+    let client = RouterClient::new(payer, Pubkey::new_unique(), 50)
+        .with_pool_guard(PoolGuardPolicy::disabled());
     let ps = dummy_pumpswap();
     let market = RoutedMarket {
         market: Market::PumpSwapOuter(ps),
@@ -629,9 +731,11 @@ fn offline_exact_out_legs_use_expected_discriminators() {
     assert_eq!(&leg.data[..8], &crate::constants::PUMPSWAP_BUY);
 
     let amm = dummy_amm_v4();
-    let leg =
-        raydium_amm_v4_swap_exact_out_leg(&user, &amm, 100, 1_000_000, WSOL_MINT).unwrap();
-    assert_eq!(leg.data[0], crate::constants::RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2);
+    let leg = raydium_amm_v4_swap_exact_out_leg(&user, &amm, 100, 1_000_000, WSOL_MINT).unwrap();
+    assert_eq!(
+        leg.data[0],
+        crate::constants::RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2
+    );
 }
 
 #[test]
@@ -671,7 +775,9 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         .buy_with_opts(
             1_000_000,
             &routed,
-            crate::TradeOpts::default().buy_with_wsol().create_wsol(true),
+            crate::TradeOpts::default()
+                .buy_with_wsol()
+                .create_wsol(true),
         )
         .unwrap();
     let ixs = built.into_instructions();
@@ -766,8 +872,8 @@ fn offline_amm_v4_in_for_out_roundtrip() {
 #[test]
 fn offline_via_sol_amm_v4_bridge_builds_route() {
     let payer = Pubkey::new_unique();
-    let client =
-        RouterClient::new(payer, Pubkey::new_unique(), 0).with_pool_guard(PoolGuardPolicy::disabled());
+    let client = RouterClient::new(payer, Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
     let stock = Pubkey::new_unique();
     let mut ll = dummy_launchlab();
     ll.quote_mint = stock;
@@ -792,7 +898,7 @@ fn offline_via_sol_amm_v4_bridge_builds_route() {
 fn offline_classify_zerobase_and_layout_codes() {
     assert!(matches!(
         classify_err("custom program error: 0x1771"), // ZeroBaseAmount = 6001
-        SimVerdict::Hard(_) // unknown custom → HARD (name not present)
+        SimVerdict::Hard(_)                           // unknown custom → HARD (name not present)
     ));
     assert!(matches!(
         classify_err("Error Code: ZeroBaseAmount. Error Number: 6001"),
@@ -830,7 +936,10 @@ fn offline_all_exact_out_and_reverse_legs() {
     let amm = dummy_amm_v4();
     let leg = raydium_amm_v4_swap_exact_out_leg(&user, &amm, 100, 1_000_000, WSOL_MINT).unwrap();
     assert_eq!(leg.program_id, RAYDIUM_AMM_V4_PROGRAM);
-    assert_eq!(leg.data[0], crate::constants::RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2);
+    assert_eq!(
+        leg.data[0],
+        crate::constants::RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2
+    );
 
     let ps = dummy_pumpswap();
     let leg = pumpswap_buy_exact_out_leg(&user, &ps, 1_000, 2_000_000).unwrap();
@@ -848,8 +957,8 @@ fn offline_all_exact_out_and_reverse_legs() {
 #[test]
 fn offline_router_builds_all_market_kinds() {
     let payer = Pubkey::new_unique();
-    let client =
-        RouterClient::new(payer, Pubkey::new_unique(), 0).with_pool_guard(PoolGuardPolicy::disabled());
+    let client = RouterClient::new(payer, Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
 
     let markets = [
         RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun())),
@@ -891,7 +1000,9 @@ fn offline_router_builds_all_market_kinds() {
             _ => {}
         }
         let buy_with = match &market.market {
-            Market::PumpFunInner(_) | Market::LaunchLabInner(_) => TradeOpts::default().buy_with_sol(),
+            Market::PumpFunInner(_) | Market::LaunchLabInner(_) => {
+                TradeOpts::default().buy_with_sol()
+            }
             _ => TradeOpts::default().buy_with_wsol(),
         };
         // LaunchLab stock-quoted needs bridge — skip if needs_sol_bridge.
@@ -901,10 +1012,7 @@ fn offline_router_builds_all_market_kinds() {
         }
         match client.buy_with_opts(1_000_000, &market, buy_with) {
             Ok(built) => {
-                assert!(
-                    built.route.is_some(),
-                    "market {i} must emit Route ix"
-                );
+                assert!(built.route.is_some(), "market {i} must emit Route ix");
                 assert_eq!(
                     built.route.as_ref().unwrap().program_id,
                     crate::constants::PROGRAM_ID
@@ -920,8 +1028,8 @@ fn offline_pool_guard_stonk_strict_blocks_untrusted_cpmm() {
     let payer = Pubkey::new_unique();
     let cpmm = dummy_cpmm();
     let market = RoutedMarket::new(Market::CpmmOuter(cpmm.clone()));
-    let strict =
-        RouterClient::new(payer, Pubkey::new_unique(), 0).with_pool_guard(PoolGuardPolicy::stonk_strict());
+    let strict = RouterClient::new(payer, Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::stonk_strict());
     assert!(strict
         .buy_with_opts(1_000, &market, TradeOpts::default().buy_with_wsol())
         .is_err());
@@ -949,7 +1057,10 @@ fn offline_fee_reduces_route_amount_in() {
     assert_eq!(encoded, amount);
     let fee_ata = crate::ata::ata(&fee_recv, &WSOL_MINT, &TOKEN_PROGRAM);
     assert!(
-        route.accounts.iter().any(|a| a.pubkey == fee_ata || a.pubkey == fee_recv),
+        route
+            .accounts
+            .iter()
+            .any(|a| a.pubkey == fee_ata || a.pubkey == fee_recv),
         "fee destination must be in Route accounts"
     );
     assert!(crate::quote::fee_amount(amount, 500) > 0);
@@ -1082,7 +1193,10 @@ fn offline_quote_helpers_cover_concentrated_venues() {
     damm.quoted_amount_in = Some(1_000);
     damm.expected_out = Some(1_234);
     damm.quoted_input_mint = Some(damm.token_a_mint);
-    assert_eq!(crate::quote::meteora_damm_v2_out(&damm, 1_000, true).unwrap(), 1_234);
+    assert_eq!(
+        crate::quote::meteora_damm_v2_out(&damm, 1_000, true).unwrap(),
+        1_234
+    );
 }
 
 #[test]
@@ -1121,8 +1235,8 @@ fn offline_pool_guard_disabled_allows_all_dummy_markets() {
 #[test]
 fn offline_router_sell_builds_for_major_dexes() {
     let payer = Pubkey::new_unique();
-    let client =
-        RouterClient::new(payer, Pubkey::new_unique(), 0).with_pool_guard(PoolGuardPolicy::disabled());
+    let client = RouterClient::new(payer, Pubkey::new_unique(), 0)
+        .with_pool_guard(PoolGuardPolicy::disabled());
 
     let pf = RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun()));
     assert!(client.sell_to_sol(1_000, &pf).is_ok());
@@ -1169,7 +1283,10 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
     let mut cpmm_target = dummy_cpmm();
     cpmm_target.quote_mint = quote;
     cpmm_target.base_mint = target;
-    let targets = [Market::LaunchLabInner(launch), Market::CpmmOuter(cpmm_target)];
+    let targets = [
+        Market::LaunchLabInner(launch),
+        Market::CpmmOuter(cpmm_target),
+    ];
     let bridges = [
         Market::CpmmOuter(cpmm_bridge),
         Market::RaydiumAmmV4(amm_bridge),
@@ -1182,10 +1299,17 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
     for bridge in &bridges {
         for target_pool in &targets {
             let built = crate::build_dynamic_quote_buy(
-                &crate::PROGRAM_ID, &payer, &fee_recipient,
-                500_000_000, 500_000_000, 1_000, 10,
-                bridge, target_pool,
-            ).unwrap();
+                &crate::PROGRAM_ID,
+                &payer,
+                &fee_recipient,
+                500_000_000,
+                500_000_000,
+                1_000,
+                10,
+                bridge,
+                target_pool,
+            )
+            .unwrap();
             assert_eq!(built.instruction.data[0], crate::TAG_ROUTE_DYNAMIC);
             assert_eq!(built.instruction.data[18], 2);
             assert_eq!(&built.instruction.data[19..51], target.as_ref());
@@ -1193,12 +1317,14 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
             assert_eq!(built.instruction.accounts[4].pubkey, built.output_ata);
             assert_eq!(built.quote_mint, quote);
             assert_eq!(built.output_mint, target);
-            assert_eq!(built.instruction.accounts.last().unwrap().pubkey,
+            assert_eq!(
+                built.instruction.accounts.last().unwrap().pubkey,
                 match target_pool {
                     Market::LaunchLabInner(_) => crate::LAUNCHLAB_PROGRAM,
                     Market::CpmmOuter(_) => crate::RAYDIUM_CPMM_PROGRAM,
                     _ => unreachable!(),
-                });
+                }
+            );
         }
     }
 }
@@ -1265,7 +1391,10 @@ fn offline_amm_v4_v2_quotes_use_actual_swap_fee_fraction() {
     let amount_in = 10_001;
     let net = amount_in - 31; // ceil(10001 * 3 / 1000)
     let expected = (2_000_000u128 * net as u128 / (1_000_000 + net) as u128) as u64;
-    assert_eq!(raydium_amm_v4_out(&pool, amount_in, true).unwrap(), expected);
+    assert_eq!(
+        raydium_amm_v4_out(&pool, amount_in, true).unwrap(),
+        expected
+    );
     let required = crate::quote::raydium_amm_v4_in_for_out(&pool, expected, true).unwrap();
     assert!(raydium_amm_v4_out(&pool, required, true).unwrap() >= expected);
     assert!(raydium_amm_v4_out(&pool, required - 1, true).unwrap() < expected);
@@ -1288,14 +1417,17 @@ fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
     let fees = PumpSwapFeeBasisPoints::new(20, 5, 30);
     for offset in [-500_000, 0, 500_000] {
         pool.virtual_quote_reserves = offset;
-        let buy = buy_quote_input_internal_with_fees(
-            10_000, 0, 1_000_000, 2_000_000, offset, &fees,
-        ).unwrap();
-        let sell = sell_base_input_internal_with_fees(
-            10_000, 0, 1_000_000, 2_000_000, offset, &fees,
-        ).unwrap();
+        let buy =
+            buy_quote_input_internal_with_fees(10_000, 0, 1_000_000, 2_000_000, offset, &fees)
+                .unwrap();
+        let sell =
+            sell_base_input_internal_with_fees(10_000, 0, 1_000_000, 2_000_000, offset, &fees)
+                .unwrap();
         assert_eq!(pumpswap_buy_base_out(&pool, 10_000).unwrap(), buy.base);
-        assert_eq!(pumpswap_sell_quote_out(&pool, 10_000).unwrap(), sell.ui_quote);
+        assert_eq!(
+            pumpswap_sell_quote_out(&pool, 10_000).unwrap(),
+            sell.ui_quote
+        );
     }
     pool.virtual_quote_reserves = -2_000_000;
     assert!(pumpswap_buy_base_out(&pool, 10_000).is_err());
@@ -1331,7 +1463,13 @@ fn offline_pumpfun_exact_in_matches_official_idl_split_fee_correction() {
     let market = RoutedMarket::new(Market::PumpFunInner(pool));
     let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
-    assert!(client.buy_with_opts(1_000, &market, TradeOpts::default().buy_with_sol().with_min_out(1)).is_ok());
+    assert!(client
+        .buy_with_opts(
+            1_000,
+            &market,
+            TradeOpts::default().buy_with_sol().with_min_out(1)
+        )
+        .is_ok());
 }
 
 #[test]
@@ -1340,12 +1478,27 @@ fn offline_damm_exact_out_uses_official_amount_order_and_quotes_bind_direction()
     let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
     let market = RoutedMarket::new(Market::MeteoraDammV2(pool.clone()));
-    let built = client.buy_with_opts(1_000, &market,
-        TradeOpts::default().buy_with_wsol().with_fixed_output(99)).unwrap();
+    let built = client
+        .buy_with_opts(
+            1_000,
+            &market,
+            TradeOpts::default().buy_with_wsol().with_fixed_output(99),
+        )
+        .unwrap();
     let route = built.route.unwrap();
-    let offset = route.data.windows(8).position(|w| w == crate::constants::METEORA_DAMM_V2_SWAP2).unwrap();
-    assert_eq!(u64::from_le_bytes(route.data[offset + 8..offset + 16].try_into().unwrap()), 99);
-    assert_eq!(u64::from_le_bytes(route.data[offset + 16..offset + 24].try_into().unwrap()), 1_000);
+    let offset = route
+        .data
+        .windows(8)
+        .position(|w| w == crate::constants::METEORA_DAMM_V2_SWAP2)
+        .unwrap();
+    assert_eq!(
+        u64::from_le_bytes(route.data[offset + 8..offset + 16].try_into().unwrap()),
+        99
+    );
+    assert_eq!(
+        u64::from_le_bytes(route.data[offset + 16..offset + 24].try_into().unwrap()),
+        1_000
+    );
     assert_eq!(route.data[offset + 24], 2);
     pool.quoted_amount_in = Some(1_000);
     pool.quoted_input_mint = Some(pool.token_a_mint);
@@ -1391,15 +1544,34 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     let protocol = k();
     let buyback = k();
     let mut params = sol_trade_sdk::trading::core::params::PumpSwapParams::new(
-        k(), k(), WSOL_MINT, k(), k(), 1_000_000, 2_000_000, 0,
-        k(), k(), TOKEN_PROGRAM, TOKEN_PROGRAM, protocol, k(), true, 7,
+        k(),
+        k(),
+        WSOL_MINT,
+        k(),
+        k(),
+        1_000_000,
+        2_000_000,
+        0,
+        k(),
+        k(),
+        TOKEN_PROGRAM,
+        TOKEN_PROGRAM,
+        protocol,
+        k(),
+        true,
+        7,
     );
     params.protocol_fee_recipient_override = Some(protocol);
     params.protocol_extra_fee_recipient_override = Some(buyback);
     let pool = crate::adapter::pumpswap_from_params(&params);
-    assert_eq!(pool.creator_fee_bps, params.fee_basis_points.coin_creator_fee_basis_points);
-    for leg in [pumpswap_buy_leg(&k(), &pool, 10_000, 1).unwrap(),
-                pumpswap_sell_leg(&k(), &pool, 10_000, 1).unwrap()] {
+    assert_eq!(
+        pool.creator_fee_bps,
+        params.fee_basis_points.coin_creator_fee_basis_points
+    );
+    for leg in [
+        pumpswap_buy_leg(&k(), &pool, 10_000, 1).unwrap(),
+        pumpswap_sell_leg(&k(), &pool, 10_000, 1).unwrap(),
+    ] {
         assert_eq!(leg.accounts[9].pubkey, protocol);
         assert_eq!(leg.accounts[leg.accounts.len() - 2].pubkey, buyback);
     }
@@ -1440,18 +1612,37 @@ fn offline_pumpswap_mayhem_fallback_does_not_use_regular_recipient() {
     use sol_trade_sdk::instruction::utils::pumpswap::accounts::MAYHEM_FEE_RECIPIENT;
     let k = Pubkey::new_unique;
     let params = sol_trade_sdk::trading::core::params::PumpSwapParams::new(
-        k(), k(), WSOL_MINT, k(), k(), 1_000_000, 2_000_000, 0,
-        k(), k(), TOKEN_PROGRAM, TOKEN_PROGRAM, MAYHEM_FEE_RECIPIENT, k(), false, 0,
+        k(),
+        k(),
+        WSOL_MINT,
+        k(),
+        k(),
+        1_000_000,
+        2_000_000,
+        0,
+        k(),
+        k(),
+        TOKEN_PROGRAM,
+        TOKEN_PROGRAM,
+        MAYHEM_FEE_RECIPIENT,
+        k(),
+        false,
+        0,
     );
     assert!(params.is_mayhem_mode && params.protocol_fee_recipient_override.is_none());
     let pool = crate::adapter::pumpswap_from_params(&params);
     assert_eq!(pool.protocol_fee_recipient, MAYHEM_FEE_RECIPIENT);
-    assert_eq!(pumpswap_buy_leg(&k(), &pool, 100, 1).unwrap().accounts[9].pubkey, MAYHEM_FEE_RECIPIENT);
+    assert_eq!(
+        pumpswap_buy_leg(&k(), &pool, 100, 1).unwrap().accounts[9].pubkey,
+        MAYHEM_FEE_RECIPIENT
+    );
 }
 
 #[test]
 fn offline_cpmm_quotes_differential_current_rust_sdk_creator_modes_and_transfer_fees() {
-    use sol_trade_sdk::trading::core::params::{RaydiumCpmmParams, TokenTransferFee as UpstreamFee};
+    use sol_trade_sdk::trading::core::params::{
+        RaydiumCpmmParams, TokenTransferFee as UpstreamFee,
+    };
     use sol_trade_sdk::utils::calc::raydium_cpmm::compute_swap_amount_for_pool;
     let pool = dummy_cpmm();
     let mut params = RaydiumCpmmParams {
@@ -1480,16 +1671,24 @@ fn offline_cpmm_quotes_differential_current_rust_sdk_creator_modes_and_transfer_
         for enabled in [false, true] {
             params.enable_creator_fee = enabled;
             for transfer_bps in [0, 25, 500] {
-                params.base_transfer_fee = UpstreamFee { basis_points: transfer_bps, maximum_fee: 50 };
-                params.quote_transfer_fee = UpstreamFee { basis_points: transfer_bps, maximum_fee: 123 };
+                params.base_transfer_fee = UpstreamFee {
+                    basis_points: transfer_bps,
+                    maximum_fee: 50,
+                };
+                params.quote_transfer_fee = UpstreamFee {
+                    basis_points: transfer_bps,
+                    maximum_fee: 123,
+                };
                 let router = crate::adapter::cpmm_from_params(&params);
                 for base_in in [false, true] {
                     for amount in [101, 999, 10_000, 10_000_000] {
-                        let official = compute_swap_amount_for_pool(&params, base_in, amount, 0).unwrap();
+                        let official =
+                            compute_swap_amount_for_pool(&params, base_in, amount, 0).unwrap();
                         let actual = cpmm_out(&router, amount, base_in).unwrap();
                         assert_eq!(actual, official.amount_out,
                             "mode={mode}, enabled={enabled}, transfer={transfer_bps}, base_in={base_in}, amount={amount}");
-                        let minimal_in = crate::quote::cpmm_in_for_out(&router, actual, base_in).unwrap();
+                        let minimal_in =
+                            crate::quote::cpmm_in_for_out(&router, actual, base_in).unwrap();
                         assert!(minimal_in <= amount);
                         assert!(cpmm_out(&router, minimal_in, base_in).unwrap() >= actual);
                         if minimal_in > 1 {
@@ -1517,10 +1716,20 @@ fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
     assert_eq!(pool.token_1_program, TOKEN_PROGRAM);
     let user = Pubkey::new_unique();
     assert!(raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).is_err());
-    crate::parser::clmm_apply_token_programs(&mut pool, crate::constants::TOKEN_2022_PROGRAM, TOKEN_PROGRAM);
+    crate::parser::clmm_apply_token_programs(
+        &mut pool,
+        crate::constants::TOKEN_2022_PROGRAM,
+        TOKEN_PROGRAM,
+    );
     let leg = raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).unwrap();
-    assert_eq!(leg.accounts[3].pubkey,
-        crate::ata::ata(&user, &event.input_mint, &crate::constants::TOKEN_2022_PROGRAM));
+    assert_eq!(
+        leg.accounts[3].pubkey,
+        crate::ata::ata(
+            &user,
+            &event.input_mint,
+            &crate::constants::TOKEN_2022_PROGRAM
+        )
+    );
     crate::parser::clmm_apply_token_programs(&mut pool, Pubkey::default(), TOKEN_PROGRAM);
     assert!(raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).is_err());
 }

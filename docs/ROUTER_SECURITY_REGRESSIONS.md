@@ -39,10 +39,14 @@ VM check exercises settlement and slippage using a System Program CPI, not a
 complete PumpFun trade. The affected SDK path is PumpFun's native-SOL settlement;
 its WSOL/v2 path is separate.
 
-Ordinary `cargo test` also includes mainnet tests that immediately return unless
-`RUN_MAINNET_SIM=1` or `RUN_MAINNET_TESTS=1` is set. Some network tests accept soft
-failures or missing live fixtures. A green test summary alone does not mean all
-mainnet trading paths were executed successfully.
+Ordinary `cargo test` marks network cases as ignored. Run `scripts/check.sh
+--mainnet` explicitly, with `SOLANA_RPC_URL` configured. Live success cases now
+require successful bank execution; missing coverage, RPC errors, slippage and
+balance errors fail the test. Unfunded-input cases require a specific balance
+failure. Set `ROUTER_TEST_EVIDENCE_DIR` to retain public signed messages, original
+transactions and simulation responses. Ephemeral trade authorities sign and are
+verified locally; public virtual funders remain unsigned and RPC `sigVerify` is
+false. Fully signed offline legacy/v0/v1 cases separately verify all signatures.
 
 Upgrade the chain program and SDK together before using the repaired protocol.
 The original tag-2 header is restored; the shorter PR #1 tag-2 format is retired.
