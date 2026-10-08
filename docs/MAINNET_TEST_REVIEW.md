@@ -49,3 +49,11 @@ The LaunchLab test formerly named `graduated_pool_events` only performed a regul
 Changed Rust test files pass targeted rustfmt checks and `git diff --check`; repository-wide cargo fmt still reports older formatting differences outside this supplement. The earlier supplement reviewed all eight files. This completion reviews all ten changed or added files, including the Cargo pin, test code, installation instructions and public evidence, zero skipped (100%).
 
 Final verification supplement: all three documentation/evidence files reviewed, zero skipped. No production logic changed after the tested revision.
+
+## Native quote account follow-up
+
+The current trade dependency is `61c0e406807d4d00f3978cf1289adc5b99e91d0a`. The 45-case mainnet evidence above remains tied to its recorded earlier dependency; it has not been relabeled as a rerun of this revision.
+
+Single-hop compact Pump V3 and PumpSwap V2 account derivation previously normalized SOL aliases to WSOL while retaining a caller-supplied Token-2022 quote program. Replaying the previous Python source reproduces incorrect WSOL user ATAs for zero, pseudo-SOL and WSOL inputs. The current helpers use SPL Token for native quotes, matching the official `@pump-fun/pump-sdk` 3.2.0 `onlineSdk.ts::curveQuote` behavior and the existing multi-hop normalization. Non-native quote programs and decoded AMM vaults are preserved; no assumption that every AMM vault is an ATA was added.
+
+The existing official native-alias tests were extended in Rust, Node, Python and Go rather than duplicated. They check mixed Token-2022 hints against the official SPL Token account fixtures, both single-hop builders, and caller-state preservation where applicable. Rust 7, Node 8, Python 8 upgrade tests and the Go instruction package pass; Node typechecking also passes. With the new pinned dependency, `scripts/check.sh` passes workspace compilation and 93 SDK, 15 program and 2 example tests (81 network cases and one doctest intentionally ignored). This is a transaction-construction compatibility fix, not evidence of a fund-loss exploit. Review coverage for this follow-up: 8 changed code/test files manually reviewed, 0 skipped (100%); unrelated historical PR files are outside that count. No transaction was broadcast and no program was deployed.

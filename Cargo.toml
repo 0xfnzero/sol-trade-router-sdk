@@ -40,7 +40,7 @@ core_affinity = "0.8"
 
 [patch.crates-io]
 # Use initialized CLMM bitmaps and signed simulation authorities until release.
-sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "bf4a01cd340ba8cc84d01cc7e1531fa2412a02a6" }
+sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "61c0e406807d4d00f3978cf1289adc5b99e91d0a" }
 # Fix repeated AMM V4 invocation/log attribution consistently for both the
 # router and sol-trade-sdk until a crates.io release contains this revision.
 sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
