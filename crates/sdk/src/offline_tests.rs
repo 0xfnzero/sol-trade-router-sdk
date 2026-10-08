@@ -108,6 +108,7 @@ fn dummy_pumpswap() -> PumpSwapPool {
         base_reserve: 1_000_000_000,
         quote_reserve: 30_000_000_000,
         virtual_quote_reserves: 0,
+        quote_fee_reserves: Some(0),
         lp_fee_bps: 20,
         protocol_fee_bps: 5,
         creator_fee_bps: 5,
@@ -495,7 +496,16 @@ fn offline_all_dex_leg_builders() {
         needs_curve_extension: false,
         needs_volume_initialization: false,
     };
+    let mut unknown_fee_pool = ps.clone();
+    unknown_fee_pool.quote_fee_reserves = None;
+    let explicit_route = router.sell_with_opts(1_000,
+        &RoutedMarket::new(Market::PumpSwapOuter(unknown_fee_pool)),
+        TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap().route.unwrap();
     let cases = [
+        ("router_pumpswap_explicit_unknown_fee_route", Leg {
+            program_id:explicit_route.program_id, accounts:explicit_route.accounts,
+            data:explicit_route.data,
+        }),
         ("pumpfun_v3_buy", pf3.buy_leg(&user, 1000, 1).unwrap()),
         ("pumpfun_v3_sell", pf3.sell_leg(&user, 1000, 1).unwrap()),
         (
@@ -569,6 +579,7 @@ fn offline_all_dex_leg_builders() {
     ];
     for (label, leg) in cases {
         let expected_program = match label {
+            "router_pumpswap_explicit_unknown_fee_route" => crate::constants::PROGRAM_ID,
             name if name.starts_with("pumpfun_") => PUMPFUN_PROGRAM,
             name if name.starts_with("pumpswap_") => PUMPSWAP_PROGRAM,
             name if name.starts_with("launchlab_") => crate::constants::LAUNCHLAB_PROGRAM,
@@ -706,6 +717,41 @@ fn offline_routed_market_helpers() {
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(),16).unwrap())
         .collect::<Vec<_>>();
     let mint_runtime = tokio::runtime::Runtime::new().unwrap();
+    // Exercise the real RPC Pool decoder and reserve refresh with explicit
+    // current-layout fee counters; mint/program validation is tested below.
+    for fault in 0..5 {
+        let mut pool = dummy_pumpswap();
+        pool.quote_reserve = 2_000_000;
+        let mut data = vec![0u8; 8 + 279];
+        data[..8].copy_from_slice(&sol_trade_sdk::instruction::utils::pumpswap_types::POOL_DISCRIMINATOR);
+        for (i, key) in [Pubkey::new_unique(), pool.base_mint, pool.quote_mint,
+            Pubkey::new_unique(), pool.pool_base_token_account, pool.pool_quote_token_account]
+            .iter().enumerate() {
+            data[11 + i * 32..11 + (i + 1) * 32].copy_from_slice(key.as_ref());
+        }
+        data[211..243].copy_from_slice(pool.coin_creator.as_ref());
+        data[244] = u8::from(pool.is_cashback_coin);
+        data[245..261].copy_from_slice(&pool.virtual_quote_reserves.to_le_bytes());
+        data[271..279].copy_from_slice(&1_800_000u64.to_le_bytes());
+        data[279..287].copy_from_slice(&100_000u64.to_le_bytes());
+        let mut account = Account { lamports:10_000_000, data,
+            owner:PUMPSWAP_PROGRAM, executable:false, rent_epoch:0 };
+        match fault {
+            1 => account.owner = PUMPFUN_PROGRAM,
+            2 => account.data[0] ^= 1,
+            3 => account.data[271..279].copy_from_slice(&2_000_000u64.to_le_bytes()),
+            4 => { account.data[271..287].fill(0); },
+            _ => {},
+        }
+        let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
+            MintRpc { accounts:HashMap::from([(pool.pool, account)]) }, Default::default());
+        let result = mint_runtime.block_on(crate::adapter::refresh_pumpswap_fee_reserves(&rpc, &mut pool));
+        assert_eq!(result.is_err(), matches!(fault, 1..=3));
+        if result.is_ok() {
+            assert_eq!(pool.quote_fee_reserves, Some(if fault == 4 {0} else {1_900_000}));
+            assert_eq!(pool.quote_reserve, 2_000_000);
+        }
+    }
     for case in hook_fixture["cases"].as_array().unwrap() {
         for hook_side in 0..2 {
             let mut pool = dummy_cpmm();
@@ -2890,6 +2936,34 @@ fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
             sell.ui_quote
         );
     }
+    // Official PumpSwap 2.1 sellAmounts pays gross minus LP fees only from
+    // raw quote balance minus protocol/creator sweep buckets.
+    pool.virtual_quote_reserves = 0;
+    pool.quote_fee_reserves = Some(1_999_000);
+    assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err(),
+        "reserved protocol/creator fees cannot fund a sell");
+    // Exact spendable-reserve threshold uses gross minus LP fees, not just
+    // the smaller user proceeds after protocol and creator fees.
+    pool.quote_fee_reserves = Some(2_000_000 - 19_761);
+    assert_eq!(pumpswap_sell_quote_out(&pool, 10_000).unwrap(), 19_691);
+    pool.quote_fee_reserves = Some(2_000_000 - 19_760);
+    assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err());
+    for reserved in [None, Some(2_000_001), Some(u64::MAX)] {
+        pool.quote_fee_reserves = reserved;
+        assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err());
+        // Buy pricing continues using the raw quote vault plus virtual quote.
+        assert!(pumpswap_buy_base_out(&pool, 10_000).is_ok());
+    }
+    let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 100)
+        .with_pool_guard(PoolGuardPolicy::disabled());
+    pool.quote_fee_reserves = None;
+    let market = RoutedMarket::new(Market::PumpSwapOuter(pool.clone()));
+    assert!(client.sell_with_opts(10_000, &market, TradeOpts::default().sell_to_wsol()).is_err());
+    let built = client.sell_with_opts(10_000, &market,
+        TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap();
+    assert_eq!(built.route.unwrap().accounts[4].pubkey,
+        crate::ata::ata(&client.payer, &WSOL_MINT, &TOKEN_PROGRAM));
+    pool.quote_fee_reserves = Some(0);
     pool.virtual_quote_reserves = -2_000_000;
     assert!(pumpswap_buy_base_out(&pool, 10_000).is_err());
     pool.virtual_quote_reserves = 0;
@@ -3024,7 +3098,39 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     );
     params.protocol_fee_recipient_override = Some(protocol);
     params.protocol_extra_fee_recipient_override = Some(buyback);
-    let pool = crate::adapter::pumpswap_from_params(&params);
+    let mut pool = crate::adapter::pumpswap_from_params(&params);
+    assert_eq!(pool.quote_fee_reserves, None);
+    let mut state = sol_trade_sdk::instruction::utils::pumpswap_types::Pool {
+        base_mint:pool.base_mint, quote_mint:pool.quote_mint,
+        pool_base_token_account:pool.pool_base_token_account,
+        pool_quote_token_account:pool.pool_quote_token_account,
+        virtual_quote_reserves:pool.virtual_quote_reserves, coin_creator:pool.coin_creator,
+        is_cashback_coin:pool.is_cashback_coin, protocol_fees:800_000, creator_fees:200_000,
+        ..Default::default()
+    };
+    pool.apply_pool_fee_reserves(&state).unwrap();
+    assert_eq!(pool.quote_fee_reserves, Some(1_000_000));
+    assert_eq!(pool.quote_reserve, params.pool_quote_token_reserves);
+    for corrupt in 0..9 {
+        let mut invalid = state.clone();
+        match corrupt {
+            0 => invalid.base_mint = k(),
+            1 => invalid.quote_mint = k(),
+            2 => invalid.pool_base_token_account = k(),
+            3 => invalid.pool_quote_token_account = k(),
+            4 => invalid.virtual_quote_reserves += 1,
+            5 => invalid.coin_creator = k(),
+            6 => invalid.is_cashback_coin = !invalid.is_cashback_coin,
+            7 => invalid.protocol_fees = u64::MAX,
+            8 => invalid.creator_fees = params.pool_quote_token_reserves,
+            _ => unreachable!(),
+        }
+        assert!(pool.apply_pool_fee_reserves(&invalid).is_err());
+        assert_eq!(pool.quote_fee_reserves, Some(1_000_000));
+    }
+    state.protocol_fees = 0; state.creator_fees = 0;
+    pool.apply_pool_fee_reserves(&state).unwrap();
+    assert_eq!(pool.quote_fee_reserves, Some(0));
     assert_eq!(
         pool.creator_fee_bps,
         params.fee_basis_points.coin_creator_fee_basis_points
@@ -3040,6 +3146,8 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     event.coin_creator_fee_basis_points = 30;
     event.cashback_fee_basis_points = 7;
     assert_eq!(crate::parser::pumpswap_from_buy(&event).creator_fee_bps, 37);
+    assert_eq!(crate::parser::pumpswap_from_buy(&event).quote_fee_reserves, None);
+    assert_eq!(crate::parser::pumpswap_from_sell(&Default::default()).quote_fee_reserves, None);
 }
 
 #[test]

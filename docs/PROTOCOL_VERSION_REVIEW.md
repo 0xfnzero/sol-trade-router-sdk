@@ -599,3 +599,60 @@ compatibility limitations still apply.
 
 Review coverage: 9 changed/added files reviewed, zero skipped (100%), including
 the manifest, official-source snapshot and all documentation/evidence logs.
+
+
+### PumpSwap sweep-reserved quote liquidity — 2026-10-09
+
+PumpSwap 2.1.0 keeps v2 protocol/creator fees in the quote vault for later sweeps.
+Its published sellAmounts helper pays `gross_quote - LP_fee` only from
+`raw_quote_vault - protocolFees - creatorFees`. Router pricing already used the
+raw quote vault plus signed virtual reserves, but its sell liquidity check used
+the entire raw vault. The pinned trade-sdk Pool decoder preserves both fee
+counters; its PumpSwapParams and the parser trade events do not preserve them.
+The expanded existing quote test reproduces a successful pre-fix quote even
+when only 1,000 quote units are spendable and 19,761 are required.
+
+PumpSwapPool now stores `quote_fee_reserves: Option<u64>` separately from the raw
+quote vault. Automatic sells require known counters and check the exact official
+liquidity threshold while retaining raw reserves for pricing. Params/event
+adapters mark missing counters None, not zero. Cold loading reads the owned,
+discriminator-checked Pool account and applies its counters, validating mint,
+vault, virtual reserve, creator and cashback bindings and checked counter totals.
+The new `apply_pool_fee_reserves` cache method accepts an authoritative matching
+Pool snapshot; callers must keep it coherent with vault/config state. The extra
+cold read is not atomic with preceding vault/config reads, and no future freshness
+guarantee is asserted. Hot-path helpers add no RPC.
+
+API migration: downstream PumpSwapPool literals must include this new field.
+Use Some(total) only with current protocol/creator fee state; old authoritative
+layouts with zero counters may use Some(0). Params/event-based automatic sell
+quotes need `apply_pool_fee_reserves` before use. A direct quote-token/WSOL sell
+with explicit min_out still constructs without local quoting; on-chain execution
+checks the actual bound/liquidity. Bridged sells require a known first-hop quote
+even with an explicit final minimum. Buy pricing and PumpSwap instruction layouts
+remain unchanged; this does not add the optional PumpSwap v2 instruction API.
+
+Existing tests now cover exact liquidity threshold, unknown/oversized counters,
+9 invalid cache overlays with atomic field preservation, 5 RPC Pool-decoder/
+refresh cases, and event/params missing-state behavior. The existing signed
+legacy/v0/v1 suite includes an explicit-minimum Router sell with unknown counters,
+including serialization roundtrips and signature tampering checks; no separate
+signing suite was added. All 110 offline tests pass (93 SDK, 15 program, 2 example);
+81 live cases and one doctest remain ignored. These are synthetic state/RPC tests
+and local signatures, not new DEX ELF execution or live pool bank simulation.
+
+Fresh registry lookup confirms official pump-swap-sdk 2.1.0; tarball SHA-512
+integrity and the executed bundle's equality were verified. Its unmodified
+private sellAmounts helper was extracted from that bundle and executed with BN
+inputs: spendable quote 19,760 rejects, 19,761 succeeds with user proceeds 19,691;
+19,691 also rejects despite covering user proceeds alone. The source snapshot
+and helper results are recorded. The Rust regression uses the same official
+threshold/output constants, independent of the pinned Rust calculator's missing
+fee-reserve argument. Trade/parser pins and sibling repositories are unchanged.
+
+Evidence: `tools/validation/simulation-coverage-20261009/pumpswap-reserved-fees-followup/`.
+No deploy, broadcast or program source/binary change. Existing mainnet router
+header/tag 7 incompatibility limits still apply.
+
+Review coverage: 17 changed/added files reviewed, zero skipped (100%), including
+all Rust changes, documentation, official-source snapshot and all evidence logs.

@@ -1,0 +1,25 @@
+{
+  "captured_at": "2026-10-08T23:10:40.034051+00:00",
+  "package": "@pump-fun/pump-swap-sdk",
+  "version": "2.1.0",
+  "tarball": "https://registry.npmjs.org/@pump-fun/pump-swap-sdk/-/pump-swap-sdk-2.1.0.tgz",
+  "integrity": "sha512-O0ulb5In/pMzxpcWIkzU17N27HQNZhGGof4fhgXZUkRj/vDbrZsDrViNoouhR52bvtfRf61e/bSvEg/h+35ueA==",
+  "integrity_verified": true,
+  "files": [
+    {
+      "package_path": "package/src/sdk/offlinePumpAmm.ts",
+      "sha256": "ac8312ce476d56f6ce9d47019ba779144fa4c3f3b9db2939693f4b12a727b50b"
+    },
+    {
+      "package_path": "package/src/sdk/sell.ts",
+      "sha256": "97bf00f0f7b4d1d694a0143f603b8f103bdcc0943a86cfdc75492eb52ca8d94b"
+    },
+    {
+      "package_path": "package/dist/index.js",
+      "sha256": "d3a43f2465642236d4f70264d8435af8cc56c2e4b7588a824c355415bffb7016",
+      "matches_executed_bundle": true
+    }
+  ],
+  "trade_sdk_pin": "e6d5c64b2c39764f76be8f4b1633f375c59dcd71",
+  "parser_sdk_pin": "51460a91ca3326663a59651ac0860744ac10fdc0"
+}

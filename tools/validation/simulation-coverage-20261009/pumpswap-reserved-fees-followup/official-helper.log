@@ -1,0 +1,6 @@
+{"scope":"Unmodified private sellAmounts helper from official 2.1.0 bundle","helper_sha256":"56163a266954d2e70702da9fc55809d1d8284221e5c24a98c6a710ca6c6ba49e"}
+{"available":1000,"error":"Insufficient real quote reserves to cover the sell output."}
+{"available":19691,"error":"Insufficient real quote reserves to cover the sell output."}
+{"available":19760,"error":"Insufficient real quote reserves to cover the sell output."}
+{"available":19761,"output":"19691","gross_without_lp":"19761","error":null}
+{"available":2000000,"output":"19691","gross_without_lp":"19761","error":null}

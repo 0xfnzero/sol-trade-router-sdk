@@ -458,6 +458,7 @@ mod tests {
             base_reserve: 800_000_000_000_000,
             quote_reserve: 100_000_000_000,
             virtual_quote_reserves: 5_000_000_000,
+            quote_fee_reserves: Some(0),
             lp_fee_bps: 20,
             protocol_fee_bps: 5,
             creator_fee_bps: 30,
@@ -754,6 +755,10 @@ pub fn pumpswap_sell_quote_out(pool: &PumpSwapPool, base_in: u64) -> Result<u64>
     if base_in == 0 || pool.base_reserve == 0 || pool.quote_reserve == 0 {
         return Err(anyhow!("invalid PumpSwap input or reserves"));
     }
+    let reserved = pool.quote_fee_reserves
+        .ok_or_else(|| anyhow!("PumpSwap sell quote requires current Pool reserved fees"))?;
+    let real_quote = pool.quote_reserve.checked_sub(reserved)
+        .ok_or_else(|| anyhow!("PumpSwap reserved fees exceed quote vault balance"))?;
     let gross = (pumpswap_effective_quote(pool)? as u128).saturating_mul(base_in as u128)
         / (pool.base_reserve as u128).saturating_add(base_in as u128);
     let fees = compute_fee_bps(gross, pool.lp_fee_bps as u128)
@@ -766,7 +771,7 @@ pub fn pumpswap_sell_quote_out(pool: &PumpSwapPool, base_in: u64) -> Result<u64>
     )
     .map_err(|_| anyhow!("PumpSwap output exceeds u64"))?;
     if gross.saturating_sub(compute_fee_bps(gross, pool.lp_fee_bps as u128))
-        > pool.quote_reserve as u128
+        > real_quote as u128
     {
         return Err(anyhow!("PumpSwap real quote reserve cannot cover output"));
     }

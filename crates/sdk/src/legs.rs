@@ -1291,6 +1291,7 @@ mod tests {
             base_reserve: 1,
             quote_reserve: 1,
             virtual_quote_reserves: 0,
+            quote_fee_reserves: Some(0),
             lp_fee_bps: 20,
             protocol_fee_bps: 5,
             creator_fee_bps: 0,

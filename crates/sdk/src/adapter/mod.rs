@@ -11,6 +11,6 @@ pub use from_params::{
 };
 pub use from_rpc::{load_routed_market_by_rpc, LoadMarketRequest};
 #[cfg(test)]
-pub(crate) use from_rpc::validate_route_mints;
+pub(crate) use from_rpc::{refresh_pumpswap_fee_reserves, validate_route_mints};
 
 pub use pumpfun_state::load_pumpfun_v3_by_rpc;

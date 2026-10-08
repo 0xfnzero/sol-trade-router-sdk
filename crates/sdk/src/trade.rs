@@ -1553,8 +1553,10 @@ impl RouterClient {
         if out_mint != pool.quote_mint {
             return Err(anyhow!("PumpSwap receive mint must be pool quote"));
         }
-        let expected = pumpswap_sell_quote_out(pool, sell_amt)?;
-        let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
+        let min_out = match explicit_min_out {
+            Some(minimum) => minimum,
+            None => apply_slippage_min_out(pumpswap_sell_quote_out(pool, sell_amt)?, slip),
+        };
         let output_ata = ata(&self.payer, &out_mint, &pool.quote_token_program);
         Ok((
             vec![pumpswap_sell_leg(&self.payer, pool, sell_amt, min_out)?],

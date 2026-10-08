@@ -11,7 +11,7 @@ use sol_trade_sdk::trading::core::params::{
 use sol_trade_sdk::trading::factory::DexType;
 
 use super::from_params::to_routed_market_for_user;
-use crate::market::{BridgePool, Market, RoutedMarket};
+use crate::market::{BridgePool, Market, PumpSwapPool, RoutedMarket};
 use crate::constants::{TOKEN_PROGRAM, TOKEN_2022_PROGRAM};
 use spl_token_2022_interface::{
     extension::{transfer_hook, BaseStateWithExtensions, ExtensionType, StateWithExtensions},
@@ -74,6 +74,14 @@ fn validate_mint(account: &Account, program: Pubkey) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub(crate) async fn refresh_pumpswap_fee_reserves(
+    rpc: &SolanaRpcClient,
+    pool: &mut PumpSwapPool,
+) -> Result<()> {
+    let state = sol_trade_sdk::instruction::utils::pumpswap::fetch_pool(rpc, &pool.pool).await?;
+    pool.apply_pool_fee_reserves(&state)
 }
 
 /// Cold-path request describing which pool to load over RPC.
@@ -227,6 +235,9 @@ pub async fn load_routed_market_by_rpc(
             _ => return Err(anyhow::anyhow!("PumpFun snapshot has incompatible params")),
         };
         super::pumpfun_state::refresh(rpc, pool, expected_creator).await?;
+    }
+    if let Market::PumpSwapOuter(pool) = &mut market.market {
+        refresh_pumpswap_fee_reserves(rpc, pool).await?;
     }
     validate_route_mints(rpc, &market).await?;
     Ok((extension, market))

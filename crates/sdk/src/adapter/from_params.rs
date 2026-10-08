@@ -185,6 +185,7 @@ pub fn pumpswap_from_params(p: &PumpSwapParams) -> PumpSwapPool {
         base_reserve: p.pool_base_token_reserves,
         quote_reserve: p.pool_quote_token_reserves,
         virtual_quote_reserves: p.virtual_quote_reserves,
+        quote_fee_reserves: None,
         lp_fee_bps: fees.lp_fee_basis_points,
         protocol_fee_bps: fees.protocol_fee_basis_points,
         creator_fee_bps: fees.coin_creator_fee_basis_points,

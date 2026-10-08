@@ -205,8 +205,12 @@ pub struct PumpSwapPool {
     pub coin_creator_vault_authority: Pubkey,
     pub coin_creator: Pubkey,
     pub base_reserve: u64,
+    /// Raw quote-vault balance, including fees reserved for future sweeps.
     pub quote_reserve: u64,
     pub virtual_quote_reserves: i128,
+    /// Protocol + creator fees held in the quote vault. None means unknown;
+    /// automatic sell quotes require a current Pool account overlay.
+    pub quote_fee_reserves: Option<u64>,
     pub lp_fee_bps: u64,
     pub protocol_fee_bps: u64,
     pub creator_fee_bps: u64,
@@ -215,6 +219,28 @@ pub struct PumpSwapPool {
     pub protocol_fee_recipient: Pubkey,
     /// Buyback fee recipient (remaining account). Prefer GlobalConfig list.
     pub buyback_fee_recipient: Pubkey,
+}
+
+impl PumpSwapPool {
+    /// Supply sweep-reserved fees from the same authoritative Pool/vault snapshot
+    /// as this market. Legacy params and trade events do not contain these totals.
+    pub fn apply_pool_fee_reserves(
+        &mut self,
+        state: &sol_trade_sdk::instruction::utils::pumpswap_types::Pool,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(state.base_mint == self.base_mint && state.quote_mint == self.quote_mint
+            && state.pool_base_token_account == self.pool_base_token_account
+            && state.pool_quote_token_account == self.pool_quote_token_account
+            && state.virtual_quote_reserves == self.virtual_quote_reserves
+            && state.coin_creator == self.coin_creator
+            && state.is_cashback_coin == self.is_cashback_coin,
+            "PumpSwap Pool changed or does not match the market snapshot; reload state");
+        let fees = state.protocol_fees.checked_add(state.creator_fees)
+            .filter(|fees| *fees <= self.quote_reserve)
+            .ok_or_else(|| anyhow::anyhow!("PumpSwap reserved fees exceed quote vault balance"))?;
+        self.quote_fee_reserves = Some(fees);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
