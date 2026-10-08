@@ -307,6 +307,7 @@ pub struct WhirlpoolPool {
     pub vault_b: Pubkey,
     pub token_program_a: Pubkey,
     pub token_program_b: Pubkey,
+    /// Three fixed tick arrays followed by up to three supplemental tick arrays.
     pub tick_arrays: Vec<Pubkey>,
     pub quoted_amount_in: Option<u64>,
     /// Input mint of the externally computed quote; never infer from reserves.

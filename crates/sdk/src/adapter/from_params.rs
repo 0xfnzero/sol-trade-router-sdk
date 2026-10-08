@@ -190,7 +190,11 @@ pub fn pumpswap_from_params(p: &PumpSwapParams) -> PumpSwapPool {
         creator_fee_bps: fees.coin_creator_fee_basis_points,
         is_cashback_coin: p.is_cashback_coin,
         protocol_fee_recipient: p.protocol_fee_recipient_override.unwrap_or(
-            sol_trade_sdk::instruction::utils::pumpswap::accounts::PROTOCOL_FEE_RECIPIENT
+            if p.is_mayhem_mode {
+                sol_trade_sdk::instruction::utils::pumpswap::accounts::MAYHEM_FEE_RECIPIENT
+            } else {
+                sol_trade_sdk::instruction::utils::pumpswap::accounts::PROTOCOL_FEE_RECIPIENT
+            }
         ),
         buyback_fee_recipient: p.protocol_extra_fee_recipient_override.unwrap_or(PUMPFUN_BUYBACK_FEE_RECIPIENT),
     }

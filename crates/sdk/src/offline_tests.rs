@@ -1407,3 +1407,96 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     event.cashback_fee_basis_points = 7;
     assert_eq!(crate::parser::pumpswap_from_buy(&event).creator_fee_bps, 37);
 }
+
+#[test]
+fn offline_whirlpool_supplemental_ticks_match_official_remaining_accounts_idl() {
+    let mut pool = dummy_whirlpool();
+    let user = Pubkey::new_unique();
+    let ordinary = whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).unwrap();
+    assert_eq!(ordinary.data.len(), 43);
+    assert_eq!(ordinary.data[42], 0);
+    for count in 1..=3 {
+        let supplemental: Vec<_> = (0..count).map(|_| Pubkey::new_unique()).collect();
+        pool.tick_arrays.truncate(3);
+        pool.tick_arrays.extend_from_slice(&supplemental);
+        let leg = whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).unwrap();
+        // Official IDL variant order: SupplementalTickArrays=6; one u32-length
+        // vector inside a Borsh Option, followed by enum ordinal and u8 count.
+        assert_eq!(&leg.data[..42], &ordinary.data[..42]);
+        assert_eq!(&leg.data[42..], &[1, 1, 0, 0, 0, 6, count as u8]);
+        assert_eq!(leg.accounts.len(), 15 + count);
+        for (account, key) in leg.accounts[15..].iter().zip(&supplemental) {
+            assert_eq!(account.pubkey, *key);
+            assert!(account.is_writable && !account.is_signer);
+        }
+    }
+    pool.tick_arrays.push(Pubkey::new_unique());
+    assert!(whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).is_err());
+}
+
+#[test]
+fn offline_pumpswap_mayhem_fallback_does_not_use_regular_recipient() {
+    use sol_trade_sdk::instruction::utils::pumpswap::accounts::MAYHEM_FEE_RECIPIENT;
+    let k = Pubkey::new_unique;
+    let params = sol_trade_sdk::trading::core::params::PumpSwapParams::new(
+        k(), k(), WSOL_MINT, k(), k(), 1_000_000, 2_000_000, 0,
+        k(), k(), TOKEN_PROGRAM, TOKEN_PROGRAM, MAYHEM_FEE_RECIPIENT, k(), false, 0,
+    );
+    assert!(params.is_mayhem_mode && params.protocol_fee_recipient_override.is_none());
+    let pool = crate::adapter::pumpswap_from_params(&params);
+    assert_eq!(pool.protocol_fee_recipient, MAYHEM_FEE_RECIPIENT);
+    assert_eq!(pumpswap_buy_leg(&k(), &pool, 100, 1).unwrap().accounts[9].pubkey, MAYHEM_FEE_RECIPIENT);
+}
+
+#[test]
+fn offline_cpmm_quotes_differential_current_rust_sdk_creator_modes_and_transfer_fees() {
+    use sol_trade_sdk::trading::core::params::{RaydiumCpmmParams, TokenTransferFee as UpstreamFee};
+    use sol_trade_sdk::utils::calc::raydium_cpmm::compute_swap_amount_for_pool;
+    let pool = dummy_cpmm();
+    let mut params = RaydiumCpmmParams {
+        pool_state: pool.pool_state,
+        amm_config: pool.amm_config,
+        observation_state: pool.observation_state,
+        base_mint: pool.base_mint,
+        quote_mint: pool.quote_mint,
+        base_vault: pool.base_vault,
+        quote_vault: pool.quote_vault,
+        base_token_program: TOKEN_PROGRAM,
+        quote_token_program: TOKEN_PROGRAM,
+        base_reserve: 1_000_000_000,
+        quote_reserve: 2_000_000_000,
+        trade_fee_rate: 2_500,
+        protocol_fee_rate: 120_000,
+        fund_fee_rate: 80_000,
+        creator_fee_rate: 10_000,
+        creator_fee_on: 0,
+        enable_creator_fee: true,
+        base_transfer_fee: UpstreamFee::default(),
+        quote_transfer_fee: UpstreamFee::default(),
+    };
+    for mode in 0..=2 {
+        params.creator_fee_on = mode;
+        for enabled in [false, true] {
+            params.enable_creator_fee = enabled;
+            for transfer_bps in [0, 25, 500] {
+                params.base_transfer_fee = UpstreamFee { basis_points: transfer_bps, maximum_fee: 50 };
+                params.quote_transfer_fee = UpstreamFee { basis_points: transfer_bps, maximum_fee: 123 };
+                let router = crate::adapter::cpmm_from_params(&params);
+                for base_in in [false, true] {
+                    for amount in [101, 999, 10_000, 10_000_000] {
+                        let official = compute_swap_amount_for_pool(&params, base_in, amount, 0).unwrap();
+                        let actual = cpmm_out(&router, amount, base_in).unwrap();
+                        assert_eq!(actual, official.amount_out,
+                            "mode={mode}, enabled={enabled}, transfer={transfer_bps}, base_in={base_in}, amount={amount}");
+                        let minimal_in = crate::quote::cpmm_in_for_out(&router, actual, base_in).unwrap();
+                        assert!(minimal_in <= amount);
+                        assert!(cpmm_out(&router, minimal_in, base_in).unwrap() >= actual);
+                        if minimal_in > 1 {
+                            assert!(cpmm_out(&router, minimal_in - 1, base_in).unwrap() < actual);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

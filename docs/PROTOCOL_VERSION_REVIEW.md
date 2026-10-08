@@ -96,6 +96,39 @@ mints. PumpFun cold refresh conservatively rejects transfer fees/hooks and
 other unsupported mint extensions; transfer hooks for the other builders are
 also outside this audit's supported account encoding.
 
+## Follow-up compatibility checks
+
+Registry `latest` tags and both Rust main heads were queried again; versions
+above remain current. Package tarball integrity values and additional source
+pins are saved in [PROTOCOL_SOURCE_SNAPSHOT.json](PROTOCOL_SOURCE_SNAPSHOT.json).
+
+- PumpSwap manual params without a recipient override now honor Mayhem mode
+  instead of selecting the ordinary pool fallback. Current GlobalConfig
+  recipient overrides still take precedence; for production cache loading use
+  authoritative current recipients, since fallback constants can become stale.
+- Whirlpool previously silently discarded all tick arrays after the first
+  three. It now accepts three fixed plus up to three supplemental arrays,
+  serializes `Some(RemainingAccountsInfo)` with `SupplementalTickArrays` variant
+  6 and appends writable accounts in the matching order. More than three
+  supplemental arrays fail as in the official SDK/program. Parser events still
+  expose only the three fixed tick arrays; supply supplemental arrays via the
+  params/cached pool when needed.
+- CPMM official JS package 0.2.73-alpha still rounds input-side trade/creator
+  fees separately in `curve/calculator.ts`. The current official
+  [chain calculator](https://github.com/raydium-io/raydium-cp-swap/blob/b3187ae53a1b95a201f855a59024a12ca8f5b51a/programs/cp-swap/src/curve/calculator.rs)
+  combines and rounds the total before splitting fees. Router and Rust
+  trade-sdk follow the chain behavior. A differential test covers 144 input
+  cases across both directions, all creator-fee modes, creator enabled/disabled,
+  capped transfer-fee schedules and varied amounts; it also checks exact-output
+  inversion returns the smallest input meeting the requested output.
+
+The attempt to refresh deployment-slot metadata for all programs could not
+complete: both publicnode and the Solana public RPC timed out/reset requests.
+Existing successful PumpFun/mainnet-router evidence below remains dated to its
+recorded snapshot; this follow-up does not claim all current deployed binaries
+match the inspected sources. Full successful swaps across every live pool and
+extension are still outside the validation performed.
+
 ## Official ABI coverage
 
 References are pinned to the upstream commit inspected, not a mutable branch.
@@ -108,7 +141,7 @@ References are pinned to the upstream commit inspected, not a mutable branch.
 | Raydium CPMM | [builder](https://github.com/raydium-io/raydium-sdk-V2/blob/cc33ec28a8921a35609e83293e9e07ad830b0779/src/raydium/cpmm/instruction.ts) | Swap input/output layouts retain 13 accounts and 24-byte payloads. The recent creator-fee protocol-share change concerns collection account lists; this router builds swaps, not collections. Updated dependencies supply current config decoding. |
 | Raydium AMM v4 | [V2 builder](https://github.com/raydium-io/raydium-sdk-V2/blob/cc33ec28a8921a35609e83293e9e07ad830b0779/src/raydium/liquidity/instruction.ts), [processor](https://github.com/raydium-io/raydium-amm/blob/d26944bfb76fb5fa8f91e5d440c2050ed358ef81/program/src/processor.rs) | V2 tags 16/17 and 8-account layout match. Fixed input fee fraction. Official builder uses SPL Token; Token-2022 support must not be inferred from a configurable program pubkey. Swap events alone do not carry authoritative fee fractions; refresh account state before quoting a custom-fee pool. |
 | Raydium CLMM | [swap_v2 builder](https://github.com/raydium-io/raydium-sdk-V2/blob/cc33ec28a8921a35609e83293e9e07ad830b0779/src/raydium/clmm/instrument.ts) | 41-byte payload, 13 fixed accounts, optional bitmap extension then tick arrays match. Requires current tick state and an amount/direction-matched quote. |
-| Orca Whirlpool | [generated swap_v2](https://github.com/orca-so/whirlpools/blob/f2a3d13fa04eb15cf5b5a309ef9b226fd5d34e36/rust-sdk/client/src/generated/instructions/swap_v2.rs) | 15 fixed accounts and 43-byte payload with `remaining_accounts_info=None` match. Transfer hooks and supplemental tick arrays need additional remaining-account encoding, which this builder does not supply. |
+| Orca Whirlpool | [generated swap_v2](https://github.com/orca-so/whirlpools/blob/f2a3d13fa04eb15cf5b5a309ef9b226fd5d34e36/rust-sdk/client/src/generated/instructions/swap_v2.rs) | 15 fixed accounts and 43-byte payload with `remaining_accounts_info=None` match. Up to 3 supplemental tick arrays now append writable remaining accounts and the official enum-6 slice (49-byte payload). Transfer-hook slices are still unsupported. |
 | Meteora DLMM | [IDL](https://github.com/MeteoraAg/dlmm-sdk/blob/576919e3e4368e542c402f000b4264724f7f23ec/idls/dlmm.json) | swap2 discriminator, 16 fixed accounts and 28-byte payload with empty remaining-account slices match. Bin arrays follow fixed accounts; transfer-hook slices are not encoded. |
 | Meteora DAMM v2 | [swap context](https://github.com/MeteoraAg/damm-v2/blob/6cd2614ff61206b456961d0704446da83be5c77a/programs/cp-amm/src/instructions/swap/ix_swap.rs) | swap2 argument struct is two u64s plus mode; optional referral sentinel/event accounts are retained. Corrected exact-out amount order; adapters append Instructions sysvar for limiter paths. Reserve-only quotes and partial fills are unsupported. |
 
@@ -148,7 +181,7 @@ complete swap execution or partial-fill behavior at graduation.
 
 ## Validation and deployment
 
-162 SDK tests, 14 program tests and 2 example tests pass with upgraded pins.
+165 SDK tests, 14 program tests and 2 example tests pass with upgraded pins.
 SDK tests include the new non-default AMM fee fraction/inverse checks and signed
 PumpSwap quote cases; network-gated tests are disabled in this run. Workspace
 compilation is checked separately. The chain processor has not changed in this
@@ -162,3 +195,7 @@ OCR delegate selected 15 Rust code files in this supplement; all 15 were
 manually reviewed (15/15, 100%, no code files skipped). The Markdown report was
 excluded by OCR's extension filter and reviewed separately. No OCR LLM review,
 GitHub Actions workflow, deployment or mainnet transaction was run.
+
+Follow-up review: all 5 OCR-selected files reviewed (4 Rust files plus the JSON
+source manifest; 5/5, 100%, no files skipped). The Markdown report was excluded
+by the extension filter and reviewed separately.

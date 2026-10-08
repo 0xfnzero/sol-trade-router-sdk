@@ -852,6 +852,9 @@ pub fn whirlpool_swap_leg(
             pool.tick_arrays.len()
         ));
     }
+    if pool.tick_arrays.len() > 6 {
+        return Err(anyhow!("Whirlpool allows at most 3 supplemental tick arrays"));
+    }
     let a_to_b = if input_mint == pool.mint_a {
         true
     } else if input_mint == pool.mint_b {
@@ -874,7 +877,17 @@ pub fn whirlpool_swap_leg(
     data.extend_from_slice(&sqrt_limit.to_le_bytes());
     data.push(1); // amount_specified_is_input
     data.push(u8::from(a_to_b));
-    data.push(0); // remaining_accounts_info: None
+    let supplemental = &pool.tick_arrays[3..];
+    if supplemental.is_empty() {
+        data.push(0); // remaining_accounts_info: None
+    } else {
+        // Official Whirlpool IDL: Some(RemainingAccountsInfo { slices: vec![
+        // RemainingAccountsSlice { accounts_type: SupplementalTickArrays (6), length } ] }).
+        data.push(1);
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.push(6);
+        data.push(supplemental.len() as u8);
+    }
     let owner_a = ata(user, &pool.mint_a, &pool.token_program_a);
     let owner_b = ata(user, &pool.mint_b, &pool.token_program_b);
     let oracle = Pubkey::find_program_address(
@@ -882,7 +895,7 @@ pub fn whirlpool_swap_leg(
         &ORCA_WHIRLPOOL_PROGRAM,
     )
     .0;
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(pool.token_program_a, false),
         AccountMeta::new_readonly(pool.token_program_b, false),
         MEMO_PROGRAM_META,
@@ -899,6 +912,8 @@ pub fn whirlpool_swap_leg(
         AccountMeta::new(ticks[2], false),
         AccountMeta::new(oracle, false),
     ];
+    accounts.extend(supplemental.iter().map(|key| AccountMeta::new(*key, false)));
+    ensure_leg_account_budget(accounts.len())?;
     Ok(Leg {
         program_id: ORCA_WHIRLPOOL_PROGRAM,
         accounts,
