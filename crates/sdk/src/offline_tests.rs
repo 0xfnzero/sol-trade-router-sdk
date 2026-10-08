@@ -1500,3 +1500,54 @@ fn offline_cpmm_quotes_differential_current_rust_sdk_creator_modes_and_transfer_
         }
     }
 }
+
+#[test]
+fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
+    let mut event = sol_parser_sdk::core::events::RaydiumClmmSwapEvent::default();
+    event.pool_state = Pubkey::new_unique();
+    event.input_mint = Pubkey::new_unique();
+    event.output_mint = WSOL_MINT;
+    event.input_vault = Pubkey::new_unique();
+    event.output_vault = Pubkey::new_unique();
+    event.tick_arrays = vec![Pubkey::new_unique(); 3];
+    event.zero_for_one = true;
+    let mut pool = crate::parser::clmm_from_swap(&event).unwrap();
+    assert_eq!(pool.token_0_program, Pubkey::default());
+    assert_eq!(pool.token_1_program, TOKEN_PROGRAM);
+    let user = Pubkey::new_unique();
+    assert!(raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).is_err());
+    crate::parser::clmm_apply_token_programs(&mut pool, crate::constants::TOKEN_2022_PROGRAM, TOKEN_PROGRAM);
+    let leg = raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).unwrap();
+    assert_eq!(leg.accounts[3].pubkey,
+        crate::ata::ata(&user, &event.input_mint, &crate::constants::TOKEN_2022_PROGRAM));
+    crate::parser::clmm_apply_token_programs(&mut pool, Pubkey::default(), TOKEN_PROGRAM);
+    assert!(raydium_clmm_swap_leg(&user, &pool, 100, 1, event.input_mint).is_err());
+}
+
+#[test]
+fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
+    let mut pool = dummy_whirlpool();
+    pool.token_program_a = Pubkey::default();
+    pool.token_program_b = crate::constants::TOKEN_2022_PROGRAM;
+    let user = Pubkey::new_unique();
+    assert!(whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).is_err());
+    let mut event = sol_parser_sdk::core::events::OrcaWhirlpoolSwapEvent::default();
+    event.token_program_a = TOKEN_PROGRAM;
+    event.token_program_b = Pubkey::default();
+    crate::parser::merge_whirlpool_swap(&mut pool, &event);
+    assert_eq!(pool.token_program_a, TOKEN_PROGRAM);
+    assert_eq!(pool.token_program_b, crate::constants::TOKEN_2022_PROGRAM);
+    assert!(whirlpool_swap_leg(&user, &pool, 100, 1, pool.mint_a).is_ok());
+}
+
+#[test]
+fn offline_amm_v4_v2_rejects_token_2022_in_both_amount_modes() {
+    let mut pool = dummy_amm_v4();
+    let user = Pubkey::new_unique();
+    pool.token_program = crate::constants::TOKEN_2022_PROGRAM;
+    assert!(raydium_amm_v4_swap_leg(&user, &pool, 100, 1, pool.coin_mint).is_err());
+    assert!(raydium_amm_v4_swap_exact_out_leg(&user, &pool, 1, 100, pool.coin_mint).is_err());
+    pool.token_program = TOKEN_PROGRAM;
+    assert!(raydium_amm_v4_swap_leg(&user, &pool, 100, 1, pool.coin_mint).is_ok());
+    assert!(raydium_amm_v4_swap_exact_out_leg(&user, &pool, 1, 100, pool.coin_mint).is_ok());
+}

@@ -90,9 +90,11 @@ API migration: PumpFun quote functions now return `Result<u64>`; PumpFun,
 LaunchLab and CPMM structs require `fee_rates_known`; externally quoted pool
 structs require `quoted_input_mint`. Mark rates known only with actual config
 and mint fee state. Feed concentrated venues a fresh official quote and token
-program owners, or supply an explicit bound. Some event-only adapters infer SPL
-Token when the owner is absent; that does not validate arbitrary Token-2022
-mints. PumpFun cold refresh conservatively rejects transfer fees/hooks and
+program owners, or supply an explicit bound. CLMM and Whirlpool event/account adapters now preserve unknown mint owners
+instead of treating them as SPL Token; resolve owners from an authoritative
+cache/RPC before building. Some other legacy params/event conversions still
+default missing programs to SPL; callers must supply actual owners and this
+does not validate arbitrary Token-2022 extensions. PumpFun cold refresh conservatively rejects transfer fees/hooks and
 other unsupported mint extensions; transfer hooks for the other builders are
 also outside this audit's supported account encoding.
 
@@ -128,6 +130,28 @@ Existing successful PumpFun/mainnet-router evidence below remains dated to its
 recorded snapshot; this follow-up does not claim all current deployed binaries
 match the inspected sources. Full successful swaps across every live pool and
 extension are still outside the validation performed.
+
+## Token-program owner validation supplement
+
+CLMM logs omit mint owner programs. A Token-2022 mint may charge zero transfer
+fees, so zero observed fees do not imply classic SPL Token. CLMM snapshots now
+leave unknown owners as the zero pubkey; only WSOL/USDC/USDT are inferred as
+known classic mints, and positive transfer fees indicate Token-2022. The
+`clmm_apply_token_programs` overlay preserves missing values rather than
+silently substituting classic SPL. Whirlpool account snapshots follow the same
+known-mint rule; filled swap events retain their actual program fields. Merge
+updates independently preserve the known owner on the other side.
+
+CLMM, Whirlpool, DLMM, DAMM v2 and PumpSwap leg builders reject missing or
+unsupported token programs before deriving ATAs. Supplying a Token-2022 program
+still does not implement transfer-hook remaining accounts. AMM v4 V2 now rejects
+Token-2022 for both exact-in and exact-out, matching the official processor's
+`spl_token::id()` check. Tests verify that a zero-transfer-fee unknown CLMM mint
+fails until overlaid with its Token-2022 owner, then uses the correct ATA; owner
+merge tests preserve the independently known side; AMM tests cover both modes.
+
+This supplement's 3 changed Rust files were manually reviewed (3/3, 100%, no
+code skipped); this document was reviewed separately.
 
 ## Official ABI coverage
 
@@ -181,7 +205,7 @@ complete swap execution or partial-fill behavior at graduation.
 
 ## Validation and deployment
 
-165 SDK tests, 14 program tests and 2 example tests pass with upgraded pins.
+168 SDK tests, 14 program tests and 2 example tests pass with upgraded pins.
 SDK tests include the new non-default AMM fee fraction/inverse checks and signed
 PumpSwap quote cases; network-gated tests are disabled in this run. Workspace
 compilation is checked separately. The chain processor has not changed in this

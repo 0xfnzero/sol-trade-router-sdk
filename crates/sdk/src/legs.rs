@@ -33,6 +33,13 @@ fn ensure_leg_account_budget(n: usize) -> Result<()> {
     Ok(())
 }
 
+fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<()> {
+    if programs.iter().any(|program| *program != TOKEN_PROGRAM && *program != TOKEN_2022_PROGRAM) {
+        return Err(anyhow!("{dex} mint token program is missing or unsupported; supply actual mint owners"));
+    }
+    Ok(())
+}
+
 #[inline(always)]
 fn encode_u64_triple(disc: &[u8; 8], a: u64, b: u64, c: u64) -> [u8; 32] {
     let mut data = [0u8; 32];
@@ -452,6 +459,7 @@ pub fn pumpfun_sell_v2_leg(
 }
 
 fn pumpswap_accounts(user: &Pubkey, pool: &PumpSwapPool, is_buy: bool) -> Result<Vec<AccountMeta>> {
+    require_token_programs(&[pool.base_token_program, pool.quote_token_program], "PumpSwap")?;
     let user_base = ata(user, &pool.base_mint, &pool.base_token_program);
     let user_quote = ata(user, &pool.quote_mint, &pool.quote_token_program);
     // Observed protocol fee recipient (mayhem or standard). Do not hardcode only
@@ -602,6 +610,9 @@ pub fn raydium_amm_v4_swap_leg(
     } else {
         pool.token_program
     };
+    if tp != TOKEN_PROGRAM {
+        return Err(anyhow!("Raydium AMM V4 V2 supports only classic SPL Token"));
+    }
     let mut data = [0u8; 17];
     data[1..9].copy_from_slice(&amount_in.to_le_bytes());
     data[9..17].copy_from_slice(&min_out.to_le_bytes());
@@ -652,6 +663,9 @@ pub fn raydium_amm_v4_swap_exact_out_leg(
     } else {
         pool.token_program
     };
+    if tp != TOKEN_PROGRAM {
+        return Err(anyhow!("Raydium AMM V4 V2 supports only classic SPL Token"));
+    }
     let mut data = [0u8; 17];
     data[0] = RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2;
     data[1..9].copy_from_slice(&max_amount_in.to_le_bytes());
@@ -682,6 +696,7 @@ pub fn meteora_damm_v2_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.token_a_program, pool.token_b_program], "Meteora DAMM V2")?;
     if pool.swap_mode == METEORA_DAMM_V2_PARTIAL_FILL {
         return Err(anyhow!(
             "Meteora DAMM V2 partial-fill unsupported (router requires exact-in/exact-out spend)"
@@ -692,9 +707,6 @@ pub fn meteora_damm_v2_swap_leg(
             "unsupported Meteora DAMM V2 swap mode {}",
             pool.swap_mode
         ));
-    }
-    if pool.swap_mode != METEORA_DAMM_V2_EXACT_IN && pool.swap_mode != METEORA_DAMM_V2_EXACT_OUT {
-        return Err(anyhow!("router DAMM V2 requires exact-in or exact-out; partial-fill mode is unsupported"));
     }
     let (input_program, output_mint, output_program) = if input_mint == pool.token_a_mint {
         (
@@ -763,6 +775,7 @@ pub fn raydium_clmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.token_0_program, pool.token_1_program], "Raydium CLMM")?;
     let bitmap_pda = crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state);
     let mut bitmap = pool
         .tick_array_bitmap_extension
@@ -846,6 +859,7 @@ pub fn whirlpool_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.token_program_a, pool.token_program_b], "Orca Whirlpool")?;
     if pool.tick_arrays.len() < 3 {
         return Err(anyhow!(
             "Whirlpool swap_v2 requires 3 tick arrays (got {})",
@@ -928,6 +942,7 @@ pub fn meteora_dlmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_token_programs(&[pool.token_x_program, pool.token_y_program], "Meteora DLMM")?;
     if pool.bin_arrays.is_empty() {
         return Err(anyhow!("Meteora DLMM snapshot has no bin arrays"));
     }

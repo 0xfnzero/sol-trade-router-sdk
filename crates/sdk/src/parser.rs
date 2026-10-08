@@ -265,11 +265,14 @@ pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
 }
 
 /// Best-effort token program for a known mint without RPC.
-/// Classic quote mints are always SPL Token; others default SPL until overlay.
+/// Classic quote mints have known owners; an unknown mint stays unresolved.
 #[inline]
 pub fn known_mint_token_program(mint: Pubkey) -> Pubkey {
-    let _ = mint; // reserved for future known Token-2022 allowlists
-    TOKEN_PROGRAM
+    if matches!(mint, WSOL_MINT | crate::constants::USDC_MINT | crate::constants::USDT_MINT) {
+        TOKEN_PROGRAM
+    } else {
+        Pubkey::default()
+    }
 }
 
 /// Overlay Token-2022 / SPL programs onto a CLMM snapshot (call after mint owners are known).
@@ -279,8 +282,8 @@ pub fn clmm_apply_token_programs(
     token_0_program: Pubkey,
     token_1_program: Pubkey,
 ) {
-    pool.token_0_program = tp_or_spl(token_0_program);
-    pool.token_1_program = tp_or_spl(token_1_program);
+    pool.token_0_program = token_0_program;
+    pool.token_1_program = token_1_program;
 }
 
 pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
@@ -295,7 +298,7 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
     let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
     // CLMM swap events do not carry per-mint token programs. Heuristic: a non-zero
     // transfer_fee on a side strongly implies Token-2022 for that mint; otherwise
-    // default SPL. Bots with mint-owner cache should call [`clmm_apply_token_programs`].
+    // leave unknown owners unresolved. Supply an authoritative mint-owner overlay.
     let token_0_program = if e.transfer_fee_0 > 0 {
         crate::constants::TOKEN_2022_PROGRAM
     } else {
@@ -360,8 +363,8 @@ pub fn whirlpool_from_swap(e: &OrcaWhirlpoolSwapEvent) -> Option<WhirlpoolPool> 
         mint_b: e.token_mint_b,
         vault_a: e.token_vault_a,
         vault_b: e.token_vault_b,
-        token_program_a: tp_or_spl(e.token_program_a),
-        token_program_b: tp_or_spl(e.token_program_b),
+        token_program_a: e.token_program_a,
+        token_program_b: e.token_program_b,
         tick_arrays: ticks.to_vec(),
         quoted_amount_in: Some(e.input_amount).filter(|&a| a > 0),
         quoted_input_mint: None,
@@ -378,8 +381,8 @@ pub fn whirlpool_from_account(e: &OrcaWhirlpoolAccountEvent) -> WhirlpoolPool {
         mint_b: w.token_mint_b,
         vault_a: w.token_vault_a,
         vault_b: w.token_vault_b,
-        token_program_a: TOKEN_PROGRAM,
-        token_program_b: TOKEN_PROGRAM,
+        token_program_a: known_mint_token_program(w.token_mint_a),
+        token_program_b: known_mint_token_program(w.token_mint_b),
         tick_arrays: Vec::new(),
         quoted_amount_in: None,
         quoted_input_mint: None,
@@ -403,6 +406,8 @@ pub fn merge_whirlpool_swap(pool: &mut WhirlpoolPool, e: &OrcaWhirlpoolSwapEvent
     }
     if e.token_program_a != Pubkey::default() {
         pool.token_program_a = e.token_program_a;
+    }
+    if e.token_program_b != Pubkey::default() {
         pool.token_program_b = e.token_program_b;
     }
     pool.expected_out = None;
