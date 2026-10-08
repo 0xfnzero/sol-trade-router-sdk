@@ -413,8 +413,9 @@ impl TradingClient {
         self.router.sell_with_opts(amount_in, market, opts)
     }
 
-    /// Query payer token balance with the same ATA derivation used on the trade path
-    /// (including seed-optimized ATAs when enabled). Prefer cold-path / post-confirm use only.
+    /// Query the standard ATA used by Router trades, including Token-2022.
+    /// Router account derivation does not use `use_seed_optimize`.
+    /// Prefer cold-path / post-confirm use only.
     pub async fn get_payer_token_balance_with_program(
         &self,
         mint: &Pubkey,
@@ -425,7 +426,7 @@ impl TradingClient {
             &self.payer.pubkey(),
             mint,
             token_program,
-            self.use_seed_optimize,
+            false, // Router legs and preparation always use the standard ATA.
         )
         .await?)
     }

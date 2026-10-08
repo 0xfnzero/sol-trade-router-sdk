@@ -549,6 +549,77 @@ fn offline_pumpswap_leg_builds() {
 
 #[test]
 fn offline_routed_market_helpers() {
+    use solana_client::{rpc_request::RpcRequest, rpc_sender::{RpcSender, RpcTransportStats}};
+    use std::sync::{Arc, Mutex};
+    struct BalanceRpc {
+        canonical: Vec<Pubkey>,
+        requests: Arc<Mutex<Vec<Pubkey>>>,
+    }
+    #[async_trait::async_trait]
+    impl RpcSender for BalanceRpc {
+        async fn send(&self, request: RpcRequest, params: serde_json::Value)
+            -> solana_client::client_error::Result<serde_json::Value> {
+            assert_eq!(request, RpcRequest::GetAccountInfo);
+            let address = params[0].as_str().unwrap().parse::<Pubkey>().unwrap();
+            self.requests.lock().unwrap().push(address);
+            let side = self.canonical.iter().position(|a| *a == address);
+            // Minimal SPL amount fixture at offset 64: ATA=42, other account=7.
+            let amount_group = if side.is_some() { "ACoA" } else { "AAcA" };
+            let data = format!("{}{amount_group}{}", "A".repeat(84), "A".repeat(132));
+            Ok(serde_json::json!({"context":{"slot":1}, "value":{
+                "data":[data,"base64"], "executable":false, "lamports":1,
+                "owner":if side == Some(1) { crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM }.to_string(),
+                "rentEpoch":0, "space":165
+            }}))
+        }
+        fn get_transport_stats(&self) -> RpcTransportStats { RpcTransportStats::default() }
+        fn url(&self) -> String { "mock://router-balance".into() }
+    }
+    let balance_wallet = Arc::new(Keypair::new());
+    let balance_mint = Pubkey::new_unique();
+    let programs = [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM];
+    let canonical: Vec<_> = programs.iter().map(|program|
+        crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, program)).collect();
+    assert_ne!(canonical[0], sol_trade_sdk::common::fast_fn::
+        get_associated_token_address_with_program_id_fast_use_seed(
+            &balance_wallet.pubkey(), &balance_mint, &TOKEN_PROGRAM, true));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let rpc = solana_client::nonblocking::rpc_client::RpcClient::new_sender(
+        BalanceRpc { canonical: canonical.clone(), requests: requests.clone() }, Default::default());
+    let infrastructure = Arc::new(sol_trade_sdk::TradingInfrastructure {
+        rpc: Arc::new(rpc), swqos_clients: Arc::new(Vec::new()),
+        config: sol_trade_sdk::common::InfrastructureConfig::new(
+            "https://example.invalid".into(), Vec::new(),
+            solana_commitment_config::CommitmentConfig::processed()),
+        max_sender_concurrency: 1, effective_core_ids: Arc::new(Vec::new()),
+    });
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut balances = Vec::new();
+    for seed in [false, true] {
+        let client = crate::TradingClient::from_infrastructure(
+            balance_wallet.clone(), infrastructure.clone(), Pubkey::new_unique(), 100, seed)
+            .with_pool_guard(PoolGuardPolicy::disabled());
+        for program in programs {
+            let mut pool = dummy_cpmm();
+            pool.base_mint = balance_mint;
+            pool.base_token_program = program;
+            let built = client.build_buy_from_market(10_000,
+                &RoutedMarket::new(Market::CpmmOuter(pool)),
+                TradeOpts::default().buy_with_wsol().with_min_out(1)).unwrap();
+            assert_eq!(built.route.as_ref().unwrap().accounts[4].pubkey,
+                crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, &program));
+            let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
+                &built.into_instructions(), Some(&balance_wallet.pubkey()), &[balance_wallet.as_ref()],
+                solana_sdk::hash::Hash::new_unique(),
+            );
+            tx.verify().unwrap();
+            balances.push(runtime.block_on(client.get_payer_token_balance_with_program(
+                &balance_mint, &program)).unwrap());
+        }
+    }
+    assert_eq!(*requests.lock().unwrap(), [canonical.clone(), canonical].concat());
+    assert_eq!(balances, vec![42; 4]);
+
     let pool = dummy_cpmm();
     let routed = RoutedMarket::stonk_outer(pool.clone(), None);
     assert_eq!(routed.meme_mint(), pool.meme_mint());

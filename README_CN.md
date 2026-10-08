@@ -240,6 +240,9 @@ V1 曲线不支持 WSOL 结算。
 与 `TradeTokenType::WSOL` 使用相同的 WSOL 账户创建和关闭标记。
 原生 SOL 卖出设置 `close_output_token_ata=true` 时，会关闭并解包 WSOL 输出。
 
+Router 交易及余额查询始终使用标准 ATA，覆盖 Token 和 Token-2022；
+共享交易配置中的 `use_seed_optimize` 不改变 Router 的账户地址。
+
 ### 5. 管理指令（部署后）
 
 ```rust

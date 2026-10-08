@@ -240,6 +240,9 @@ In `TradeBuyParams` / `TradeSellParams`, `TradeTokenType::Token(WSOL_MINT)`
 uses the same WSOL account creation and close flags as `TradeTokenType::WSOL`.
 For native SOL sells, `close_output_token_ata=true` unwraps the WSOL output.
 
+Router trades and balance queries use standard ATAs for both Token and Token-2022,
+even when the shared trade configuration enables `use_seed_optimize`.
+
 ### 5. Admin (after deploy)
 
 ```rust

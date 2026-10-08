@@ -19,6 +19,7 @@ solana-message = { workspace = true }
 core_affinity = { workspace = true }
 
 [dev-dependencies]
+async-trait = "0.1"
 solana-client = "=4.2.2"
 solana-commitment-config = "3"
 solana-transaction-status = "=4.2.2"
