@@ -102,7 +102,7 @@ const PUMPSWAP_SELL: [u8; 8] = [51, 230, 133, 164, 1, 127, 131, 173];
 const METEORA_DLMM_SWAP2: [u8; 8] = [65, 75, 63, 76, 235, 91, 91, 136];
 const CLMM_SWAP_V2: [u8; 8] = [43, 4, 237, 11, 26, 201, 30, 98];
 const NO_ACCOUNT: usize = usize::MAX;
-const MAX_DYNAMIC_LEG_DATA: usize = 43;
+const MAX_DYNAMIC_LEG_DATA: usize = 49;
 
 #[derive(Clone, Copy)]
 struct DynamicSecondLeg {
@@ -115,6 +115,12 @@ struct DynamicSecondLeg {
     output_mint: usize,
     output_program: usize,
     paired_mints: bool,
+}
+
+fn valid_whirlpool_remaining_accounts(data: &[u8]) -> bool {
+    (data.len() == 43 && data[42] == 0)
+        || (data.len() == 49 && data[42..48] == [1, 1, 0, 0, 0, 6]
+            && (1..=3).contains(&data[48]))
 }
 
 // Both dynamic hops use this DEX switch; keep one copy in the SBF binary.
@@ -228,11 +234,10 @@ fn dynamic_second_leg(program_id: &Address, data: &[u8]) -> Result<DynamicSecond
             paired_mints: true,
         })
     } else if addr_eq(program_id, &ORCA_WHIRLPOOL_PROGRAM_ID)
-        && data.len() == 43
+        && valid_whirlpool_remaining_accounts(data)
         && data[..8] == CLMM_SWAP_V2
         && data[40] == 1
         && data[41] <= 1
-        && data[42] == 0
     {
         let a_to_b = data[41] == 1;
         Ok(DynamicSecondLeg {
@@ -1107,6 +1112,30 @@ mod tests {
         ] {
             assert_eq!(Address::from_str(name).unwrap().as_array(), expected);
         }
+    }
+
+    #[test]
+    fn dynamic_whirlpool_preserves_and_validates_supplemental_slice() {
+        let program = Address::new_from_array(ORCA_WHIRLPOOL_PROGRAM_ID);
+        let mut data = [0u8; 49];
+        data[..8].copy_from_slice(&CLMM_SWAP_V2);
+        data[40] = 1;
+        data[41] = 1;
+        data[42..48].copy_from_slice(&[1, 1, 0, 0, 0, 6]);
+        for count in 1..=3 {
+            data[48] = count;
+            let layout = dynamic_second_leg(&program, &data).unwrap();
+            let mut buffer = [0u8; MAX_DYNAMIC_LEG_DATA];
+            let patched = patch_second_leg_amount(&data, 123, layout.amount_offset, &mut buffer);
+            assert_eq!(read_u64(patched, 8).unwrap(), 123);
+            assert_eq!(&patched[16..], &data[16..]);
+        }
+        for (index, value) in [(42, 0), (43, 2), (47, 0), (48, 0), (48, 4)] {
+            let mut invalid = data;
+            invalid[index] = value;
+            assert!(dynamic_second_leg(&program, &invalid).is_err());
+        }
+        assert!(dynamic_second_leg(&program, &data[..48]).is_err());
     }
 
     #[test]

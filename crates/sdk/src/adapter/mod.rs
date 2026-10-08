@@ -10,3 +10,5 @@ pub use from_params::{
     to_routed_market, to_routed_market_for_user, whirlpool_from_params,
 };
 pub use from_rpc::{load_routed_market_by_rpc, LoadMarketRequest};
+
+pub use pumpfun_state::load_pumpfun_v3_by_rpc;

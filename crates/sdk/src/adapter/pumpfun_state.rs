@@ -114,6 +114,23 @@ fn apply(
     mint: &Account,
     quote: &Account,
 ) -> Result<()> {
+    apply_inner(pool, curve, global, config, mint, quote, false)
+}
+
+fn apply_inner(
+    pool: &mut PumpFunPool,
+    curve: &Account,
+    global: &Account,
+    config: Option<&Account>,
+    mint: &Account,
+    quote: &Account,
+    v3: bool,
+) -> Result<()> {
+    if v3 && (config.is_none() || curve.data.get(82) == Some(&1)) {
+        return Err(anyhow!(
+            "Pump V3 requires FeeConfig and does not support cashback"
+        ));
+    }
     if curve.owner != PUMPFUN_PROGRAM
         || global.owner != PUMPFUN_PROGRAM
         || curve.data.get(..8) != Some(&[23, 183, 248, 55, 96, 216, 172, 96])
@@ -123,9 +140,11 @@ fn apply(
             "invalid PumpFun curve/Global owner or discriminator"
         ));
     }
-    if curve.data.get(48) != Some(&0) || curve.data.get(141).is_some_and(|depth| *depth != 0) {
+    if curve.data.get(48) != Some(&0)
+        || (!v3 && curve.data.get(141).is_some_and(|depth| *depth != 0))
+    {
         return Err(anyhow!(
-            "completed/nested PumpFun curves require V3 routing, unsupported by this router"
+            "completed Pump curves must migrate; nested curves require the explicit V3 API"
         ));
     }
     let stored_quote = if curve.data.len() >= 115 {
@@ -217,6 +236,108 @@ fn apply(
         choose_recipient(&global.data, 741, 773, pool.buyback_fee_recipient)?;
     pool.fee_rates_known = true;
     Ok(())
+}
+
+/// Load a coherent V3 state after discovering quote mint and base token owner.
+/// The second batch revalidates both discoveries before using any reserves.
+pub async fn load_pumpfun_v3_by_rpc(
+    rpc: &SolanaRpcClient,
+    mint: &Pubkey,
+    user: &Pubkey,
+) -> Result<crate::pumpfun_v3::PumpFunV3Pool> {
+    let curve_key =
+        Pubkey::find_program_address(&[b"bonding-curve", mint.as_ref()], &PUMPFUN_PROGRAM).0;
+    let first = rpc.get_multiple_accounts(&[curve_key, *mint]).await?;
+    let initial_curve = first
+        .first()
+        .and_then(Option::as_ref)
+        .ok_or_else(|| anyhow!("missing Pump curve"))?;
+    let initial_mint = first
+        .get(1)
+        .and_then(Option::as_ref)
+        .ok_or_else(|| anyhow!("missing Pump mint"))?;
+    let stored_quote = if initial_curve.data.len() >= 115 {
+        key_at(&initial_curve.data, 83)?
+    } else {
+        Pubkey::default()
+    };
+    let quote_mint = if stored_quote == Pubkey::default() {
+        WSOL_MINT
+    } else {
+        stored_quote
+    };
+    let token_program = mint_program(initial_mint)?;
+    let vault = crate::ata::ata(&curve_key, mint, &token_program);
+    let volume = Pubkey::find_program_address(
+        &[b"user_volume_accumulator", user.as_ref()],
+        &PUMPFUN_PROGRAM,
+    )
+    .0;
+    let keys = [
+        curve_key,
+        PUMPFUN_GLOBAL,
+        PUMPFUN_FEE_CONFIG,
+        *mint,
+        quote_mint,
+        vault,
+        volume,
+    ];
+    let accounts = rpc.get_multiple_accounts(&keys).await?;
+    let get = |i: usize| {
+        accounts
+            .get(i)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| anyhow!("Pump V3 snapshot missing {}", keys[i]))
+    };
+    let mut pool = crate::parser::pumpfun_from_trade(&Default::default());
+    pool.mint = *mint;
+    pool.quote_mint = quote_mint;
+    pool.bonding_curve = curve_key;
+    apply_inner(
+        &mut pool,
+        get(0)?,
+        get(1)?,
+        Some(get(2)?),
+        get(3)?,
+        get(4)?,
+        true,
+    )?;
+    if pool.mint_token_program != token_program {
+        return Err(anyhow!("Pump base mint owner changed during refresh"));
+    }
+    let base_vault = get(5)?;
+    if base_vault.owner != token_program
+        || key_at(&base_vault.data, 0)? != *mint
+        || key_at(&base_vault.data, 32)? != curve_key
+        || base_vault.data.get(108) != Some(&1)
+    {
+        return Err(anyhow!("invalid Pump curve base token vault"));
+    }
+    let needs_volume_initialization = match accounts.get(6).and_then(Option::as_ref) {
+        None => true,
+        Some(account) if account.owner == SYSTEM_PROGRAM && account.data.is_empty() => true,
+        Some(account) => {
+            if account.owner != PUMPFUN_PROGRAM
+                || account.data.get(..8) != Some(&[86, 255, 112, 14, 102, 53, 154, 250])
+                || key_at(&account.data, 8)? != *user
+            {
+                return Err(anyhow!("invalid Pump user volume accumulator"));
+            }
+            false
+        }
+    };
+    Ok(crate::pumpfun_v3::PumpFunV3Pool {
+        curve: pool,
+        complete: false, // apply_inner rejects already-completed curves.
+        supports_graduation: false,
+        real_quote_reserves: u64_at(&get(0)?.data, 32)?,
+        curve_base_token_balance: u64_at(&base_vault.data, 64)?,
+        pool_migration_fee: u64_at(&get(1)?.data, 146)?,
+        mayhem_mode: get(0)?.data.get(81) == Some(&1),
+        depth: get(0)?.data.get(141).copied().unwrap_or(0),
+        needs_curve_extension: get(0)?.data.len() < 166,
+        needs_volume_initialization,
+    })
 }
 
 #[cfg(test)]
@@ -313,6 +434,48 @@ mod tests {
         apply(&mut pool, &curve, &global, None, &mint, &mint).unwrap();
         assert_eq!((pool.protocol_fee_bps, pool.creator_fee_bps), (77, 11));
     }
+    #[test]
+    fn v3_requires_fee_config_and_accepts_nested_but_not_completed_or_cashback() {
+        let (mut pool, mut curve, global, mint) = fixture();
+        let config = fee_config();
+        curve.data[141] = 1;
+        assert!(apply_inner(&mut pool, &curve, &global, None, &mint, &mint, true).is_err());
+        apply_inner(
+            &mut pool,
+            &curve,
+            &global,
+            Some(&config),
+            &mint,
+            &mint,
+            true,
+        )
+        .unwrap();
+        assert_eq!((pool.protocol_fee_bps, pool.creator_fee_bps), (20, 30));
+        curve.data[82] = 1;
+        assert!(apply_inner(
+            &mut pool,
+            &curve,
+            &global,
+            Some(&config),
+            &mint,
+            &mint,
+            true
+        )
+        .is_err());
+        curve.data[82] = 0;
+        curve.data[48] = 1;
+        assert!(apply_inner(
+            &mut pool,
+            &curve,
+            &global,
+            Some(&config),
+            &mint,
+            &mint,
+            true
+        )
+        .is_err());
+    }
+
     #[test]
     fn invalid_owners_unimplemented_extensions_and_v3_states_fail_closed() {
         let (mut pool, mut curve, mut global, mint) = fixture();

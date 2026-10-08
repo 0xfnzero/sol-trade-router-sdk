@@ -2,6 +2,7 @@
 
 #![cfg(test)]
 
+use solana_sdk::instruction::AccountMeta;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
@@ -1550,4 +1551,54 @@ fn offline_amm_v4_v2_rejects_token_2022_in_both_amount_modes() {
     pool.token_program = TOKEN_PROGRAM;
     assert!(raydium_amm_v4_swap_leg(&user, &pool, 100, 1, pool.coin_mint).is_ok());
     assert!(raydium_amm_v4_swap_exact_out_leg(&user, &pool, 1, 100, pool.coin_mint).is_ok());
+}
+
+#[test]
+fn offline_dynamic_route_accepts_whirlpool_supplemental_ticks_as_following_hop() {
+    let user = Pubkey::new_unique();
+    let mut pool = dummy_whirlpool();
+    pool.tick_arrays
+        .extend([Pubkey::new_unique(), Pubkey::new_unique()]);
+    let input = crate::ata::ata(&user, &pool.mint_a, &pool.token_program_a);
+    let output = crate::ata::ata(&user, &pool.mint_b, &pool.token_program_b);
+    let first = Leg {
+        program_id: TOKEN_PROGRAM,
+        accounts: vec![AccountMeta::new(input, false)],
+        data: vec![3],
+    };
+    let second = whirlpool_swap_leg(&user, &pool, 0, 1, pool.mint_a).unwrap();
+    let accounts = || crate::route_ix::RouteAccounts {
+        payer: user,
+        fee_destination: Pubkey::new_unique(),
+        fee_source: Pubkey::new_unique(),
+        output_token_account: output,
+        fee_program: TOKEN_PROGRAM,
+        fee_mint: WSOL_MINT,
+    };
+    assert!(crate::route_ix::build_dynamic_route_instruction(
+        &crate::PROGRAM_ID,
+        accounts(),
+        input,
+        100,
+        1,
+        1,
+        &pool.mint_b,
+        &first,
+        &second
+    )
+    .is_ok());
+    let mut missing = second.clone();
+    missing.accounts.pop();
+    assert!(crate::route_ix::build_dynamic_route_instruction(
+        &crate::PROGRAM_ID,
+        accounts(),
+        input,
+        100,
+        1,
+        1,
+        &pool.mint_b,
+        &first,
+        &missing
+    )
+    .is_err());
 }

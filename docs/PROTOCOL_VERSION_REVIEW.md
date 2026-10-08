@@ -64,8 +64,9 @@ Additional confirmed logic fixes:
 - PumpFun params retain fee-sharing creator-vault resolution, normalize native
   SOL sentinels, and reject completed curves. Unknown fee state can only bypass
   local quoting with an explicit final `min_out`; a bridge sell still requires
-  a quote in intermediate units. Pump 3.2.0 V3/post-completion/nested quote
-  routing is **not implemented** and is rejected rather than mapped to V1/V2.
+  a quote in intermediate units. Pump V3 now has a separate explicit API,
+  described below; the existing TradingClient does not automatically switch
+  versions or recursively fund nested quote tokens.
 - PumpSwap params retain current protocol/buyback recipient overrides. Event
   snapshots include cashback in the creator-side fee bucket; params already
   contain the combined bucket and are not charged twice.
@@ -223,3 +224,67 @@ GitHub Actions workflow, deployment or mainnet transaction was run.
 Follow-up review: all 5 OCR-selected files reviewed (4 Rust files plus the JSON
 source manifest; 5/5, 100%, no files skipped). The Markdown report was excluded
 by the extension filter and reviewed separately.
+
+
+## Explicit Pump V3 API and deployed-program verification
+
+`load_pumpfun_v3_by_rpc(rpc, mint, user)` loads `PumpFunV3Pool` from a
+coherent curve/Global/FeeConfig/mint/base-vault/user-volume batch after discovering
+quote mint and base mint owner. FeeConfig is mandatory. Both mint owners and
+extensions, vault mint/authority/state, and existing volume account ownership,
+discriminator and user are checked. Completed curves and cashback coins fail.
+Old curve extension and missing volume initialization are returned as setup
+instructions before the router's budget measurement.
+
+The API supports `buy_quote`, `buy_quote_for_tokens`, `build_buy_route`,
+`build_buy_exact_out_route`, and `build_sell_route`. The 17-account V3 ABI is
+independent of V1/V2: it omits the creator vault and ordinary fee recipient,
+and uses the curve/user base and quote ATAs, user volume, FeeConfig and buyback
+recipient. Token-quote recipients use canonical quote ATAs; native output binds
+the router System sentinel. Partial fill is always false. For token-quoted or
+nested curves these helpers settle in the quote token, which the caller must
+fund; recursive SOL acquisition is not implemented.
+
+V3 exact-quote-input buys can leave rounding dust. Their router route uses the
+existing maximum-input bit (historically named exact-out): total input debit is
+bounded by the declared budget, the router fee is charged on that full budget,
+and both DEX and router enforce the positive output minimum. V3 exact-output
+buys use the same maximum-input protection and serialize tokens then maximum
+quote cost. Sell routes retain exact debit equality. Setup rent is outside the
+trade input budget; `fee_bps` must match the deployed router config.
+
+Official 3.2.0 quotes include a pool-to-be leg when buying beyond the remaining
+curve supply. That math is implemented and unit-tested, but
+`supports_graduation` defaults to false in the cold loader and crossing builders
+fail unless the caller has verified and explicitly enabled the target deployment.
+The captured mainnet Pump ELF returns 6021 (`NotEnoughTokensToBuy`) for our
+non-Mayhem crossing fixture, including with realistic curve reserve invariants.
+This local observation does not prove every possible live crossing fails, and
+SDK publication alone does not establish deployed behavior.
+
+Local integration executes **both actual Pump ELF and repaired router ELF**
+with public mainnet Global/FeeConfig state captured at slot 454461315 and
+synthetic classic-token curves/accounts. It verifies V3 buy, exact-output buy,
+base-token router fees, native SOL sell, and graduation rejection with atomic
+rollback. The FeeConfig SOL tier is 95/30 bps; Global's 95/5 fallback is not used
+for V3. Pump ProgramData deployment slot: 452654932; captured ELF plus padding
+SHA256: `1023f7b01210f102713d52beff506ab1cc940246831a5128f004115e49c80f99`.
+Token-quoted/nested V3 account layouts and quotes have offline tests; complete
+execution on those paths and arbitrary Token-2022 extensions remain unverified.
+
+```sh
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so --exact-out
+python scripts/test-pump-v3-local.py /path/to/router.so /path/to/pump.so --graduation-rejection
+```
+
+Use solders 0.29.0. These scripts never call RPC or submit network transactions.
+The public fee fixture is `scripts/fixtures/pump-v3-mainnet-fees.json`. To verify
+a new deployment, supply its freshly downloaded ELF and re-evaluate graduation
+capability rather than treating a failed rejection assertion as an SDK regression.
+
+Whirlpool supplemental tick arrays are now accepted by both static and dynamic
+routes: 49-byte remaining slice encoding with official enum 6 and 1–3 writable
+arrays. Dynamic amount patching preserves that slice; malformed options, vector
+lengths, enum values, counts, truncated data and missing SDK accounts are tested.
+Transfer-hook slices remain outside the supported dynamic whitelist.

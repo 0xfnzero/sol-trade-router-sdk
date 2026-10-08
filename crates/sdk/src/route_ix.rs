@@ -39,6 +39,17 @@ struct DynamicLegLayout {
     minimum_accounts: usize,
 }
 
+fn whirlpool_dynamic_accounts(data: &[u8]) -> Option<usize> {
+    if data.len() == 43 && data[42] == 0 {
+        Some(15)
+    } else if data.len() == 49 && data[42..48] == [1, 1, 0, 0, 0, 6]
+        && (1..=3).contains(&data[48]) {
+        Some(15 + data[48] as usize)
+    } else {
+        None
+    }
+}
+
 fn dynamic_leg_layout(leg: &Leg) -> Result<DynamicLegLayout> {
     let data = &leg.data;
     let (input_account, output_account, signer, amount_offset, minimum_accounts) = if leg.program_id
@@ -80,16 +91,15 @@ fn dynamic_leg_layout(leg: &Leg) -> Result<DynamicLegLayout> {
     {
         (2, 3, 8, 8, 11)
     } else if leg.program_id == ORCA_WHIRLPOOL_PROGRAM
-        && data.len() == 43
+        && whirlpool_dynamic_accounts(data).is_some()
         && data[..8] == WHIRLPOOL_SWAP_V2
         && data[40] == 1
         && data[41] <= 1
-        && data[42] == 0
     {
         if data[41] == 1 {
-            (7, 9, 3, 8, 15)
+            (7, 9, 3, 8, whirlpool_dynamic_accounts(data).unwrap())
         } else {
-            (9, 7, 3, 8, 15)
+            (9, 7, 3, 8, whirlpool_dynamic_accounts(data).unwrap())
         }
     } else {
         bail!("dynamic leg must be a supported exact-input swap");
