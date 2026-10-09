@@ -5,9 +5,9 @@
 //! 1. `[]` config PDA (must be this program's PDA, owned by this program)
 //! 2. `[writable]` fee_destination
 //! 3. `[writable]` fee_source (SOL: user; Token: user ATA owned by user)
-//! 4. `[writable]` user_output_token (min_out check; must be a token account)
+//! 4. `[writable]` user_output_token (token account, or user for native SOL)
 //! 5. `[]` fee_program (System for SOL fee; SPL Token / Token-2022 for token fee)
-//!    6.. : remaining — concatenated per-leg AccountMetas, then optional DEX program ids
+//!    6.. : remaining — per-leg metas, optional DEX program ids and fee mint
 //!
 //! # Data (after 1-byte tag stripped by entrypoint)
 //! ```text
@@ -15,6 +15,7 @@
 //! min_amount_out: u64
 //! fee_asset: u8        // 0=SOL 1=SPL
 //! num_legs: u8
+//! output_mint: [u8;32] // SystemProgram (=0) means native SOL on user
 //! for each leg:
 //!   program_id: [u8;32]
 //!   num_accounts: u8
@@ -24,12 +25,11 @@
 //!
 //! # Fee integrity
 //! Fee = amount_in * fee_bps / 10_000 is taken from `fee_source` first.
-//! After all legs, `fee_source` balance must have decreased by **at least**
-//! `amount_in` (fee + spend share the same source). This prevents understating
-//! `amount_in` while routing a larger swap.
+//! Exact-in requires `fee_source` spend == `amount_in` (fee + swap).
+//! Exact-out requires fee <= spend <= amount_in (the declared max budget).
 //!
 //! The separate `ROUTE_DYNAMIC` tag keeps this legacy format intact. It adds
-//! `intermediate_min_out: u64` after `num_legs` and one writable intermediate
+//! `intermediate_min_out: u64` after `output_mint` and one writable intermediate
 //! token account after the six fixed accounts. It requires exactly two legs;
 //! the second must be LaunchLab buyExactIn or a supported exact-input pool swap.
 //!
@@ -62,6 +62,8 @@ use crate::{
 const MAX_LEGS: usize = 4;
 /// Must stay in sync with SDK `legs::MAX_LEG_ACCOUNTS`.
 const MAX_LEG_ACCOUNTS: usize = 64;
+/// Legacy tag-2 header: input(8), minimum(8), fee asset(1), legs(1), output mint(32).
+const ROUTE_HEADER_LEN: usize = 50;
 const LAUNCHLAB_PROGRAM_ID: [u8; 32] = [
     5, 4, 59, 149, 77, 202, 38, 225, 239, 145, 181, 44, 79, 143, 137, 175, 138, 111, 90, 200, 198,
     33, 86, 241, 113, 207, 15, 33, 172, 81, 201, 34,
@@ -100,7 +102,7 @@ const PUMPSWAP_SELL: [u8; 8] = [51, 230, 133, 164, 1, 127, 131, 173];
 const METEORA_DLMM_SWAP2: [u8; 8] = [65, 75, 63, 76, 235, 91, 91, 136];
 const CLMM_SWAP_V2: [u8; 8] = [43, 4, 237, 11, 26, 201, 30, 98];
 const NO_ACCOUNT: usize = usize::MAX;
-const MAX_DYNAMIC_LEG_DATA: usize = 43;
+const MAX_DYNAMIC_LEG_DATA: usize = 49;
 
 #[derive(Clone, Copy)]
 struct DynamicSecondLeg {
@@ -113,6 +115,12 @@ struct DynamicSecondLeg {
     output_mint: usize,
     output_program: usize,
     paired_mints: bool,
+}
+
+fn valid_whirlpool_remaining_accounts(data: &[u8]) -> bool {
+    (data.len() == 43 && data[42] == 0)
+        || (data.len() == 49 && data[42..48] == [1, 1, 0, 0, 0, 6]
+            && (1..=3).contains(&data[48]))
 }
 
 // Both dynamic hops use this DEX switch; keep one copy in the SBF binary.
@@ -226,11 +234,10 @@ fn dynamic_second_leg(program_id: &Address, data: &[u8]) -> Result<DynamicSecond
             paired_mints: true,
         })
     } else if addr_eq(program_id, &ORCA_WHIRLPOOL_PROGRAM_ID)
-        && data.len() == 43
+        && valid_whirlpool_remaining_accounts(data)
         && data[..8] == CLMM_SWAP_V2
         && data[40] == 1
         && data[41] <= 1
-        && data[42] == 0
     {
         let a_to_b = data[41] == 1;
         Ok(DynamicSecondLeg {
@@ -352,15 +359,66 @@ fn checked_fee(amount_in: u64, fee_bps: u16) -> Result<u64, ProgramError> {
     if fee_bps == 0 {
         return Ok(0);
     }
-    amount_in
-        .checked_mul(fee_bps as u64)
-        .and_then(|v| v.checked_div(10_000))
-        .ok_or_else(|| RouterError::ArithmeticOverflow.into())
+    let fee = amount_in as u128 * fee_bps as u128 / 10_000;
+    u64::try_from(fee).map_err(|_| RouterError::ArithmeticOverflow.into())
 }
 
 #[inline(always)]
 fn addr_eq(a: &Address, b: &[u8; 32]) -> bool {
     a.as_array() == b
+}
+
+#[inline(always)]
+fn validate_output(
+    user: &AccountView,
+    output: &AccountView,
+    expected_mint: &[u8; 32],
+    dynamic: bool,
+) -> Result<bool, ProgramError> {
+    let native_sol = *expected_mint == SYSTEM_PROGRAM_ID;
+    if native_sol {
+        // Dynamic routes settle only in tokens; native SOL must belong to the signer.
+        if dynamic || output.address() != user.address() {
+            return Err(RouterError::InvalidOutputAccount.into());
+        }
+    } else {
+        if !is_token_program(output.owner()) {
+            return Err(RouterError::InvalidOutputAccount.into());
+        }
+        if token_mint(output)?.as_array() != expected_mint {
+            return Err(RouterError::InvalidOutputMint.into());
+        }
+        if dynamic && token_owner(output)? != *user.address() {
+            return Err(RouterError::InvalidOutputAccount.into());
+        }
+    }
+    Ok(native_sol)
+}
+
+#[inline(always)]
+fn output_balance(output: &AccountView, native_sol: bool) -> Result<u64, ProgramError> {
+    if native_sol {
+        Ok(output.lamports())
+    } else {
+        token_amount(output)
+    }
+}
+
+#[inline(always)]
+fn validate_spend(
+    before: u64,
+    after: u64,
+    amount_in: u64,
+    fee: u64,
+    exact_out: bool,
+) -> ProgramResult {
+    let spent = before
+        .checked_sub(after)
+        .ok_or(RouterError::FeeSourceMismatch)?;
+    if (exact_out && (spent > amount_in || spent < fee)) || (!exact_out && spent != amount_in) {
+        return Err(RouterError::FeeSourceMismatch.into());
+    }
+    Ok(())
 }
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -391,7 +449,7 @@ fn process_inner(
 ) -> ProgramResult {
     let dynamic = dynamic_intermediates != 0;
     let three_hop = dynamic_intermediates == 2;
-    if data.len() < 18 + 8 * dynamic_intermediates {
+    if data.len() < ROUTE_HEADER_LEN + 8 * dynamic_intermediates {
         return Err(RouterError::InvalidInstructionData.into());
     }
 
@@ -399,8 +457,18 @@ fn process_inner(
     let min_amount_out = read_u64(data, 8)?;
     let fee_asset = data[16];
     let num_legs = data[17] as usize;
-    let intermediate_min_out = if dynamic { read_u64(data, 18)? } else { 0 };
-    let second_intermediate_min_out = if three_hop { read_u64(data, 26)? } else { 0 };
+    let mut expected_output_mint = [0u8; 32];
+    expected_output_mint.copy_from_slice(&data[18..ROUTE_HEADER_LEN]);
+    let intermediate_min_out = if dynamic {
+        read_u64(data, ROUTE_HEADER_LEN)?
+    } else {
+        0
+    };
+    let second_intermediate_min_out = if three_hop {
+        read_u64(data, ROUTE_HEADER_LEN + 8)?
+    } else {
+        0
+    };
 
     if amount_in == 0 {
         return Err(RouterError::InvalidInstructionData.into());
@@ -478,16 +546,19 @@ fn process_inner(
         return Err(RouterError::Paused.into());
     }
 
-    // Output must be a real token account (owner = Token / Token-2022).
-    if !is_token_program(user_output.owner()) {
-        return Err(RouterError::InvalidOutputAccount.into());
-    }
+    let native_sol_out = validate_output(user, user_output, &expected_output_mint, dynamic)?;
 
     let fee = checked_fee(amount_in, cfg.fee_bps)?;
 
     // Snapshot fee_source before fee + legs (C2).
     let fee_source_before = match fee_asset {
-        0 => fee_source.lamports(),
+        0 => {
+            // This binding also applies when rounding or a zero fee skips the fee CPI.
+            if fee_source.address() != user.address() {
+                return Err(RouterError::InvalidFeeAsset.into());
+            }
+            fee_source.lamports()
+        }
         1 => {
             if !is_token_program(fee_source.owner()) {
                 return Err(RouterError::InvalidFeeAsset.into());
@@ -545,18 +616,52 @@ fn process_inner(
                 if token_mint(fee_destination)? != token_mint(fee_source)? {
                     return Err(RouterError::InvalidFeeAsset.into());
                 }
-                // Program id already verified above (Token / Token-2022).
-                TokenTransfer::new(fee_source, fee_destination, user, fee)
-                    .invoke_with_unverified_program(fee_program.address())?;
+                // Token-2022 extensions such as TransferFeeAmount require the
+                // mint even for a platform fee. Locate it among leg accounts or
+                // the SDK's trailing metas, keeping all route ABIs unchanged.
+                let mint_address = token_mint(fee_source)?;
+                let mint = remaining.iter().find(|acc| acc.address() == &mint_address);
+                if let Some(mint) = mint.filter(|_| addr_eq(fee_program.address(), &TOKEN_2022_PROGRAM_ID)) {
+                    if mint.owner() != fee_program.address() {
+                        return Err(RouterError::InvalidFeeAsset.into());
+                    }
+                    let decimals = {
+                        let mint_data = mint.try_borrow()?;
+                        if mint_data.len() < 82 || mint_data[45] != 1 {
+                            return Err(RouterError::InvalidFeeAsset.into());
+                        }
+                        mint_data[44]
+                    };
+                    let mut transfer_data = [0u8; 10];
+                    transfer_data[0] = 12; // SPL Token TransferChecked
+                    transfer_data[1..9].copy_from_slice(&fee.to_le_bytes());
+                    transfer_data[9] = decimals;
+                    let metas = [
+                        InstructionAccount::new(fee_source.address(), true, false),
+                        InstructionAccount::new(mint.address(), false, false),
+                        InstructionAccount::new(fee_destination.address(), true, false),
+                        InstructionAccount::new(user.address(), false, true),
+                    ];
+                    invoke_with_slice(
+                        &InstructionView {
+                            program_id: fee_program.address(),
+                            accounts: &metas,
+                            data: &transfer_data,
+                        },
+                        &[fee_source.clone(), mint.clone(), fee_destination.clone(), user.clone()],
+                    )?;
+                } else {
+                    // Preserve old clients using extension-free token accounts.
+                    // Token-2022 itself rejects unchecked extension transfers.
+                    TokenTransfer::new(fee_source, fee_destination, user, fee)
+                        .invoke_with_unverified_program(fee_program.address())?;
+                }
             }
             _ => return Err(RouterError::InvalidFeeAsset.into()),
         }
     }
 
-    let output_before = token_amount(user_output)?;
-    if dynamic && token_owner(user_output)? != *user.address() {
-        return Err(RouterError::InvalidOutputAccount.into());
-    }
+    let output_before = output_balance(user_output, native_sol_out)?;
     let quote_before = if let Some(intermediate) = intermediate_acc.as_ref() {
         if !intermediate.is_writable()
             || !is_token_program(intermediate.owner())
@@ -588,7 +693,7 @@ fn process_inner(
     };
     let mut quote_received = 0u64;
 
-    let mut cursor = 18 + 8 * dynamic_intermediates;
+    let mut cursor = ROUTE_HEADER_LEN + 8 * dynamic_intermediates;
     let mut remaining_offset = 0usize;
 
     for leg_index in 0..num_legs {
@@ -742,25 +847,22 @@ fn process_inner(
     }
 
     // C2 fee integrity:
-    // - exact-in:  spent >= amount_in (prevent understating amount_in / fee evasion)
+    // - exact-in:  spent == amount_in (no overspend or understated fees)
     // - exact-out: spent <= amount_in (amount_in is max budget; DEX enforces exact out)
     let fee_source_after = match fee_asset {
         0 => fee_source.lamports(),
         1 => token_amount(fee_source)?,
         _ => return Err(RouterError::InvalidFeeAsset.into()),
     };
-    let spent = fee_source_before
-        .checked_sub(fee_source_after)
-        .ok_or(RouterError::FeeSourceMismatch)?;
-    if exact_out {
-        if spent > amount_in || spent < fee {
-            return Err(RouterError::FeeSourceMismatch.into());
-        }
-    } else if spent < amount_in {
-        return Err(RouterError::FeeSourceMismatch.into());
-    }
+    validate_spend(
+        fee_source_before,
+        fee_source_after,
+        amount_in,
+        fee,
+        exact_out,
+    )?;
 
-    let output_after = token_amount(user_output)?;
+    let output_after = output_balance(user_output, native_sol_out)?;
     let received = output_after.saturating_sub(output_before);
     if received < min_amount_out {
         return Err(RouterError::SlippageExceeded.into());
@@ -773,6 +875,224 @@ fn process_inner(
 mod tests {
     use super::*;
     use core::str::FromStr;
+    use pinocchio::account::{RuntimeAccount, NOT_BORROWED};
+
+    // RuntimeAccount is followed immediately by its data, as in the Solana ABI.
+    #[repr(C)]
+    struct Fixture {
+        raw: RuntimeAccount,
+        data: [u8; 80],
+    }
+
+    impl Fixture {
+        fn new(address: Address, owner: Address, signer: bool, data_len: u64) -> Self {
+            Self {
+                raw: RuntimeAccount {
+                    borrow_state: NOT_BORROWED,
+                    address,
+                    owner,
+                    is_signer: signer as u8,
+                    is_writable: 1,
+                    data_len,
+                    lamports: 1_000_000,
+                    ..Default::default()
+                },
+                data: [0; 80],
+            }
+        }
+
+        fn view(&mut self) -> AccountView {
+            // SAFETY: repr(C) ensures aligned metadata immediately followed by
+            // the data buffer; the fixture stays alive during every view use.
+            assert!(self.raw.data_len <= self.data.len() as u64);
+            unsafe { AccountView::new_unchecked(&mut self.raw) }
+        }
+    }
+
+    #[test]
+    fn exact_in_rejects_overspending_understatement_and_unspent_budget() {
+        let mismatch = Err(RouterError::FeeSourceMismatch.into());
+        // A 10,000-unit swap cannot be declared as 1 to round its 100-bps fee to zero.
+        let understated_fee = checked_fee(1, 100).unwrap();
+        assert_eq!(understated_fee, 0);
+        assert_eq!(
+            validate_spend(20_000, 10_000, 1, understated_fee, false),
+            mismatch
+        );
+        // Legitimate 100-bps fee and input spend total exactly 10,000.
+        assert_eq!(validate_spend(20_000, 10_000, 10_000, 100, false), Ok(()));
+        assert_eq!(validate_spend(20_000, 9_999, 10_000, 100, false), mismatch);
+        assert_eq!(validate_spend(20_000, 10_001, 10_000, 100, false), mismatch);
+        assert_eq!(validate_spend(20_000, 20_001, 10_000, 100, false), mismatch);
+    }
+
+    #[test]
+    fn exact_out_preserves_the_fee_floor_and_budget_ceiling() {
+        for bps in [0u16, 1, 25, 100, 1_000, 9_999, 10_000] {
+            let expected = (u64::MAX as u128 * bps as u128 / 10_000) as u64;
+            assert_eq!(checked_fee(u64::MAX, bps), Ok(expected));
+        }
+        assert_eq!(checked_fee(u64::MAX, u16::MAX), Err(RouterError::ArithmeticOverflow.into()));
+        let mismatch = Err(RouterError::FeeSourceMismatch.into());
+        assert_eq!(validate_spend(20_000, 19_900, 10_000, 100, true), Ok(()));
+        assert_eq!(validate_spend(20_000, 10_000, 10_000, 100, true), Ok(()));
+        assert_eq!(validate_spend(20_000, 19_901, 10_000, 100, true), mismatch);
+        assert_eq!(validate_spend(20_000, 9_999, 10_000, 100, true), mismatch);
+    }
+
+    #[test]
+    fn token_output_is_bound_to_the_expected_mint_in_every_route_mode() {
+        let user = Address::new_from_array([1; 32]);
+        let mint = [7; 32];
+        let mut payer = Fixture::new(user, Address::new_from_array(SYSTEM_PROGRAM_ID), true, 0);
+        for program in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] {
+            let mut output = Fixture::new(
+                Address::new_from_array([2; 32]),
+                Address::new_from_array(program),
+                false,
+                72,
+            );
+            output.data[..32].copy_from_slice(&mint);
+            output.data[32..64].copy_from_slice(user.as_array());
+            for dynamic in [false, true] {
+                assert_eq!(
+                    validate_output(&payer.view(), &output.view(), &mint, dynamic),
+                    Ok(false)
+                );
+                assert_eq!(
+                    validate_output(&payer.view(), &output.view(), &[8; 32], dynamic),
+                    Err(RouterError::InvalidOutputMint.into())
+                );
+            }
+            output.data[32..64].fill(9);
+            assert_eq!(
+                validate_output(&payer.view(), &output.view(), &mint, true),
+                Err(RouterError::InvalidOutputAccount.into())
+            );
+        }
+        // Keep the pre-dynamic error code stable for existing integrations.
+        assert_eq!(RouterError::InvalidOutputMint as u32, 18);
+    }
+
+    #[test]
+    fn native_sol_settlement_reads_signer_lamports_and_rejects_other_recipients() {
+        let user = Address::new_from_array([1; 32]);
+        let system = Address::new_from_array(SYSTEM_PROGRAM_ID);
+        let mut payer = Fixture::new(user, system, true, 0);
+        let mut other = Fixture::new(Address::new_from_array([2; 32]), system, false, 0);
+        assert_eq!(
+            validate_output(&payer.view(), &payer.view(), &SYSTEM_PROGRAM_ID, false),
+            Ok(true)
+        );
+        assert_eq!(
+            validate_output(&payer.view(), &other.view(), &SYSTEM_PROGRAM_ID, false),
+            Err(RouterError::InvalidOutputAccount.into())
+        );
+        assert_eq!(
+            validate_output(&payer.view(), &payer.view(), &SYSTEM_PROGRAM_ID, true),
+            Err(RouterError::InvalidOutputAccount.into())
+        );
+        let before = output_balance(&payer.view(), true).unwrap();
+        payer.raw.lamports += 500;
+        assert_eq!(output_balance(&payer.view(), true).unwrap() - before, 500);
+    }
+
+    #[test]
+    fn legacy_native_sol_header_reaches_leg_parsing() {
+        let user = Address::new_from_array([1; 32]);
+        let system = Address::new_from_array(SYSTEM_PROGRAM_ID);
+        let (config, bump) = crate::state::config_pda(&crate::ID);
+        let mut payer = Fixture::new(user, system, true, 0);
+        let mut cfg = Fixture::new(config, crate::ID, false, RouterConfig::LEN as u64);
+        RouterConfig::write_new(&mut cfg.view(), user, user, 0, bump).unwrap();
+        let mut destination = Fixture::new(Address::new_from_array([2; 32]), system, false, 0);
+        let mut source = Fixture::new(
+            Address::new_from_array([3; 32]),
+            Address::new_from_array(TOKEN_PROGRAM_ID),
+            false,
+            72,
+        );
+        source.data[..32].fill(7);
+        source.data[32..64].copy_from_slice(user.as_array());
+        let mut fee_program =
+            Fixture::new(Address::new_from_array(TOKEN_PROGRAM_ID), system, false, 0);
+        let mut accounts = [
+            payer.view(),
+            cfg.view(),
+            destination.view(),
+            source.view(),
+            payer.view(),
+            fee_program.view(),
+        ];
+        let mut data = [0u8; ROUTE_HEADER_LEN];
+        data[..8].copy_from_slice(&1u64.to_le_bytes());
+        data[8..16].copy_from_slice(&1u64.to_le_bytes());
+        data[16] = 1;
+        data[17] = 1;
+        // Deliberately omit the CPI leg: InvalidLeg proves native output passed validation.
+        assert_eq!(
+            process(&crate::ID, &mut accounts, &data),
+            Err(RouterError::InvalidLeg.into())
+        );
+        // A SOL fee source must remain the signer, even with fee_bps=0.
+        data[16] = 0;
+        assert_eq!(
+            process(&crate::ID, &mut accounts, &data),
+            Err(RouterError::InvalidFeeAsset.into())
+        );
+    }
+
+    #[test]
+    fn every_route_header_rejects_a_substituted_output_mint_before_cpi() {
+        let user = Address::new_from_array([1; 32]);
+        let system = Address::new_from_array(SYSTEM_PROGRAM_ID);
+        let token = Address::new_from_array(TOKEN_PROGRAM_ID);
+        let (config, bump) = crate::state::config_pda(&crate::ID);
+        let mut payer = Fixture::new(user, system, true, 0);
+        let mut cfg = Fixture::new(config, crate::ID, false, RouterConfig::LEN as u64);
+        RouterConfig::write_new(&mut cfg.view(), user, user, 0, bump).unwrap();
+        let mut destination = Fixture::new(Address::new_from_array([2; 32]), token, false, 72);
+        let mut source = Fixture::new(Address::new_from_array([3; 32]), token, false, 72);
+        let mut output = Fixture::new(Address::new_from_array([4; 32]), token, false, 72);
+        let mut first = Fixture::new(Address::new_from_array([5; 32]), token, false, 72);
+        let mut second = Fixture::new(Address::new_from_array([6; 32]), token, false, 72);
+        for fixture in [&mut source, &mut output, &mut first, &mut second] {
+            fixture.data[..32].fill(7);
+            fixture.data[32..64].copy_from_slice(user.as_array());
+        }
+        let mut fee_program = Fixture::new(token, system, false, 0);
+        for intermediates in 0..=2 {
+            let mut accounts = [
+                payer.view(),
+                cfg.view(),
+                destination.view(),
+                source.view(),
+                output.view(),
+                fee_program.view(),
+                first.view(),
+                second.view(),
+            ];
+            let mut data = [0u8; ROUTE_HEADER_LEN + 16];
+            data[..8].copy_from_slice(&1u64.to_le_bytes());
+            data[8..16].copy_from_slice(&1u64.to_le_bytes());
+            data[16] = 1;
+            data[17] = (intermediates + 1) as u8;
+            data[18..50].fill(8); // Declared mint differs from the actual mint [7;32].
+            data[50..58].copy_from_slice(&1u64.to_le_bytes());
+            data[58..66].copy_from_slice(&1u64.to_le_bytes());
+            let len = ROUTE_HEADER_LEN + 8 * intermediates;
+            assert_eq!(
+                process_inner(&crate::ID, &mut accounts, &data[..len], intermediates),
+                Err(RouterError::InvalidOutputMint.into())
+            );
+            data[18..50].fill(7);
+            // No CPI leg is provided; reaching its parser proves header/account acceptance.
+            assert_eq!(
+                process_inner(&crate::ID, &mut accounts, &data[..len], intermediates),
+                Err(RouterError::InvalidLeg.into())
+            );
+        }
+    }
 
     #[test]
     fn stored_config_bump_recreates_the_canonical_pda() {
@@ -832,6 +1152,30 @@ mod tests {
         ] {
             assert_eq!(Address::from_str(name).unwrap().as_array(), expected);
         }
+    }
+
+    #[test]
+    fn dynamic_whirlpool_preserves_and_validates_supplemental_slice() {
+        let program = Address::new_from_array(ORCA_WHIRLPOOL_PROGRAM_ID);
+        let mut data = [0u8; 49];
+        data[..8].copy_from_slice(&CLMM_SWAP_V2);
+        data[40] = 1;
+        data[41] = 1;
+        data[42..48].copy_from_slice(&[1, 1, 0, 0, 0, 6]);
+        for count in 1..=3 {
+            data[48] = count;
+            let layout = dynamic_second_leg(&program, &data).unwrap();
+            let mut buffer = [0u8; MAX_DYNAMIC_LEG_DATA];
+            let patched = patch_second_leg_amount(&data, 123, layout.amount_offset, &mut buffer);
+            assert_eq!(read_u64(patched, 8).unwrap(), 123);
+            assert_eq!(&patched[16..], &data[16..]);
+        }
+        for (index, value) in [(42, 0), (43, 2), (47, 0), (48, 0), (48, 4)] {
+            let mut invalid = data;
+            invalid[index] = value;
+            assert!(dynamic_second_leg(&program, &invalid).is_err());
+        }
+        assert!(dynamic_second_leg(&program, &data[..48]).is_err());
     }
 
     #[test]

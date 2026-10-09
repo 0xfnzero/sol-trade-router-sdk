@@ -61,7 +61,7 @@
 4. **Full DexType parity** — PumpFun, PumpSwap, LaunchLab/StonkFun/Bonk, Raydium CPMM / AMM V4 / CLMM, Orca Whirlpool, Meteora DLMM / DAMM V2
 5. **Zero-RPC pool snapshots** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
 6. **ATA policy** — WSOL / quote on the cold path; meme ATA in the buy tx
-7. **Fee integrity** — on-chain `fee_source` spend ≥ `amount_in` (fee + swap)
+7. **Spend / output integrity** — exact-in spend == `amount_in` (fee + swap); exact-out spend stays within budget; expected output mint / native SOL and `min_out` are checked
 8. **Pool guard** — optional PDA / allowlist / `stonk_strict`
 
 ## 📚 Documentation
@@ -77,23 +77,21 @@ Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Tradin
 
 ## 📦 Installation
 
-This workspace client crate is currently **`publish = false`**. Depend on a git checkout (or path):
+The client is prepared for crates.io as version **0.2.0**. Until that version is published, use the `main` Git branch:
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
-# Streaming bots only — declare if you `use sol_parser_sdk::...`:
-sol-parser-sdk = "0.7.6"
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
+# After publication: sol-trade-router-sdk = "=0.2.0"
+# Streaming bots only, if importing parser types directly:
+sol-parser-sdk = "=0.7.12"
 ```
 
-Transitive crates.io deps (pulled automatically):
+Dependencies use published **sol-trade-sdk 6.0.0** and **sol-parser-sdk 0.7.12**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
 
-| Crate | Version | Role |
-|-------|---------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS submit, params, infra (re-exported) |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred events (direct dep only if you subscribe) |
+See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
 
-Do **not** add `sol-trade-sdk` to your `Cargo.toml` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
+Do **not** add `sol-trade-sdk` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
 
 ## 🆚 vs sol-trade-sdk
 
@@ -199,6 +197,10 @@ let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
 | Quote token | `buy_with_token` | `sell_to_token` |
 
+When reusing `TradeOpts`, selecting `sell_to_wsol()` or `sell_to_token(...)` clears
+the WSOL close set by `sell_to_sol()`. Apply an explicit `close_wsol(...)` or
+`with_ata(...)` override after selecting the destination.
+
 ### 3. Markets from events / params
 
 ```rust
@@ -221,6 +223,28 @@ let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```rust
 client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
+
+For SOL-paired Pump curves with `use_v2=true`, prepare `BuyWith::Wsol` or
+`SellTo::Wsol` to create the required WSOL ATAs. Native SOL settlement still
+skips them; V1 curves reject WSOL settlement.
+
+In `TradeBuyParams` / `TradeSellParams`, `TradeTokenType::Token(WSOL_MINT)`
+uses the same WSOL account creation and close flags as `TradeTokenType::WSOL`.
+For native SOL sells, `close_output_token_ata=true` unwraps the WSOL output.
+
+Router trades and balance queries use standard ATAs for both Token and Token-2022,
+even when the shared trade configuration enables `use_seed_optimize`.
+
+PumpFun/PumpSwap `BuyAmount::WithMaxInput` (`use_exact_sol_amount=false`)
+is not implemented by the high-level Router client and returns an error.
+Use exact-input sizing or a supported fixed-output target; the latter takes precedence.
+
+`TradeBuyParams` / `TradeSellParams` must name the selected market target in `mint`,
+and `dex_type` must match `extension_params`. Build-only methods reject mismatches too.
+
+For native SOL buys, an explicit `close_input_token_ata=true` closes a touched WSOL ATA
+after the route, returning its rent and all remaining WSOL as SOL. Direct native-SOL
+PumpFun routes do not touch or close the WSOL ATA.
 
 ### 5. Admin (after deploy)
 

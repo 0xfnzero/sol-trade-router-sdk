@@ -1,0 +1,37 @@
+   Compiling sol-trade-router-sdk v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/crates/sdk)
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sol-trade-router-sdk` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.51s
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router_sdk-5225f172ff08f755)
+
+running 2 tests
+
+thread 'offline_tests::offline_whirlpool_owner_overlay_preserves_independently_known_side' (50021350) panicked at crates/sdk/src/offline_tests.rs:2585:9:
+assertion `left == right` failed: foreign Whirlpool event mutated snapshot
+  left: "WhirlpoolPool { whirlpool: 11157t3sqMV725NVRLrVQbAu98Jjfk1uCKehJnXXQs, mint_a: So11111111111111111111111111111111111111112, mint_b: 1117mWrzzrZr312ebPDHu8tbfMwFNvCvMbr6WepCNG, vault_a: 1119DWteoLSdjvrT6g6L8C2PfDD2faiTQUpsjY2RiF, vault_b: 111BuZ6b86gm7XhxjvTakhRvxSMjXp2GqgifkNUmDK, token_program_a: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, token_program_b: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb, tick_arrays: [111buTJDRoVnAuqg2RiXyiYFLbyHXBXSuEjLFdarkn, 111fcLTw6cc4kfAF9UhCriFQVbAMbL5WGR2Fn9G5eR, 111gbUgQk1ZFzZAQ2u4VePsUmmbjvubFCb4fwnFfhB], quoted_amount_in: Some(100), quoted_input_mint: None, expected_out: None, fee_bps: 30 }"
+ right: "WhirlpoolPool { whirlpool: 11157t3sqMV725NVRLrVQbAu98Jjfk1uCKehJnXXQs, mint_a: So11111111111111111111111111111111111111112, mint_b: 1117mWrzzrZr312ebPDHu8tbfMwFNvCvMbr6WepCNG, vault_a: 1119DWteoLSdjvrT6g6L8C2PfDD2faiTQUpsjY2RiF, vault_b: 111BuZ6b86gm7XhxjvTakhRvxSMjXp2GqgifkNUmDK, token_program_a: 11111111111111111111111111111111, token_program_b: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb, tick_arrays: [111FJo4zLAGU9nzTWa6EnbV4VAmtG4FR8kcokrtZYr, 111FJo4zLAGU9nzTWa6EnbV4VAmtG4FR8kcokrtZYr, 111FJo4zLAGU9nzTWa6EnbV4VAmtG4FR8kcokrtZYr], quoted_amount_in: Some(1000000), quoted_input_mint: Some(So11111111111111111111111111111111111111112), expected_out: Some(400000), fee_bps: 30 }"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test offline_tests::offline_whirlpool_owner_overlay_preserves_independently_known_side ... FAILED
+
+thread 'offline_tests::offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees' (50021349) panicked at crates/sdk/src/offline_tests.rs:2538:9:
+assertion `left == right` failed: foreign CLMM event mutated snapshot
+  left: "RaydiumClmmPool { amm_config: 111wPYuG9TUUbFiBH6uVgJYm6vqtrJGJa5z4Z59JEU, pool_state: 111JV6iBiRLoJUtNieRJ9QmcpE2KPE3gLpDzAUkbNW, observation_state: 111yMN5Kh2iNCz4U9jd5f3Z1H4YxUCjuQpQZEysRtr, token_0_mint: 111MqiH3tDg8KtkQYkCteems4APA9GgUsEFQavs8Vb, token_1_mint: So11111111111111111111111111111111111111112, token_0_vault: 111Q7zKqw7vEw6U5Mf3qDU1UrV3MRubjPcCrT1QftA, token_1_vault: 111S1d9dJA6NS2j95MQ7A2eDjAgdAKXDjvxQg5d8pa, token_0_program: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb, token_1_program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, tick_arrays: [111nsfrnL7NwUjsqEJscfSDLfzgSfKBcRQyUF5e2oa, 111qxZYJ3VzBZqvrCDn2vHDtMBGYBNmZmYuKYA4ZiK, 111tJmbDARYy2527cTtrfboCD34b8HcutcUi3okWXN], tick_array_bitmap_extension: Some(11121XYqzR1aA2R3CVQzggS1YLKBHnddtjqMoa4EHyu), quoted_amount_in: Some(100), quoted_input_mint: None, expected_out: None, fee_bps: 0 }"
+ right: "RaydiumClmmPool { amm_config: 11111111111111111111111111111111, pool_state: 111JV6iBiRLoJUtNieRJ9QmcpE2KPE3gLpDzAUkbNW, observation_state: 11111111111111111111111111111111, token_0_mint: 111MqiH3tDg8KtkQYkCteems4APA9GgUsEFQavs8Vb, token_1_mint: So11111111111111111111111111111111111111112, token_0_vault: 111Q7zKqw7vEw6U5Mf3qDU1UrV3MRubjPcCrT1QftA, token_1_vault: 111S1d9dJA6NS2j95MQ7A2eDjAgdAKXDjvxQg5d8pa, token_0_program: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb, token_1_program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, tick_arrays: [111V4D5zGGPzhpX2QHduCfQfYQLv3gY5jrvGPnWRff, 111V4D5zGGPzhpX2QHduCfQfYQLv3gY5jrvGPnWRff, 111V4D5zGGPzhpX2QHduCfQfYQLv3gY5jrvGPnWRff], tick_array_bitmap_extension: None, quoted_amount_in: None, quoted_input_mint: Some(111MqiH3tDg8KtkQYkCteems4APA9GgUsEFQavs8Vb), expected_out: Some(50), fee_bps: 0 }"
+test offline_tests::offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees ... FAILED
+
+failures:
+
+failures:
+    offline_tests::offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees
+    offline_tests::offline_whirlpool_owner_overlay_preserves_independently_known_side
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 172 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p sol-trade-router-sdk --lib`

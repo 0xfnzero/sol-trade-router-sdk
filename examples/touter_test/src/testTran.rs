@@ -15,7 +15,7 @@ const INPUT_MINT: Pubkey = pubkey!("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
 const OUTPUT_MINT: Pubkey = pubkey!("5HcMuG7toPaAEQLJSsWZVZG9v4wtTUca5MZvBZeoXQxQ");
 
 // 本示例只接受：Route(tag=2) 中的单个 Orca swap_v2 leg。
-const ROUTE_LEG_DATA_OFFSET: usize = 54;
+const ROUTE_LEG_DATA_OFFSET: usize = 86;
 const ORCA_SWAP_V2_DATA_LEN: usize = 43;
 
 fn load_authority() -> anyhow::Result<Keypair> {
@@ -62,10 +62,14 @@ fn orca_data_range(ix: &Instruction) -> anyhow::Result<std::ops::Range<usize>> {
     ensure!(data.len() >= ROUTE_LEG_DATA_OFFSET, "Router data 过短");
     ensure!(data[0] == 2 && data[18] == 1, "仅支持单跳 Route 指令");
     ensure!(
-        &data[19..51] == ORCA_WHIRLPOOL_PROGRAM.as_ref(),
+        &data[19..51] == OUTPUT_MINT.as_ref(),
+        "Router 目标 mint 不匹配"
+    );
+    ensure!(
+        &data[51..83] == ORCA_WHIRLPOOL_PROGRAM.as_ref(),
         "内层程序不是 Orca Whirlpool"
     );
-    let len = u16::from_le_bytes([data[52], data[53]]) as usize;
+    let len = u16::from_le_bytes([data[84], data[85]]) as usize;
     ensure!(
         len == ORCA_SWAP_V2_DATA_LEN,
         "预期 Orca swap_v2 data 为 43 字节，实际 {len}"
@@ -183,8 +187,8 @@ async fn main() -> anyhow::Result<()> {
         },
         &authority_pubkey,
     )
-        .await
-        .context("加载 Orca 池参数失败")?;
+    .await
+    .context("加载 Orca 池参数失败")?;
     let input_token_program = match &mut market.market {
         Market::Whirlpool(pool) => {
             ensure!(pool.whirlpool == pool_address, "加载的池地址不匹配");

@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-09",
+  "base_reviewed_head": "4e5c4e26b5029841bdf244dbbb33318f69173d58",
+  "workspace_tests_passed": 111,
+  "sdk_package_tests_passed": 93,
+  "ignored_live_tests": 81,
+  "ignored_doctests": 1,
+  "vm": {
+    "security": 15,
+    "multihop": 40,
+    "pump_native_rent": 86,
+    "pump_disabled_hook": 6
+  },
+  "release_check_exit_code": 0,
+  "live_smoke": {
+    "status": "unavailable",
+    "test": "mainnet_sim_tests::mainnet_sim_pumpfun_buy_v1",
+    "reason": "get_slot transport failure after three RPC attempts; not a passing live simulation"
+  },
+  "router_sha256": "9fce64e47706c4bb2dbacee46be95b9dc90d1ff0540c9637b3dcca9183c95924",
+  "pump_sha256": "a4b32d322295a15666b1293e0028b9b75d688bfce10b574e1094f249f2ce9f16",
+  "fee_program_sha256": "73c679c8dae8d24153fdd0455b557b73662e93ab2ec88831a9e4be2b08a897a4",
+  "mock_dex_scope": "Synthetic 2:1 price, genuine SPL/Token-2022 transfer CPIs; Router accounting and rollback only",
+  "external_program_scope": "Captured Pump and fee-program ELF against constructed state; not live mainnet coverage",
+  "deployed": false,
+  "published": false
+}

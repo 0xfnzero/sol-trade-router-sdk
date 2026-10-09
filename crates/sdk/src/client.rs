@@ -260,12 +260,19 @@ impl TradingClient {
     }
 
     /// Build Route instructions without submitting (simulate / custom send).
+    /// Validates protocol type and binds the requested mint to the routed target.
+    /// Regular Pump `use_exact_sol_amount=false` sizing is unsupported unless
+    /// a supported fixed-output target takes precedence; it returns an error.
     pub fn build_buy_instructions(&self, params: &TradeBuyParams) -> Result<Vec<Instruction>> {
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!("Invalid protocol params for Trade (dex={:?})", params.dex_type));
+        }
         let market = to_routed_market_for_user(
             &params.extension_params,
             params.mint,
             &self.payer.pubkey(),
         )?;
+        validate_requested_mint(&market, params.mint)?;
         let opts = buy_opts_from_params(params)?;
         Ok(self
             .router
@@ -273,12 +280,17 @@ impl TradingClient {
             .into_instructions())
     }
 
+    /// Build sell instructions after validating protocol type and requested mint.
     pub fn build_sell_instructions(&self, params: &TradeSellParams) -> Result<Vec<Instruction>> {
+        if !validate_protocol_params(params.dex_type, &params.extension_params) {
+            return Err(anyhow!("Invalid protocol params for Trade (dex={:?})", params.dex_type));
+        }
         let market = to_routed_market_for_user(
             &params.extension_params,
             params.mint,
             &self.payer.pubkey(),
         )?;
+        validate_requested_mint(&market, params.mint)?;
         let opts = sell_opts_from_params(params)?;
         Ok(self
             .router
@@ -413,8 +425,9 @@ impl TradingClient {
         self.router.sell_with_opts(amount_in, market, opts)
     }
 
-    /// Query payer token balance with the same ATA derivation used on the trade path
-    /// (including seed-optimized ATAs when enabled). Prefer cold-path / post-confirm use only.
+    /// Query the standard ATA used by Router trades, including Token-2022.
+    /// Router account derivation does not use `use_seed_optimize`.
+    /// Prefer cold-path / post-confirm use only.
     pub async fn get_payer_token_balance_with_program(
         &self,
         mint: &Pubkey,
@@ -425,7 +438,7 @@ impl TradingClient {
             &self.payer.pubkey(),
             mint,
             token_program,
-            self.use_seed_optimize,
+            false, // Router legs and preparation always use the standard ATA.
         )
         .await?)
     }
@@ -557,46 +570,45 @@ fn trade_token_to_sell_to(t: TradeTokenType) -> SellTo {
 }
 
 fn buy_ata_policy(params: &TradeBuyParams) -> AtaPolicy {
+    let asset = trade_token_to_buy_with(params.input_token_type);
     AtaPolicy {
         create_meme: params.create_mint_ata,
         create_wsol: params.create_input_token_ata
-            && matches!(
-                params.input_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         create_quote: params.create_input_token_ata
-            && !matches!(
-                params.input_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && !matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         close_wsol: params.close_input_token_ata
-            && matches!(params.input_token_type, TradeTokenType::WSOL),
+            && matches!(asset, BuyWith::Sol | BuyWith::Wsol),
         close_meme: false,
         close_quote: false,
     }
 }
 
 fn sell_ata_policy(params: &TradeSellParams) -> AtaPolicy {
+    let asset = trade_token_to_sell_to(params.output_token_type);
     AtaPolicy {
         create_meme: false,
         create_wsol: params.create_output_token_ata
-            && matches!(
-                params.output_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && matches!(asset, SellTo::Sol | SellTo::Wsol),
         create_quote: params.create_output_token_ata
-            && !matches!(
-                params.output_token_type,
-                TradeTokenType::SOL | TradeTokenType::WSOL
-            ),
+            && !matches!(asset, SellTo::Sol | SellTo::Wsol),
         close_wsol: params.close_output_token_ata
-            && matches!(params.output_token_type, TradeTokenType::WSOL),
+            && matches!(asset, SellTo::Sol | SellTo::Wsol),
         close_meme: params.close_mint_token_ata,
         close_quote: false,
     }
 }
 
-fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
+pub(crate) fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
+    if params.use_exact_sol_amount == Some(false)
+        && params.fixed_output_token_amount.is_none()
+        && matches!(params.dex_type, DexType::PumpFun | DexType::PumpSwap)
+    {
+        return Err(anyhow!(
+            "Router does not support use_exact_sol_amount=false for regular Pump buys; \
+             use exact-input sizing or a supported fixed-output target"
+        ));
+    }
     let mut opts = TradeOpts::default()
         .with_slippage_bps(params.slippage_basis_points.unwrap_or(100))
         .with_ata(buy_ata_policy(params));
@@ -607,7 +619,7 @@ fn buy_opts_from_params(params: &TradeBuyParams) -> Result<TradeOpts> {
     Ok(opts)
 }
 
-fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
+pub(crate) fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
     let mut opts = TradeOpts::default()
         .with_slippage_bps(params.slippage_basis_points.unwrap_or(100))
         .with_ata(sell_ata_policy(params));
@@ -616,6 +628,15 @@ fn sell_opts_from_params(params: &TradeSellParams) -> Result<TradeOpts> {
         opts = opts.with_fixed_output(fixed);
     }
     Ok(opts)
+}
+
+// Bind user intent after market resolution, before fee/leg construction.
+fn validate_requested_mint(market: &RoutedMarket, mint: Pubkey) -> Result<()> {
+    if market.meme_mint() != mint {
+        return Err(anyhow!("requested mint {} does not match routed target {}",
+            mint, market.meme_mint()));
+    }
+    Ok(())
 }
 
 /// Validate that `dex_type` matches `extension_params` (mirrors trade-sdk).

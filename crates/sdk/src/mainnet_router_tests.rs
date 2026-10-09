@@ -4,20 +4,18 @@
 //! 1. `create_wallet()` — ephemeral Keypair (never a real private key)
 //! 2. Virtually fund from a mainnet whale (`sigVerify=false`)
 //! 3. Build Route ix via `RouterClient` (assert `PROGRAM_ID`)
-//! 4. Simulate Route tx (Soft if router program not deployed yet)
+//! 4. Simulate Route tx; execution failure does not count as success
 //! 5. Also simulate equivalent direct DEX legs (real layout coverage)
 //!
 //! ```bash
-//! RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk mainnet_router -- --nocapture --test-threads=1
+//! cargo test -p sol-trade-router-sdk mainnet_router -- --ignored --nocapture --test-threads=1
 //! ```
 
 #![cfg(test)]
 
 use sol_parser_sdk::core::events::DexEvent;
+use sol_trade_sdk::trading::core::params::{DexParamEnum, RaydiumCpmmParams, StonkFunViaSolParams};
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
-use sol_trade_sdk::trading::core::params::{
-    DexParamEnum, RaydiumCpmmParams, StonkFunViaSolParams,
-};
 
 use crate::adapter::to_routed_market_for_user;
 use crate::ata::{ata, create_ata, create_wsol_ata, wrap_sol, AtaPolicy};
@@ -27,9 +25,9 @@ use crate::legs::{
     raydium_amm_v4_swap_leg,
 };
 use crate::mainnet_sim::{
-    assert_route_ix, assert_sim_ok, create_wallet, create_wallets, enabled, fill_amm_v4_mints,
-    fixtures, load_cpmm_pool, load_pumpswap_pool, require_rpc, rpc, router_program_deployed,
-    scan_events, simulate_built_trade, simulate_legs_funded, soft_coverage, SimVerdict,
+    assert_route_ix, assert_sim_ok, create_wallet, create_wallets, fill_amm_v4_mints, fixtures,
+    load_cpmm_pool, load_pumpswap_pool, require_rpc, router_program_deployed, rpc, scan_events,
+    simulate_built_trade, simulate_legs_funded, soft_coverage, SimVerdict,
 };
 use crate::market::{Market, RoutedMarket};
 use crate::parser::{amm_v4_from_swap, launchlab_from_trade, pumpswap_from_buy};
@@ -115,10 +113,8 @@ fn cpmm_to_params(pool: &crate::market::CpmmPool) -> RaydiumCpmmParams {
 // ─── Wallet creation ─────────────────────────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_creates_many_unique_wallets_and_funds() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -144,20 +140,16 @@ fn mainnet_router_creates_many_unique_wallets_and_funds() {
 // ─── CPMM via RouterClient ───────────────────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_cpmm_wsol_stonk_buy() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM)
-        .expect("load WSOL_STONK_CPMM fixture");
+    let pool =
+        load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM).expect("load WSOL_STONK_CPMM fixture");
     let meme = pool.meme_mint();
-    let meme_tp = pool
-        .token_program_for(&meme)
-        .unwrap_or(TOKEN_PROGRAM);
+    let meme_tp = pool.token_program_for(&meme).unwrap_or(TOKEN_PROGRAM);
     let amount = 50_000u64;
 
     let wallet = create_wallet();
@@ -169,6 +161,7 @@ fn mainnet_router_cpmm_wsol_stonk_buy() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -203,23 +196,21 @@ fn mainnet_router_cpmm_wsol_stonk_buy() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_cpmm_exact_out_buy() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM)
-        .expect("load WSOL_STONK_CPMM fixture");
+    let pool =
+        load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM).expect("load WSOL_STONK_CPMM fixture");
     let meme = pool.meme_mint();
-    let meme_tp = pool
-        .token_program_for(&meme)
-        .unwrap_or(TOKEN_PROGRAM);
+    let meme_tp = pool.token_program_for(&meme).unwrap_or(TOKEN_PROGRAM);
     let max_in = 200_000u64;
     // Small exact-out target relative to reserves.
-    let amount_out = (pool.quote_reserve.min(pool.base_reserve) / 1_000_000).max(1).min(1_000);
+    let amount_out = (pool.quote_reserve.min(pool.base_reserve) / 1_000_000)
+        .max(1)
+        .min(1_000);
 
     let wallet = create_wallet();
     let user = wallet.pubkey();
@@ -229,6 +220,7 @@ fn mainnet_router_cpmm_exact_out_buy() {
             max_in,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_fixed_output(amount_out)
                 .with_ata(route_buy_ata()),
@@ -262,16 +254,14 @@ fn mainnet_router_cpmm_exact_out_buy() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_cpmm_buy_sell_roundtrip() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_CARDS_CPMM)
-        .expect("load WSOL_CARDS_CPMM fixture");
+    let pool =
+        load_cpmm_pool(&client, &fixtures::WSOL_CARDS_CPMM).expect("load WSOL_CARDS_CPMM fixture");
     let amount = 50_000u64;
 
     let wallet = create_wallet();
@@ -283,6 +273,7 @@ fn mainnet_router_cpmm_buy_sell_roundtrip() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -298,7 +289,7 @@ fn mainnet_router_cpmm_buy_sell_roundtrip() {
         .sell_with_opts(
             sell_amt,
             &market,
-            TradeOpts::default().sell_to_wsol(),
+            TradeOpts::default().with_min_out(1).sell_to_wsol(),
         )
         .expect("sell");
     assert_route_ix(&sell, "router_cpmm_cards_sell");
@@ -319,10 +310,8 @@ fn mainnet_router_cpmm_buy_sell_roundtrip() {
 // ─── PumpSwap via RouterClient ───────────────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpswap_buy() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -341,6 +330,7 @@ fn mainnet_router_pumpswap_buy() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -362,16 +352,14 @@ fn mainnet_router_pumpswap_buy() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpswap_exact_out_buy() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_pumpswap_pool(&client, &fixtures::PUMPSWAP_POOL)
-        .expect("load pumpswap fixture");
+    let pool =
+        load_pumpswap_pool(&client, &fixtures::PUMPSWAP_POOL).expect("load pumpswap fixture");
     let max_quote = 500_000u64;
     let base_out = (pool.base_reserve / 1_000_000).max(1).min(10_000);
 
@@ -383,6 +371,7 @@ fn mainnet_router_pumpswap_exact_out_buy() {
             max_quote,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_fixed_output(base_out)
                 .with_ata(route_buy_ata()),
@@ -408,18 +397,16 @@ fn mainnet_router_pumpswap_exact_out_buy() {
 // ─── ViaSol (graduated CPMM + SOL hop) ───────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_stonk_viasol_graduated() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
     let meme_pool = load_cpmm_pool(&client, &fixtures::GRAD_POOL)
         .expect("load GRAD_POOL (graduated StonkFun CPMM)");
-    let bridge = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM)
-        .expect("load WSOL_STONK_CPMM bridge");
+    let bridge =
+        load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM).expect("load WSOL_STONK_CPMM bridge");
     let amount = 100_000u64;
 
     let wallet = create_wallet();
@@ -430,6 +417,7 @@ fn mainnet_router_stonk_viasol_graduated() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_sol()
                 .with_ata(viasol_buy_ata()),
         )
@@ -466,10 +454,8 @@ fn mainnet_router_stonk_viasol_graduated() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_stonk_viasol_curve_from_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -517,6 +503,7 @@ fn mainnet_router_stonk_viasol_curve_from_events() {
                 100_000,
                 &market,
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_sol()
                     .with_ata(viasol_buy_ata()),
             ) {
@@ -543,10 +530,8 @@ fn mainnet_router_stonk_viasol_curve_from_events() {
 // ─── Adapter DexParamEnum → RouterClient ─────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_adapter_cpmm_params_roundtrip() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -563,6 +548,7 @@ fn mainnet_router_adapter_cpmm_params_roundtrip() {
             50_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -575,10 +561,8 @@ fn mainnet_router_adapter_cpmm_params_roundtrip() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_adapter_viasol_params() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -603,6 +587,7 @@ fn mainnet_router_adapter_viasol_params() {
             80_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_sol()
                 .with_ata(viasol_buy_ata()),
         )
@@ -617,10 +602,8 @@ fn mainnet_router_adapter_viasol_params() {
 // ─── AmmV4 / PumpFun live-event Router builds ────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_amm_v4_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -654,6 +637,7 @@ fn mainnet_router_amm_v4_from_live_events() {
                 amount,
                 &market,
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_wsol()
                     .with_ata(route_buy_ata()),
             ) {
@@ -694,55 +678,57 @@ fn mainnet_router_amm_v4_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpswap_from_live_buy_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let found = scan_events(&client, &[PUMPSWAP_PROGRAM, fixtures::PUMPSWAP_POOL], 60, |sig, ev| {
-        let DexEvent::PumpSwapBuy(e) = ev else {
-            return false;
-        };
-        if e.quote_mint != WSOL_MINT || e.base_mint == Pubkey::default() {
-            return false;
-        }
-        let pool = pumpswap_from_buy(e);
-        let amount = e.quote_amount_in.max(50_000).min(500_000);
-        let wallet = create_wallet();
-        let user = wallet.pubkey();
-        let market = RoutedMarket::pumpswap(pool.clone());
-        let built = match router_for(&user).buy_with_opts(
-            amount,
-            &market,
-            TradeOpts::default()
-                .buy_with_wsol()
-                .with_ata(route_buy_ata()),
-        ) {
-            Ok(b) => b,
-            Err(err) => {
-                println!("[router_ps_live] build err={err}");
+    let found = scan_events(
+        &client,
+        &[PUMPSWAP_PROGRAM, fixtures::PUMPSWAP_POOL],
+        60,
+        |sig, ev| {
+            let DexEvent::PumpSwapBuy(e) = ev else {
+                return false;
+            };
+            if e.quote_mint != WSOL_MINT || e.base_mint == Pubkey::default() {
                 return false;
             }
-        };
-        assert_route_ix(&built, "router_ps_live");
-        println!("[router_ps_live] sig={sig} wallet={user}");
-        assert_funded_ok(
-            "router_ps_live_route",
-            simulate_built_trade(&client, &wallet, built),
-        );
-        true
-    });
+            let pool = pumpswap_from_buy(e);
+            let amount = e.quote_amount_in.max(50_000).min(500_000);
+            let wallet = create_wallet();
+            let user = wallet.pubkey();
+            let market = RoutedMarket::pumpswap(pool.clone());
+            let built = match router_for(&user).buy_with_opts(
+                amount,
+                &market,
+                TradeOpts::default()
+                    .with_min_out(1)
+                    .buy_with_wsol()
+                    .with_ata(route_buy_ata()),
+            ) {
+                Ok(b) => b,
+                Err(err) => {
+                    println!("[router_ps_live] build err={err}");
+                    return false;
+                }
+            };
+            assert_route_ix(&built, "router_ps_live");
+            println!("[router_ps_live] sig={sig} wallet={user}");
+            assert_funded_ok(
+                "router_ps_live_route",
+                simulate_built_trade(&client, &wallet, built),
+            );
+            true
+        },
+    );
     soft_coverage("router_ps_live", found);
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_amm_v4_from_fixture_pool() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -766,6 +752,7 @@ fn mainnet_router_amm_v4_from_fixture_pool() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -794,16 +781,13 @@ fn mainnet_router_amm_v4_from_fixture_pool() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_multi_wallet_cpmm_parallel_builds() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM)
-        .expect("load WSOL_STONK_CPMM");
+    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM).expect("load WSOL_STONK_CPMM");
     let wallets = create_wallets(3);
     for (i, wallet) in wallets.iter().enumerate() {
         let user = wallet.pubkey();
@@ -813,6 +797,7 @@ fn mainnet_router_multi_wallet_cpmm_parallel_builds() {
                 40_000 + i as u64 * 1_000,
                 &market,
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_wsol()
                     .with_ata(route_buy_ata()),
             )
@@ -826,16 +811,13 @@ fn mainnet_router_multi_wallet_cpmm_parallel_builds() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_trading_client_build_and_simulate() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_CARDS_CPMM)
-        .expect("load WSOL_CARDS_CPMM");
+    let pool = load_cpmm_pool(&client, &fixtures::WSOL_CARDS_CPMM).expect("load WSOL_CARDS_CPMM");
     let wallet = create_wallet();
     let payer = std::sync::Arc::new(wallet.insecure_clone());
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -858,6 +840,7 @@ fn mainnet_router_trading_client_build_and_simulate() {
             60_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -870,16 +853,13 @@ fn mainnet_router_trading_client_build_and_simulate() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_cpmm_sell_route_simulate() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
     }
-    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM)
-        .expect("load WSOL_STONK_CPMM");
+    let pool = load_cpmm_pool(&client, &fixtures::WSOL_STONK_CPMM).expect("load WSOL_STONK_CPMM");
     let meme = pool.meme_mint();
     let meme_tp = pool.token_program_for(&meme).unwrap_or(TOKEN_PROGRAM);
     let buy_amt = 80_000u64;
@@ -892,6 +872,7 @@ fn mainnet_router_cpmm_sell_route_simulate() {
             buy_amt,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -901,7 +882,11 @@ fn mainnet_router_cpmm_sell_route_simulate() {
         .max(1);
     let sell_amt = (expected / 5).max(1);
     let sell = router
-        .sell_with_opts(sell_amt, &market, TradeOpts::default().sell_to_wsol())
+        .sell_with_opts(
+            sell_amt,
+            &market,
+            TradeOpts::default().with_min_out(1).sell_to_wsol(),
+        )
         .expect("sell route");
     assert_route_ix(&sell, "router_cpmm_sell");
     // Buy credits meme ATA, then sell Route spends it — one funded simulate.
@@ -920,10 +905,8 @@ fn mainnet_router_cpmm_sell_route_simulate() {
 // ─── Broader Router DEX coverage ─────────────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_fee_bps_encodes_and_simulates() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -942,6 +925,7 @@ fn mainnet_router_fee_bps_encodes_and_simulates() {
             amount_in,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -954,7 +938,10 @@ fn mainnet_router_fee_bps_encodes_and_simulates() {
     assert!(crate::quote::fee_amount(amount_in, fee_bps) > 0);
     let fee_ata = ata(&fee_recv, &WSOL_MINT, &TOKEN_PROGRAM);
     assert!(
-        route.accounts.iter().any(|a| a.pubkey == fee_ata || a.pubkey == fee_recv),
+        route
+            .accounts
+            .iter()
+            .any(|a| a.pubkey == fee_ata || a.pubkey == fee_recv),
         "fee recipient must appear in Route accounts"
     );
     assert_funded_ok(
@@ -964,10 +951,8 @@ fn mainnet_router_fee_bps_encodes_and_simulates() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pool_guard_rejects_untrusted_amm() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -980,18 +965,22 @@ fn mainnet_router_pool_guard_rejects_untrusted_amm() {
     let market = RoutedMarket::new(Market::CpmmOuter(pool.clone()));
     assert!(
         strict
-            .buy_with_opts(50_000, &market, TradeOpts::default().buy_with_wsol())
+            .buy_with_opts(
+                50_000,
+                &market,
+                TradeOpts::default().with_min_out(1).buy_with_wsol()
+            )
             .is_err(),
         "stonk_strict must reject unlisted CPMM"
     );
-    let trusted = RouterClient::new(user, fee_recipient(), 0).with_pool_guard(
-        PoolGuardPolicy::stonk_strict().trust(pool.pool_state),
-    );
+    let trusted = RouterClient::new(user, fee_recipient(), 0)
+        .with_pool_guard(PoolGuardPolicy::stonk_strict().trust(pool.pool_state));
     let built = trusted
         .buy_with_opts(
             50_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -1004,10 +993,8 @@ fn mainnet_router_pool_guard_rejects_untrusted_amm() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_amm_v4_exact_out() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1033,6 +1020,7 @@ fn mainnet_router_amm_v4_exact_out() {
             max_in,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_fixed_output(out)
                 .with_ata(route_buy_ata()),
@@ -1046,10 +1034,8 @@ fn mainnet_router_amm_v4_exact_out() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpswap_buy_sell_roundtrip() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1073,6 +1059,7 @@ fn mainnet_router_pumpswap_buy_sell_roundtrip() {
             buy_amt,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -1083,7 +1070,11 @@ fn mainnet_router_pumpswap_buy_sell_roundtrip() {
         .max(1);
     let sell_amt = (base_out / 4).max(1);
     let sell = router
-        .sell_with_opts(sell_amt, &market, TradeOpts::default().sell_to_wsol())
+        .sell_with_opts(
+            sell_amt,
+            &market,
+            TradeOpts::default().with_min_out(1).sell_to_wsol(),
+        )
         .expect("ps sell");
     assert_route_ix(&sell, "router_ps_rt_sell");
     let mut ixs = buy.into_instructions();
@@ -1098,10 +1089,8 @@ fn mainnet_router_pumpswap_buy_sell_roundtrip() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpfun_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1129,10 +1118,12 @@ fn mainnet_router_pumpfun_from_live_events() {
         let market = RoutedMarket::new(Market::PumpFunInner(pool.clone()));
         let opts = if pool.uses_v2() && pool.is_native_sol_quote() {
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata())
         } else if pool.is_native_sol_quote() {
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_sol()
                 .with_ata(route_buy_ata())
         } else {
@@ -1146,7 +1137,10 @@ fn mainnet_router_pumpfun_from_live_events() {
             }
         };
         assert_route_ix(&built, "router_pumpfun");
-        println!("[router_pumpfun] sig={sig} wallet={user} v2={}", pool.uses_v2());
+        println!(
+            "[router_pumpfun] sig={sig} wallet={user} v2={}",
+            pool.uses_v2()
+        );
         assert_funded_ok(
             "router_pumpfun_route",
             simulate_built_trade(&client, &wallet, built),
@@ -1157,10 +1151,8 @@ fn mainnet_router_pumpfun_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_damm_v2_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1183,10 +1175,9 @@ fn mainnet_router_damm_v2_from_live_events() {
                 return false;
             }
             let amount = e.amount_in.max(50_000).min(1_000_000);
-            // Bind quote to observed swap so concentrated_min_out works.
-            let mut pool = pool;
-            pool.quoted_amount_in = Some(amount);
-            pool.expected_out = Some(e.output_amount.max(1));
+            // Explicit minimum exercises live instruction execution, not historical quote math.
+            let pool = pool;
+
             let wallet = create_wallet();
             let user = wallet.pubkey();
             let market = RoutedMarket::new(Market::MeteoraDammV2(pool));
@@ -1194,6 +1185,7 @@ fn mainnet_router_damm_v2_from_live_events() {
                 amount,
                 &market,
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_wsol()
                     .with_ata(route_buy_ata()),
             ) {
@@ -1216,10 +1208,8 @@ fn mainnet_router_damm_v2_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_clmm_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1243,14 +1233,7 @@ fn mainnet_router_clmm_from_live_events() {
             .unwrap_or(e.amount_0.max(e.amount_1))
             .max(50_000)
             .min(1_000_000);
-        if let (Some(qin), Some(qout)) = (pool.quoted_amount_in, pool.expected_out) {
-            if qin > 0 && amount != qin {
-                pool.expected_out =
-                    Some(((qout as u128) * amount as u128 / qin as u128).max(1) as u64);
-            }
-        }
-        pool.quoted_amount_in = Some(amount);
-        pool.expected_out = pool.expected_out.or(Some(1));
+
         let wallet = create_wallet();
         let user = wallet.pubkey();
         let market = RoutedMarket::new(Market::RaydiumClmm(pool));
@@ -1258,6 +1241,7 @@ fn mainnet_router_clmm_from_live_events() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         ) {
@@ -1279,10 +1263,8 @@ fn mainnet_router_clmm_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_whirlpool_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1301,14 +1283,7 @@ fn mainnet_router_whirlpool_from_live_events() {
             return false;
         }
         let amount = e.input_amount.max(50_000).min(1_000_000);
-        if let (Some(qin), Some(qout)) = (pool.quoted_amount_in, pool.expected_out) {
-            if qin > 0 && amount != qin {
-                pool.expected_out =
-                    Some(((qout as u128) * amount as u128 / qin as u128).max(1) as u64);
-            }
-        }
-        pool.quoted_amount_in = Some(amount);
-        pool.expected_out = pool.expected_out.or(Some(e.output_amount.max(1)));
+
         let wallet = create_wallet();
         let user = wallet.pubkey();
         let market = RoutedMarket::new(Market::Whirlpool(pool));
@@ -1316,6 +1291,7 @@ fn mainnet_router_whirlpool_from_live_events() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         ) {
@@ -1337,10 +1313,8 @@ fn mainnet_router_whirlpool_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_dlmm_from_live_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1349,7 +1323,7 @@ fn mainnet_router_dlmm_from_live_events() {
         let DexEvent::MeteoraDlmmSwap(e) = ev else {
             return false;
         };
-        let Some(mut pool) = crate::parser::dlmm_from_swap(e) else {
+        let Some(pool) = crate::parser::dlmm_from_swap(e) else {
             return false;
         };
         let input = if e.swap_for_y {
@@ -1361,8 +1335,7 @@ fn mainnet_router_dlmm_from_live_events() {
             return false;
         }
         let amount = e.amount_in.max(50_000).min(1_000_000);
-        pool.quoted_amount_in = Some(amount);
-        pool.expected_out = Some(e.amount_out.max(1));
+
         let wallet = create_wallet();
         let user = wallet.pubkey();
         let market = RoutedMarket::new(Market::MeteoraDlmm(pool));
@@ -1370,6 +1343,7 @@ fn mainnet_router_dlmm_from_live_events() {
             amount,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         ) {
@@ -1391,10 +1365,8 @@ fn mainnet_router_dlmm_from_live_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_adapter_amm_v4_params() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1422,6 +1394,8 @@ fn mainnet_router_adapter_amm_v4_params() {
         serum_vault_signer: pool.serum_vault_signer,
         coin_reserve: pool.coin_reserve,
         pc_reserve: pool.pc_reserve,
+        swap_fee_numerator: pool.swap_fee_numerator,
+        swap_fee_denominator: pool.swap_fee_denominator,
     };
     let wallet = create_wallet();
     let user = wallet.pubkey();
@@ -1430,14 +1404,14 @@ fn mainnet_router_adapter_amm_v4_params() {
     } else {
         pool.coin_mint
     };
-    let market =
-        to_routed_market_for_user(&DexParamEnum::RaydiumAmmV4(params), mint, &user)
-            .expect("adapter amm_v4");
+    let market = to_routed_market_for_user(&DexParamEnum::RaydiumAmmV4(params), mint, &user)
+        .expect("adapter amm_v4");
     let built = router_for(&user)
         .buy_with_opts(
             100_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -1450,10 +1424,8 @@ fn mainnet_router_adapter_amm_v4_params() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_load_market_by_rpc_cpmm() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1491,6 +1463,7 @@ fn mainnet_router_load_market_by_rpc_cpmm() {
             50_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
@@ -1503,10 +1476,8 @@ fn mainnet_router_load_market_by_rpc_cpmm() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_trading_client_sell_build() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1533,7 +1504,7 @@ fn mainnet_router_trading_client_sell_build() {
         .build_sell_from_market(
             1_000,
             &market,
-            TradeOpts::default().sell_to_wsol(),
+            TradeOpts::default().with_min_out(1).sell_to_wsol(),
         )
         .expect("TradingClient sell");
     assert_route_ix(&sell, "trading_client_sell");
@@ -1545,10 +1516,8 @@ fn mainnet_router_trading_client_sell_build() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_prepare_atas_then_minimal_route() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1565,6 +1534,7 @@ fn mainnet_router_prepare_atas_then_minimal_route() {
             80_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(AtaPolicy::none().with_create_meme(true)),
         )
@@ -1579,10 +1549,8 @@ fn mainnet_router_prepare_atas_then_minimal_route() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_fault_bad_route_program_is_soft_or_hard() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1596,24 +1564,32 @@ fn mainnet_router_fault_bad_route_program_is_soft_or_hard() {
             50_000,
             &market,
             TradeOpts::default()
+                .with_min_out(1)
                 .buy_with_wsol()
                 .with_ata(route_buy_ata()),
         )
         .expect("build");
-    if let Some(route) = built.route.as_mut() {
-        // Point Route at System Program — must not execute as Route CPI.
-        route.program_id = Pubkey::default(); // invalid / non-router program
-    }
-    // Soft (wrong program / undeployed semantics) or Hard (invalid instruction) both prove detection.
-    match crate::mainnet_sim::simulate_with_fresh_wallet(
-        &client,
-        &wallet,
-        built.into_instructions(),
-    ) {
+    // Point Route at System Program — must not execute as Route CPI.
+    built.route.as_mut().expect("built trade must contain route").program_id = SYSTEM_PROGRAM;
+    // simulate_with_fresh_wallet prepends exactly one virtual funding instruction.
+    let route_index = built.setup.len() + 1;
+    assert_bad_route_failure(route_index, crate::mainnet_sim::simulate_with_fresh_wallet(
+        &client, &wallet, built.into_instructions(),
+    ));
+}
+
+pub(crate) fn assert_bad_route_failure(route_index: usize, verdict: Option<SimVerdict>) {
+    match verdict {
         None => panic!("funder required"),
         Some(SimVerdict::Ok) => panic!("mutated route program must not succeed"),
         Some(SimVerdict::Soft(m)) | Some(SimVerdict::Hard(m)) => {
-            println!("[router_fault_bad_program] rejected as expected: {m}");
+            // System Program also runs during funding/wrapping. Its runtime
+            // failure alone cannot prove the mutated route was exercised.
+            assert!(m.starts_with(&format!("InstructionError({route_index},")),
+                "failure must belong to mutated route instruction {route_index}, got: {m}");
+            crate::mainnet_sim_tests::assert_funded_fault(
+                "router_fault_bad_program", SYSTEM_PROGRAM, Some(SimVerdict::Hard(m)),
+            );
         }
     }
 }
@@ -1621,10 +1597,8 @@ fn mainnet_router_fault_bad_route_program_is_soft_or_hard() {
 // ─── Broad router coverage wave ──────────────────────────────────────────────
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_launchlab_from_curve_events() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1649,10 +1623,12 @@ fn mainnet_router_launchlab_from_curve_events() {
             let market = RoutedMarket::new(Market::LaunchLabInner(pool.clone()));
             let opts = if pool.is_sol_quote() {
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_sol()
                     .with_ata(route_buy_ata())
             } else if pool.quote_mint == WSOL_MINT {
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_wsol()
                     .with_ata(route_buy_ata())
             } else {
@@ -1678,10 +1654,8 @@ fn mainnet_router_launchlab_from_curve_events() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpfun_sell_soft() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1709,7 +1683,7 @@ fn mainnet_router_pumpfun_sell_soft() {
         };
         assert_route_ix(&built, "router_pumpfun_sell");
         println!("[router_pumpfun_sell] sig={sig} wallet={user} (expect soft)");
-        assert_funded_ok(
+        crate::mainnet_sim::assert_sim_balance_failure(
             "router_pumpfun_sell",
             simulate_built_trade(&client, &wallet, built),
         );
@@ -1719,10 +1693,8 @@ fn mainnet_router_pumpfun_sell_soft() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_pumpswap_sell_soft() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1750,17 +1722,15 @@ fn mainnet_router_pumpswap_sell_soft() {
     };
     assert_route_ix(&built, "router_pumpswap_sell");
     println!("[router_pumpswap_sell] wallet={user} (expect soft: no base)");
-    assert_funded_ok(
+    crate::mainnet_sim::assert_sim_balance_failure(
         "router_pumpswap_sell",
         simulate_built_trade(&client, &wallet, built),
     );
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_load_market_by_rpc_amm_v4_and_damm() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1795,6 +1765,7 @@ fn mainnet_router_load_market_by_rpc_amm_v4_and_damm() {
                         100_000,
                         &market,
                         TradeOpts::default()
+                            .with_min_out(1)
                             .buy_with_wsol()
                             .with_ata(route_buy_ata()),
                     )
@@ -1828,16 +1799,12 @@ fn mainnet_router_load_market_by_rpc_amm_v4_and_damm() {
             .await
         });
         match result {
-            Ok((_ext, mut market)) => {
-                // Bind a conservative quote for concentrated venues.
-                if let Market::MeteoraDammV2(ref mut p) = market.market {
-                    p.quoted_amount_in = Some(50_000);
-                    p.expected_out = Some(1);
-                }
+            Ok((_ext, market)) => {
                 match router_for(&user2).buy_with_opts(
                     50_000,
                     &market,
                     TradeOpts::default()
+                        .with_min_out(1)
                         .buy_with_wsol()
                         .with_ata(route_buy_ata()),
                 ) {
@@ -1866,10 +1833,8 @@ fn mainnet_router_load_market_by_rpc_amm_v4_and_damm() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_clmm_reverse_sell_soft() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1888,8 +1853,7 @@ fn mainnet_router_clmm_reverse_sell_soft() {
             return false;
         }
         let amount = 1_000u64;
-        pool.quoted_amount_in = Some(amount);
-        pool.expected_out = Some(1);
+
         let wallet = create_wallet();
         let user = wallet.pubkey();
         let market = RoutedMarket::new(Market::RaydiumClmm(pool));
@@ -1902,7 +1866,7 @@ fn mainnet_router_clmm_reverse_sell_soft() {
         };
         assert_route_ix(&built, "router_clmm_sell");
         println!("[router_clmm_sell] sig={sig} wallet={user} (expect soft)");
-        assert_funded_ok(
+        crate::mainnet_sim::assert_sim_balance_failure(
             "router_clmm_sell",
             simulate_built_trade(&client, &wallet, built),
         );
@@ -1912,10 +1876,8 @@ fn mainnet_router_clmm_reverse_sell_soft() {
 }
 
 #[test]
+#[ignore = "requires mainnet RPC; run explicitly with --ignored"]
 fn mainnet_router_cpmm_cards_direct_and_route() {
-    if !enabled() {
-        return;
-    }
     let client = rpc();
     if !require_rpc(&client) {
         return;
@@ -1959,6 +1921,7 @@ fn mainnet_router_cpmm_cards_direct_and_route() {
                 amount,
                 &market,
                 TradeOpts::default()
+                    .with_min_out(1)
                     .buy_with_wsol()
                     .with_ata(route_buy_ata()),
             )

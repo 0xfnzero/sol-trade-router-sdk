@@ -1,23 +1,48 @@
 use anyhow::{ensure, Context};
 use sol_trade_router_sdk::{
-    ata, load_routed_market_by_rpc, LoadMarketRequest, Market, PoolGuardPolicy, RouterClient,
+    ata, initialize_config, load_routed_market_by_rpc, LoadMarketRequest, Market, PoolGuardPolicy, RouterClient,
     TradeOpts, ORCA_WHIRLPOOL_PROGRAM,
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_client::rpc_response::transaction::AccountMeta;
 use solana_sdk::{
-    instruction::Instruction, pubkey, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    instruction::Instruction,
+    pubkey,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::Signer,
     transaction::Transaction,
 };
 
-// 自部署 Router；与 programs/sol-trade-router/src/lib.rs 保持一致。
+// Test fixture only; runtime always requires the self-deployed ID.
+#[cfg(test)]
 const PROGRAM_ID: Pubkey = pubkey!("CmNFUmRJL7YcnVn22oZzwG5Xg5WJqbcHEc6BK5mzDNR8");
 const INPUT_MINT: Pubkey = pubkey!("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263");
 const OUTPUT_MINT: Pubkey = pubkey!("5HcMuG7toPaAEQLJSsWZVZG9v4wtTUca5MZvBZeoXQxQ");
-const SYSTEM_PROGRAM: Pubkey = pubkey!("11111111111111111111111111111111");
 // 本示例只接受：Route(tag=2) 中的单个 Orca swap_v2 leg。
-const ROUTE_LEG_DATA_OFFSET: usize = 54;
+const ROUTE_LEG_DATA_OFFSET: usize = 86;
 const ORCA_SWAP_V2_DATA_LEN: usize = 43;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RunOptions {
+    send: bool,
+    initialize_config: bool,
+}
+
+impl RunOptions {
+    fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Self> {
+        let mut options = Self::default();
+        for arg in args {
+            match arg.as_str() {
+                "--send" if !options.send => options.send = true,
+                "--initialize-config" if !options.initialize_config => {
+                    options.initialize_config = true
+                }
+                _ => anyhow::bail!("未知或重复参数 {arg}；支持 --send 和 --initialize-config"),
+            }
+        }
+        Ok(options)
+    }
+}
 
 fn load_authority() -> anyhow::Result<Keypair> {
     let value = std::env::var("PRIVATE_KEY").context("缺少 PRIVATE_KEY 环境变量")?;
@@ -57,16 +82,20 @@ fn encode_hex(data: &[u8]) -> String {
     data.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn orca_data_range(ix: &Instruction) -> anyhow::Result<std::ops::Range<usize>> {
+fn orca_data_range(ix: &Instruction, program_id: &Pubkey) -> anyhow::Result<std::ops::Range<usize>> {
     let data = &ix.data;
-    ensure!(ix.program_id == PROGRAM_ID, "不是自部署 Router 指令");
+    ensure!(ix.program_id == *program_id, "不是自部署 Router 指令");
     ensure!(data.len() >= ROUTE_LEG_DATA_OFFSET, "Router data 过短");
     ensure!(data[0] == 2 && data[18] == 1, "仅支持单跳 Route 指令");
     ensure!(
-        &data[19..51] == ORCA_WHIRLPOOL_PROGRAM.as_ref(),
+        &data[19..51] == OUTPUT_MINT.as_ref(),
+        "Router 目标 mint 不匹配"
+    );
+    ensure!(
+        &data[51..83] == ORCA_WHIRLPOOL_PROGRAM.as_ref(),
         "内层程序不是 Orca Whirlpool"
     );
-    let len = u16::from_le_bytes([data[52], data[53]]) as usize;
+    let len = u16::from_le_bytes([data[84], data[85]]) as usize;
     ensure!(
         len == ORCA_SWAP_V2_DATA_LEN,
         "预期 Orca swap_v2 data 为 43 字节，实际 {len}"
@@ -80,11 +109,12 @@ fn orca_data_range(ix: &Instruction) -> anyhow::Result<std::ops::Range<usize>> {
 
 fn customize_orca_data(
     ix: &mut Instruction,
+    program_id: &Pubkey,
     amount_in: u64,
     min_out: u64,
     override_hex: Option<&str>,
 ) -> anyhow::Result<()> {
-    let range = orca_data_range(ix)?;
+    let range = orca_data_range(ix, program_id)?;
     let original = ix.data[range.clone()].to_vec();
     println!("默认 ORCA_SWAP_DATA_HEX={}", encode_hex(&original));
     let Some(hex) = override_hex else {
@@ -125,21 +155,23 @@ fn customize_orca_data(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
-    test_in().await.expect("TODO: panic message");
+    // Reject invalid arguments before loading a key or contacting RPC.
+    let options = RunOptions::parse(std::env::args().skip(1))?;
     let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env");
     dotenvy::from_path(&env_path)
         .with_context(|| format!("无法读取 .env 文件：{}", env_path.display()))?;
 
-    let send = match std::env::args().nth(1).as_deref() {
-        None => false,
-        Some("--send") => true,
-        Some(other) => anyhow::bail!("未知参数 {other}；仅支持 --send"),
-    };
+    let program_id: Pubkey = std::env::var("ROUTER_PROGRAM_ID")
+        .context("缺少 ROUTER_PROGRAM_ID：请填写自行部署的 Router 地址")?
+        .parse().context("ROUTER_PROGRAM_ID 不是有效公钥")?;
+    ensure!(program_id != Pubkey::default(), "ROUTER_PROGRAM_ID 不能是 System Program");
     let rpc_url = std::env::var("RPC_URL").context("缺少 RPC_URL 环境变量")?;
     let rpc = RpcClient::new(rpc_url);
     let authority = load_authority()?;
     let authority_pubkey = authority.pubkey();
+    if options.initialize_config {
+        return initialize_router(&rpc, &program_id, &authority, options.send).await;
+    }
     let amount_in = required_u64("QUOTE_AMOUNT_RAW")?;
     let min_out = required_u64("MIN_OUT_RAW")?;
     let pool_address: Pubkey = std::env::var("ORCA_POOL")
@@ -158,12 +190,12 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // 读取已初始化的自部署 Router config；本示例只接受 fee_bps=0。
-    let (config_address, _) = Pubkey::find_program_address(&[b"config"], &PROGRAM_ID);
+    let (config_address, _) = Pubkey::find_program_address(&[b"config"], &program_id);
     let config = rpc
         .get_account(&config_address)
         .await
         .context("读取 Router config 失败")?;
-    ensure!(config.owner == PROGRAM_ID, "Router config owner 不匹配");
+    ensure!(config.owner == program_id, "Router config owner 不匹配");
     ensure!(
         config.data.len() >= 80 && &config.data[..8] == b"ROUTCFG1",
         "Router config 未初始化或格式不匹配"
@@ -186,8 +218,8 @@ async fn main() -> anyhow::Result<()> {
         },
         &authority_pubkey,
     )
-        .await
-        .context("加载 Orca 池参数失败")?;
+    .await
+    .context("加载 Orca 池参数失败")?;
     let input_token_program = match &mut market.market {
         Market::Whirlpool(pool) => {
             ensure!(pool.whirlpool == pool_address, "加载的池地址不匹配");
@@ -230,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let router = RouterClient::new(authority_pubkey, fee_recipient, 0)
-        .with_program_id(PROGRAM_ID)
+        .with_program_id(program_id)
         .with_pool_guard(PoolGuardPolicy::default().trust(pool_address));
     let trade = router.buy_with_opts(
         amount_in,
@@ -242,10 +274,10 @@ async fn main() -> anyhow::Result<()> {
     let mut instructions = trade.into_instructions();
     let route = instructions
         .iter_mut()
-        .find(|ix| ix.program_id == PROGRAM_ID)
+        .find(|ix| ix.program_id == program_id)
         .context("构造结果缺少 Router 指令")?;
     let custom_data = std::env::var("ORCA_SWAP_DATA_HEX").ok();
-    customize_orca_data(route, amount_in, min_out, custom_data.as_deref())?;
+    customize_orca_data(route, &program_id, amount_in, min_out, custom_data.as_deref())?;
 
     println!("payer={authority_pubkey}, pool={pool_address}, input_ata={input_ata}");
     println!("BONK 输入原始数量={amount_in}, 目标币最少到账原始数量={min_out}");
@@ -258,8 +290,16 @@ async fn main() -> anyhow::Result<()> {
         &[&authority],
         blockhash,
     );
+    simulate_then_maybe_send(&rpc, &tx, options.send).await
+}
+
+async fn simulate_then_maybe_send(
+    rpc: &RpcClient,
+    tx: &Transaction,
+    send: bool,
+) -> anyhow::Result<()> {
     let simulation = rpc
-        .simulate_transaction(&tx)
+        .simulate_transaction(tx)
         .await
         .context("模拟交易失败")?
         .value;
@@ -277,51 +317,110 @@ async fn main() -> anyhow::Result<()> {
         println!("仅模拟，未上链。确认参数后加 --send 才会真实广播。");
         return Ok(());
     }
-    let signature = rpc.send_and_confirm_transaction(&tx).await?;
+    let signature = rpc.send_and_confirm_transaction(tx).await?;
     println!("上链成功：{signature}");
     Ok(())
 }
 
-async  fn test_in() -> anyhow::Result<()> {
-    let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env");
-    dotenvy::from_path(&env_path)
-        .with_context(|| format!("无法读取 .env 文件：{}", env_path.display()))?;
-
-    let rpc_url = std::env::var("RPC_URL").context("缺少 RPC_URL 环境变量")?;
-    let rpc = RpcClient::new(rpc_url);
-    let authority = load_authority()?;
+async fn initialize_router(rpc: &RpcClient, program_id: &Pubkey, authority: &Keypair, send: bool) -> anyhow::Result<()> {
     let authority_pubkey = authority.pubkey();
+    let (config_address, _) = Pubkey::find_program_address(&[b"config"], &program_id);
+    if let Some(config) = rpc
+        .get_account_with_commitment(&config_address, rpc.commitment())
+        .await
+        .context("读取 Router config 失败")?
+        .value
+    {
+        ensure!(config.owner == *program_id, "Router config owner 不匹配");
+        ensure!(
+            config.data.len() >= 80 && &config.data[..8] == b"ROUTCFG1",
+            "Router config 格式不匹配"
+        );
+        println!("Router config 已初始化：{config_address}；未发送初始化交易。");
+        return Ok(());
+    }
 
     // 手续费为 0；收款地址暂时用自己的钱包
-    let ix = initialize_config(&authority_pubkey, &authority_pubkey, 0);
+    let ix = initialize_config(program_id, &authority_pubkey, &authority_pubkey, 0);
 
     let blockhash = rpc.get_latest_blockhash().await?;
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&authority_pubkey),
-        &[&authority],
-        blockhash,
-    );
+    let tx =
+        Transaction::new_signed_with_payer(&[ix], Some(&authority_pubkey), &[authority], blockhash);
 
-    let signature = rpc.send_and_confirm_transaction(&tx).await?;
-    println!("初始化成功：{signature}");
-    Ok(())
+    simulate_then_maybe_send(rpc, &tx, send).await
 }
-fn initialize_config(authority: &Pubkey, fee_recipient: &Pubkey, fee_bps: u16) -> Instruction {
-    let (config, bump) = Pubkey::find_program_address(&[b"config"], &PROGRAM_ID);
-    let mut data = vec![0]; // initialize 指令 tag
-    data.extend_from_slice(&fee_bps.to_le_bytes());
-    data.push(bump);
 
-    Instruction {
-        program_id: PROGRAM_ID,
-        accounts: vec![
-            AccountMeta::new(*authority, true),
-            AccountMeta::new(config, false),
-            AccountMeta::new_readonly(*fee_recipient, false),
-            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
-        ],
-        data,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_and_initialization_modes_never_send_without_the_send_flag() {
+        assert_eq!(RunOptions::parse([]).unwrap(), RunOptions::default());
+        assert_eq!(
+            RunOptions::parse(["--initialize-config".into()]).unwrap(),
+            RunOptions {
+                initialize_config: true,
+                send: false,
+            }
+        );
+        for args in [
+            ["--initialize-config", "--send"],
+            ["--send", "--initialize-config"],
+        ] {
+            assert_eq!(
+                RunOptions::parse(args.map(String::from)).unwrap(),
+                RunOptions {
+                    initialize_config: true,
+                    send: true,
+                }
+            );
+        }
+        assert_eq!(
+            RunOptions::parse(["--send".into()]).unwrap(),
+            RunOptions {
+                initialize_config: false,
+                send: true,
+            }
+        );
+        assert!(RunOptions::parse(["--invalid".into()]).is_err());
+        assert!(RunOptions::parse(["--send".into(), "--invalid".into()]).is_err());
+        assert!(RunOptions::parse(["--send".into(), "--send".into()]).is_err());
+    }
+
+    #[test]
+    fn orca_overrides_preserve_the_restored_legacy_header_and_target_mint() {
+        let mut data = vec![2];
+        data.extend_from_slice(&100u64.to_le_bytes());
+        data.extend_from_slice(&10u64.to_le_bytes());
+        data.extend_from_slice(&[1, 1]);
+        data.extend_from_slice(OUTPUT_MINT.as_ref());
+        data.extend_from_slice(ORCA_WHIRLPOOL_PROGRAM.as_ref());
+        data.push(15);
+        data.extend_from_slice(&43u16.to_le_bytes());
+        data.extend_from_slice(&[0; 43]);
+        let mut ix = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: vec![],
+            data,
+        };
+        assert_eq!(orca_data_range(&ix, &PROGRAM_ID).unwrap(), 86..129);
+        let custom_program = Pubkey::new_unique();
+        ix.program_id = custom_program;
+        assert!(orca_data_range(&ix, &PROGRAM_ID).is_err());
+        assert_eq!(orca_data_range(&ix, &custom_program).unwrap(), 86..129);
+        let initialize = initialize_config(&custom_program, &custom_program, &custom_program, 0);
+        assert_eq!(initialize.program_id, custom_program);
+        assert_eq!(initialize.accounts[1].pubkey, sol_trade_router_sdk::config_pda(&custom_program).0);
+        ix.program_id = PROGRAM_ID;
+        let header = ix.data[..86].to_vec();
+        let mut replacement = ix.data[86..].to_vec();
+        replacement[8..16].copy_from_slice(&100u64.to_le_bytes());
+        replacement[16..24].copy_from_slice(&10u64.to_le_bytes());
+        replacement[40] = 1;
+        customize_orca_data(&mut ix, &PROGRAM_ID, 100, 10, Some(&encode_hex(&replacement))).unwrap();
+        assert_eq!(ix.data[..86], header);
+        ix.data[19] ^= 1;
+        assert!(orca_data_range(&ix, &PROGRAM_ID).is_err());
     }
 }
-

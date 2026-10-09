@@ -1,0 +1,14 @@
+[package]
+name = "router-test-dex"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pinocchio = { version = "=0.11.2", features = ["cpi"] }
+
+# Standalone test fixture, never part of the publishable workspace.
+[workspace]

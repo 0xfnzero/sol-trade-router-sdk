@@ -1,0 +1,28 @@
+{
+  "source": "Raydium official API https://api-v3.raydium.io/pools/info/list and confirmed Solana getProgramAccounts/getMultipleAccounts; public addresses only",
+  "clmm": {
+    "pool": "45ssPkUQs1ssbeDqxD2mZrMdJYAXF7GyQyhS5xDXuWC5",
+    "input": "So11111111111111111111111111111111111111112",
+    "output": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+    "output_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "signature": "2k27KtSR1h5qaxeMtT4pH5G4xsW7Ya5tPaVZyYCqvsiMRBZJJ9yHg1LJUaVXeRvE8TJapyA3pXpfgHQ7eSFQpvi3"
+  },
+  "cashback": {
+    "curve": "2MZfT69MQ3Nujwhu6Rc5oa8WwdajxJfPihx97LawL4Cv",
+    "lamports": 46612158347,
+    "size": 151,
+    "complete": false,
+    "cashback": true,
+    "real_base": 272981929685016,
+    "snapshot_slot": 454491299,
+    "source_transaction": "NQcpdYu4iyBZgiGCbeFciy8B1HY8M5kifFgCtHaqAE1yuhTAoX5ao8ybFDXCBv74n3AizK4yVQbr9teABpguukJ",
+    "source_transaction_slot": 454250524
+  },
+  "note": "Fixtures identify candidates, not immutable state. Tests verify original signatures, cold state and bank execution at run time; stale/migrated candidates fall back to program scans.",
+  "launchlab": {
+    "pool": "BPg5LnXFrup6JXvrtKi1Zy1FxnEtGiNBja24BYQiByRi",
+    "quote_mint": "So11111111111111111111111111111111111111112",
+    "signature": "5d6akibjVG1VgmUHx8JAbekpU3fj6hyXDEjrQyT3riNvpjK9A4KG571acaMCAH5fqL7AUH7y2VxQAmu2s2w5w4Do",
+    "source": "Earlier successful direct mainnet run; candidate is rescanned for recent original transactions and simulated against current state."
+  }
+}

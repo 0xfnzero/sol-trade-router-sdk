@@ -224,6 +224,7 @@ fn parse_nonce_accounts() -> Result<Vec<Pubkey>> {
 /// Set `NONCE_ACCOUNT=<pubkey>[,pubkey…]` for durable-nonce mode (recommended for
 /// multi-SWQoS / MEV). Without it, falls back to a background blockhash cache.
 pub async fn warm_router_client() -> Result<WarmContext> {
+    let program_id = parse_router_program_id(std::env::var("ROUTER_PROGRAM_ID").ok().as_deref())?;
     let payer = keypair::load_keypair_from_env("PRIVATE_KEY")?;
     let fee_recipient = std::env::var("FEE_RECIPIENT")
         .ok()
@@ -244,7 +245,7 @@ pub async fn warm_router_client() -> Result<WarmContext> {
 
     let mut client = TradingClient::new(
         Arc::new(payer),
-        RouterTradeConfig::new(trade_config, fee_recipient, fee_bps),
+        RouterTradeConfig::new(trade_config, fee_recipient, fee_bps).with_program_id(program_id),
     )
     .await;
 
@@ -303,4 +304,31 @@ pub async fn warm_router_client() -> Result<WarmContext> {
         wait_tx_confirmed,
         buy_sol_lamports,
     })
+}
+
+fn parse_router_program_id(value: Option<&str>) -> Result<Pubkey> {
+    let value = value.ok_or_else(|| anyhow!("ROUTER_PROGRAM_ID must identify your self-deployed Router"))?;
+    let program_id = Pubkey::from_str(value.trim())
+        .map_err(|_| anyhow!("ROUTER_PROGRAM_ID is not a valid public key"))?;
+    if program_id == Pubkey::default() {
+        return Err(anyhow!("ROUTER_PROGRAM_ID cannot be the System Program"));
+    }
+    Ok(program_id)
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::*;
+
+    #[test]
+    fn self_deployment_id_is_required_and_preserved() {
+        assert!(parse_router_program_id(None).is_err());
+        assert!(parse_router_program_id(Some("invalid")).is_err());
+        assert!(parse_router_program_id(Some(&Pubkey::default().to_string())).is_err());
+        let custom = Pubkey::new_unique();
+        assert_eq!(parse_router_program_id(Some(&format!(" {custom} "))).unwrap(), custom);
+        let router = sol_trade_router_sdk::RouterClient::new(custom, custom, 0).with_program_id(custom);
+        assert_eq!(router.program_id, custom);
+        assert_eq!(router.config_address(), sol_trade_router_sdk::config_pda(&custom).0);
+    }
 }

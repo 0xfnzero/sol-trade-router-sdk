@@ -1,0 +1,28 @@
+   Compiling sol-trade-router-sdk v0.1.0 (/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/crates/sdk)
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sol-trade-router-sdk` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.22s
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router_sdk-5225f172ff08f755)
+
+running 1 test
+
+thread 'offline_tests::offline_all_exact_out_and_reverse_legs' (50052472) panicked at crates/sdk/src/offline_tests.rs:1454:42:
+CPMM accepted an invalid token program
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test offline_tests::offline_all_exact_out_and_reverse_legs ... FAILED
+
+failures:
+
+failures:
+    offline_tests::offline_all_exact_out_and_reverse_legs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 173 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p sol-trade-router-sdk --lib`

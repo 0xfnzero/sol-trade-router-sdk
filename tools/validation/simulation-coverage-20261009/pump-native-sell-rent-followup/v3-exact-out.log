@@ -1,0 +1,2 @@
+{"mode": "exact_out", "amount": 100000000000, "token2022": false, "initial_quote": 0, "error": null, "complete": 0, "tokens": 100000000000, "legacy": false, "initialize_volume": true, "creator_lamports": null, "prepared": false, "spent": 2931113, "sell_received": 1366861}
+{"pump_sha256": "a4b32d322295a15666b1293e0028b9b75d688bfce10b574e1094f249f2ce9f16", "router_sha256": "9fce64e47706c4bb2dbacee46be95b9dc90d1ff0540c9637b3dcca9183c95924"}

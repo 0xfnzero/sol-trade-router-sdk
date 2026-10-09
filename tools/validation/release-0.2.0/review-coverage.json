@@ -1,0 +1,301 @@
+{
+  "scope": "Release follow-up plus focused baseline security review; not a full independent audit of every baseline test/evidence file.",
+  "findings": [],
+  "followup": {
+    "total_files": 15,
+    "reviewed_files": 15,
+    "skipped_files": 0,
+    "coverage_rate": 1.0,
+    "checklist": [
+      {
+        "path": "Cargo.toml",
+        "status": "reviewed"
+      },
+      {
+        "path": "crates/sdk/Cargo.toml",
+        "status": "reviewed"
+      },
+      {
+        "path": "crates/sdk/LICENSE",
+        "status": "reviewed"
+      },
+      {
+        "path": "crates/sdk/src/adapter/pumpfun_state.rs",
+        "status": "reviewed"
+      },
+      {
+        "path": "crates/sdk/src/offline_tests.rs",
+        "status": "reviewed"
+      },
+      {
+        "path": "examples/common/src/lib.rs",
+        "status": "reviewed"
+      },
+      {
+        "path": "examples/touter_test/src/main.rs",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/check-release.sh",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/mock-dex/.gitignore",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/mock-dex/Cargo.toml",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/mock-dex/src/lib.rs",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/test-pump-v3-local.py",
+        "status": "reviewed"
+      },
+      {
+        "path": "scripts/test-router-multihop.py",
+        "status": "reviewed"
+      },
+      {
+        "path": "tools/validation/release-0.2.0/review-coverage.json",
+        "status": "reviewed"
+      },
+      {
+        "path": "tools/validation/release-0.2.0/summary.json",
+        "status": "reviewed"
+      }
+    ]
+  },
+  "baseline": {
+    "total_files": 43,
+    "reviewed_files": 19,
+    "skipped_files": 24,
+    "coverage_rate": 0.4418604651162791,
+    "checklist": [
+      {
+        "path": "Cargo.toml",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/Cargo.toml",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/adapter/from_params.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/adapter/from_rpc.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/adapter/mod.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/adapter/pumpfun_state.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/client.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/dynamic.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/legs.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/lib.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/mainnet_router_tests.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/mainnet_sim.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/mainnet_sim_tests.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/market.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/offline_tests.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/parser.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/pool_guard.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/pumpfun_v3.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "crates/sdk/src/quote.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/route_ix.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "crates/sdk/src/trade.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "docs/MAINNET_VALIDATION_SUMMARY.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "docs/PROTOCOL_SOURCE_SNAPSHOT.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "docs/PUMP_V3_DEPLOYMENT_RECHECK.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "docs/ROUTER_DEPLOYMENT_RECHECK.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "examples/pumpfun_copy_trading/src/main.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "examples/pumpfun_shred_sniper/src/main.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "examples/pumpfun_sniper_trading/src/main.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "examples/touter_test/src/main.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "examples/touter_test/src/testTran.rs",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "programs/sol-trade-router/src/error.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "programs/sol-trade-router/src/instructions/mod.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "programs/sol-trade-router/src/instructions/prepare_pumpfun.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "programs/sol-trade-router/src/instructions/route.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "programs/sol-trade-router/src/lib.rs",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "scripts/check.sh",
+        "status": "reviewed",
+        "reason": null
+      },
+      {
+        "path": "scripts/test-pump-v3-local.py",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "scripts/test-router-security.py",
+        "status": "skipped",
+        "reason": "Focused/sampled inspection and executed regression checks; not claiming a complete line-by-line review of this baseline file in the final follow-up."
+      },
+      {
+        "path": "tools/validation/simulation-coverage-20261009/bitmap-pool-binding-followup/official-source-snapshot.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "tools/validation/simulation-coverage-20261009/cold-mint-hook-followup/official-source-snapshot.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "tools/validation/simulation-coverage-20261009/launchlab-sell-liquidity-followup/official-source-snapshot.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "tools/validation/simulation-coverage-20261009/pump-current-deployment-followup/deployment-capture.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      },
+      {
+        "path": "tools/validation/simulation-coverage-20261009/pumpswap-reserved-fees-followup/official-source-snapshot.json",
+        "status": "skipped",
+        "reason": "Historical captured/generated evidence; treated as data, not production behavior; no fresh verification of every historical assertion."
+      }
+    ]
+  },
+  "validation": "summary.json",
+  "limitations": [
+    "Live RPC smoke unavailable; no new full-mainnet pass.",
+    "Mock DEX validates accounting, not real pricing.",
+    "Unix host/package tests; no Windows or separate MSRV toolchain validation."
+  ]
+}

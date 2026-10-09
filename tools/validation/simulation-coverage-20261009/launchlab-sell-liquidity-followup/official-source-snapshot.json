@@ -1,0 +1,24 @@
+{
+  "package": "@raydium-io/raydium-sdk-v2",
+  "version": "0.2.74-alpha",
+  "tarball": "https://registry.npmjs.org/@raydium-io/raydium-sdk-v2/-/raydium-sdk-v2-0.2.74-alpha.tgz",
+  "integrity": "sha512-OD+GeNHuIYMyfsSfKzeIvrPQj/akqiKz3cKnKB/f5jQG67LZsxUCoYYL2QwDsrKiV65aEsuWeBeuSAJthiQwxw==",
+  "integrity_verified": true,
+  "files": [
+    {
+      "package_path": "package/src/raydium/launchpad/curve/curve.ts",
+      "sha256": "4ffaf7a72f2caf01c296db7d7422b43789d99a7e9591608b9b7d1a03defa316a"
+    },
+    {
+      "package_path": "package/src/raydium/launchpad/curve/constantProductCurve.ts",
+      "sha256": "d8004455490cf3742472889a1c981e9f3faeda03c74f27bdc789b88e2831dc66"
+    }
+  ],
+  "captured_at": "2026-10-08T23:34:52.766633+00:00",
+  "reference_checks": {
+    "method": "Curve.sellExactOut",
+    "quote_check": "poolInfo.realB >= amountOutWithFeeB",
+    "base_check": "amountA <= poolInfo.realA",
+    "exact_in_note": "Official sellExactIn currently computes without these checks; Router now checks curve solvency locally."
+  }
+}

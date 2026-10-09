@@ -13,7 +13,7 @@ members = [
 default-members = ["crates/sdk"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["0xfnzero"]
@@ -31,17 +31,12 @@ thiserror = "2"
 solana-sdk = "4.0.1"
 solana-system-interface = { version = "3.0.0", features = ["bincode"] }
 solana-commitment-config = { version = "3.1.1", features = ["serde"] }
-sol-parser-sdk = { version = "=0.7.6", default-features = false, features = ["parse-borsh"] }
-sol-trade-sdk = { version = "=5.0.5", default-features = false }
+sol-parser-sdk = { version = "=0.7.12", default-features = false, features = ["parse-borsh"] }
+sol-trade-sdk = { version = "=6.0.0", default-features = false }
 tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
 solana-hash = "4.4.0"
 solana-message = "4.4.0"
 core_affinity = "0.8"
-
-[patch.crates-io]
-# Yellowstone 13.5.0 imports UnixStream unconditionally; the local copy
-# gates its UDS-only API on Unix so Windows RPC examples can compile.
-yellowstone-grpc-client = { path = "vendor/yellowstone-grpc-client" }
 
 [profile.release.package.sol-trade-router]
 # Keep size tuning local to the on-chain program; client SDK builds stay unchanged.

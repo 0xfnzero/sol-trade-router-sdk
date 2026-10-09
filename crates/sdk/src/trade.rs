@@ -6,7 +6,10 @@
 //! - Inner (LaunchLab / PumpFun) + outer (CPMM), 1-hop or 2-hop as needed
 
 use anyhow::{anyhow, Result};
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+};
 
 use crate::{
     asset::{BuyWith, SellTo},
@@ -21,33 +24,106 @@ use crate::{
         meteora_damm_v2_swap_leg, meteora_dlmm_swap_leg, pumpfun_buy_leg, pumpfun_buy_v2_leg,
         pumpfun_sell_leg, pumpfun_sell_v2_leg, pumpswap_buy_exact_out_leg, pumpswap_buy_leg,
         pumpswap_sell_leg, raydium_amm_v4_swap_exact_out_leg, raydium_amm_v4_swap_leg,
-        raydium_clmm_swap_leg, whirlpool_swap_leg, Leg,
+        raydium_clmm_swap_leg, require_mint_programs, require_token_programs, whirlpool_swap_leg, Leg,
     },
     market::{
         BridgePool, CpmmPool, LaunchLabPool, Market, MeteoraDammV2Pool, MeteoraDlmmPool,
-        PumpSwapPool, RaydiumAmmV4Pool, RaydiumClmmPool, RoutedMarket, WhirlpoolPool,
+        PumpFunPool, PumpSwapPool, RaydiumAmmV4Pool, RaydiumClmmPool, RoutedMarket, WhirlpoolPool,
     },
     pool_guard::{assert_routed_market_ok, PoolGuardPolicy},
     quote::{
         apply_slippage_min_out, cpmm_in_for_out, cpmm_out, fee_amount, launchlab_buy_quote,
         launchlab_sell_quote_out, meteora_damm_v2_out, pumpfun_buy_token_out, pumpfun_sell_sol_out,
         pumpswap_buy_base_out, pumpswap_sell_quote_out, raydium_amm_v4_in_for_out,
-        raydium_amm_v4_out,
+        raydium_amm_v4_out, validate_router_fee_bps,
     },
     route_ix::{
         build_route_instruction_ex, sol_fee_program, token_fee_program, RouteAccounts,
-        FEE_ASSET_SOL, FEE_ASSET_TOKEN,
+        FEE_ASSET_SOL, FEE_ASSET_TOKEN, TAG_PREPARE_PUMPFUN,
     },
 };
+
+// Keep protocol setup rent outside native input/output measurement. Both
+// instructions are idempotent; plain V1 sells do not need a volume account.
+fn prepare_pumpfun_native_accounts(
+    router: &Pubkey,
+    payer: &Pubkey,
+    pool: &PumpFunPool,
+    initialize_volume: bool,
+    setup: &mut Vec<Instruction>,
+) {
+    if initialize_volume {
+        let volume = crate::constants::pumpfun_user_volume_accumulator(payer);
+        setup.push(Instruction {
+            program_id: crate::constants::PUMPFUN_PROGRAM,
+            accounts: vec![
+                AccountMeta::new(*payer, true),
+                AccountMeta::new_readonly(*payer, false),
+                AccountMeta::new(volume, false),
+                AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+                AccountMeta::new_readonly(crate::constants::PUMPFUN_EVENT_AUTHORITY, false),
+                AccountMeta::new_readonly(crate::constants::PUMPFUN_PROGRAM, false),
+            ],
+            data: vec![94, 6, 202, 115, 255, 96, 232, 183],
+        });
+    }
+    setup.push(Instruction {
+        program_id: *router,
+        accounts: vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new_readonly(pool.bonding_curve, false),
+            AccountMeta::new(pool.creator_vault, false),
+            AccountMeta::new_readonly(SYSTEM_PROGRAM, false),
+        ],
+        data: vec![TAG_PREPARE_PUMPFUN],
+    });
+}
+
+fn validate_inner_market_programs(market: &RoutedMarket, quote_ata: bool) -> Result<()> {
+    if let Market::LaunchLabInner(pool) = &market.market {
+        require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+            (pool.quote_mint, pool.quote_token_program)], "LaunchLab")?;
+    }
+    if let Market::PumpFunInner(pool) = &market.market {
+        require_token_programs(&[pool.mint_token_program], "PumpFun")?;
+        // Native SOL settlement uses lamports, not the quote mint's token program.
+        if !pool.is_native_sol_quote() || quote_ata {
+            require_token_programs(&[pool.quote_token_program], "PumpFun quote")?;
+            if pool.is_native_sol_quote() && pool.quote_token_program != TOKEN_PROGRAM {
+                return Err(anyhow!("PumpFun WSOL ATA settlement requires classic WSOL token program"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_bridge_quote_program(market: &RoutedMarket) -> Result<()> {
+    let bridge = market.bridge.as_ref().ok_or_else(|| anyhow!("missing SOL/WSOL bridge"))?;
+    let quote = market.quote_mint();
+    let bridge_program = match bridge {
+        BridgePool::Cpmm(pool) => pool.token_program_for(&quote),
+        BridgePool::AmmV4(pool) => bridge.contains_mint(&quote).then_some(
+            if pool.token_program == Pubkey::default() { TOKEN_PROGRAM } else { pool.token_program }
+        ), // AMM V4's leg builder retains the legacy classic-program default.
+    };
+    if bridge_program != Some(market.quote_token_program()) {
+        return Err(anyhow!("bridge quote token program does not match target market"));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct TradeOpts {
     /// Slippage in basis points (default 100 = 1%).
     pub slippage_bps: u64,
     /// Explicit DEX minimum output, primarily for complex Meteora DAMM V2 curves.
+    /// None uses automatic quoting with a positive floor; Some(0) explicitly
+    /// allows zero output and bypasses the automatic quote guard.
     pub min_out: Option<u64>,
-    /// Exact-out target. When set, `amount_in` on buy/sell is the **max input budget**
-    /// and capable venues use exact-out legs (CPMM / AmmV4 / PumpSwap / DAMM V2).
+    /// Positive exact-out target; `amount_in` is the maximum input budget.
+    /// Single-hop CPMM / AMM V4 / DAMM V2 buys and sells are supported, plus
+    /// PumpSwap buys. Other paths return an error rather than ignoring the target.
+    /// An explicit `min_out` may not exceed this target.
     pub fixed_output: Option<u64>,
     /// Buy input asset (`buy_with_*`).
     pub buy_with: BuyWith,
@@ -72,6 +148,21 @@ impl Default for TradeOpts {
 }
 
 impl TradeOpts {
+    fn validate_fixed_output(&self, supported: bool) -> Result<()> {
+        if let Some(target) = self.fixed_output {
+            if target == 0 {
+                return Err(anyhow!("fixed_output must be positive"));
+            }
+            if self.min_out.is_some_and(|minimum| minimum > target) {
+                return Err(anyhow!("min_out exceeds fixed_output target"));
+            }
+            if !supported {
+                return Err(anyhow!("fixed_output is unsupported for this trade path"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn with_slippage_bps(mut self, slippage_bps: u64) -> Self {
         self.slippage_bps = slippage_bps;
         self
@@ -106,14 +197,20 @@ impl TradeOpts {
         self.ata.close_wsol = true;
         self
     }
+    /// Keep the sale proceeds wrapped. Clears a previous SOL settlement's
+    /// automatic unwrap; call `close_wsol(true)` afterward to explicitly close.
     pub fn sell_to_wsol(mut self) -> Self {
         self.sell_to = SellTo::Wsol;
         self.ata.create_meme = false;
+        self.ata.close_wsol = false;
         self
     }
+    /// Receive tokens without inheriting a previous SOL settlement's unwrap.
+    /// Apply an explicit close/ATA policy after selecting the destination.
     pub fn sell_to_token(mut self, mint: Pubkey) -> Self {
         self.sell_to = SellTo::Token(mint);
         self.ata.create_meme = false;
+        self.ata.close_wsol = false;
         self
     }
     pub fn with_ata(mut self, ata: AtaPolicy) -> Self {
@@ -201,9 +298,10 @@ pub struct RouterClient {
     pub program_id: Pubkey,
     pub fee_recipient: Pubkey,
     /// Must match on-chain config (used for local fee netting).
-    /// Mismatch with `cfg.fee_bps` causes `FeeSourceMismatch` on-chain.
+    /// A mismatch invalidates the net-input quote and may reject the route.
     /// Must match on-chain `RouterConfig.fee_bps`. Client computes spend /
     /// `route_amount_in` with this value; the program charges `cfg.fee_bps`.
+    /// High-level builders reject values above the config limit (1_000 bps).
     pub fee_bps: u16,
     /// Reject wild / non-canonical pools before building legs.
     pub pool_guard: PoolGuardPolicy,
@@ -264,15 +362,15 @@ impl RouterClient {
 
     pub fn create_quote_ata(&self, market: &RoutedMarket) -> Instruction {
         self.create_ata(
-            market.market.quote_mint(),
-            market.market.quote_token_program(),
+            market.quote_mint(),
+            market.quote_token_program(),
         )
     }
 
     pub fn close_quote_ata(&self, market: &RoutedMarket) -> Instruction {
         self.close_ata(
-            market.market.quote_mint(),
-            market.market.quote_token_program(),
+            market.quote_mint(),
+            market.quote_token_program(),
         )
     }
 
@@ -282,8 +380,13 @@ impl RouterClient {
         let mut ixs = Vec::new();
         match buy_with {
             BuyWith::Sol | BuyWith::Wsol => {
-                // PumpFun WSOL-quote pools settle in native SOL (V1 and V2).
-                if !matches!(&market.market, Market::PumpFunInner(p) if p.is_native_sol_quote()) {
+                // Native SOL needs no ATA; explicit V2 WSOL settlement does.
+                let needs_wsol = match &market.market {
+                    Market::PumpFunInner(p) if p.is_native_sol_quote() =>
+                        matches!(buy_with, BuyWith::Wsol) && p.uses_wsol_ata_settlement(),
+                    _ => true,
+                };
+                if needs_wsol {
                     ixs.push(self.create_wsol_ata());
                     ixs.push(create_ata(
                         &self.payer,
@@ -300,7 +403,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 ixs.push(self.create_ata(mint, tp));
                 ixs.push(create_ata(&self.payer, &self.fee_recipient, &mint, &tp));
@@ -322,7 +425,12 @@ impl RouterClient {
         ));
         match sell_to {
             SellTo::Sol | SellTo::Wsol => {
-                if !matches!(&market.market, Market::PumpFunInner(p) if p.is_native_sol_quote()) {
+                let needs_wsol = match &market.market {
+                    Market::PumpFunInner(p) if p.is_native_sol_quote() =>
+                        matches!(sell_to, SellTo::Wsol) && p.uses_wsol_ata_settlement(),
+                    _ => true,
+                };
+                if needs_wsol {
                     ixs.push(self.create_wsol_ata());
                 }
                 if market.market.needs_sol_bridge() {
@@ -333,7 +441,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 ixs.push(self.create_ata(mint, tp));
             }
@@ -369,7 +477,9 @@ impl RouterClient {
         market: &RoutedMarket,
         opts: TradeOpts,
     ) -> Result<BuiltTrade> {
+        validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
+        validate_inner_market_programs(market, !matches!(opts.buy_with, BuyWith::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
@@ -402,21 +512,29 @@ impl RouterClient {
                 if mint == meme {
                     return Err(anyhow!("buy_with token cannot be the meme mint"));
                 }
-                if mint != market.market.quote_mint() {
+                if mint != market.quote_mint() {
                     return Err(anyhow!(
                         "buy_with token {} is not this market's quote {}",
                         mint,
-                        market.market.quote_mint()
+                        market.quote_mint()
                     ));
                 }
                 false
             }
             BuyWith::Sol | BuyWith::Wsol => market.market.needs_sol_bridge(),
         };
+        opts.validate_fixed_output(!needs_bridge && matches!(
+            &market.market,
+            Market::CpmmOuter(_) | Market::RaydiumAmmV4(_)
+                | Market::MeteoraDammV2(_) | Market::PumpSwapOuter(_)
+        ))?;
         if needs_bridge && market.bridge.is_none() {
             return Err(anyhow!(
                 "SOL/WSOL path needs stock bridge; or use buy_with_token(mint)"
             ));
+        }
+        if needs_bridge {
+            validate_bridge_quote_program(market)?;
         }
 
         let is_pump_native_sol =
@@ -463,10 +581,13 @@ impl RouterClient {
 
         let (legs, min_out, swap_spent) =
             self.build_buy_legs(spend, market, &opts, &mut setup, &mut touched)?;
+        if opts.min_out.is_none() && min_out == 0 {
+            return Err(anyhow!("automatic buy quote rounds to zero output; increase input"));
+        }
         let route_amount_in = if swap_spent == spend {
             amount_in
         } else {
-            route_amount_in_for_spend(swap_spent, self.fee_bps)
+            route_amount_in_for_spend(swap_spent, self.fee_bps)?
         };
 
         if matches!(opts.buy_with, BuyWith::Sol) && !is_pump_native_sol {
@@ -505,7 +626,7 @@ impl RouterClient {
                 let tp = if mint == WSOL_MINT {
                     TOKEN_PROGRAM
                 } else {
-                    market.market.quote_token_program()
+                    market.quote_token_program()
                 };
                 let kind = if mint == WSOL_MINT {
                     touched.touch_wsol();
@@ -549,6 +670,7 @@ impl RouterClient {
             min_out,
             fee_asset,
             opts.fixed_output.is_some(),
+            &market.meme_mint(),
             &legs,
         );
 
@@ -588,7 +710,9 @@ impl RouterClient {
         market: &RoutedMarket,
         opts: TradeOpts,
     ) -> Result<BuiltTrade> {
+        validate_router_fee_bps(self.fee_bps)?;
         assert_routed_market_ok(market, &self.pool_guard)?;
+        validate_inner_market_programs(market, !matches!(opts.sell_to, SellTo::Sol))?;
         if amount_in == 0 {
             return Err(anyhow!("amount_in is zero"));
         }
@@ -610,21 +734,28 @@ impl RouterClient {
                 if mint == meme {
                     return Err(anyhow!("sell_to token cannot be the meme mint"));
                 }
-                if mint != market.market.quote_mint() {
+                if mint != market.quote_mint() {
                     return Err(anyhow!(
                         "sell_to token {} is not this market's quote {}",
                         mint,
-                        market.market.quote_mint()
+                        market.quote_mint()
                     ));
                 }
                 false
             }
             SellTo::Sol | SellTo::Wsol => market.market.needs_sol_bridge(),
         };
+        opts.validate_fixed_output(!needs_bridge && matches!(
+            &market.market,
+            Market::CpmmOuter(_) | Market::RaydiumAmmV4(_) | Market::MeteoraDammV2(_)
+        ))?;
         if needs_bridge && market.bridge.is_none() {
             return Err(anyhow!(
                 "SOL/WSOL receive needs stock bridge; or use sell_to_token(mint)"
             ));
+        }
+        if needs_bridge {
+            validate_bridge_quote_program(market)?;
         }
 
         let is_pump_native_sol =
@@ -673,7 +804,7 @@ impl RouterClient {
                 &TOKEN_PROGRAM,
             );
         } else if let SellTo::Token(mint) = opts.sell_to {
-            let tp = market.market.quote_token_program();
+            let tp = market.quote_token_program();
             let kind = if mint == WSOL_MINT {
                 touched.touch_wsol();
                 AtaKind::Wsol
@@ -686,8 +817,11 @@ impl RouterClient {
 
         let (legs, min_out, output_ata) =
             self.build_sell_legs(sell_amt, market, &opts, &mut setup, &mut touched)?;
+        if opts.min_out.is_none() && min_out == 0 {
+            return Err(anyhow!("automatic sell quote rounds to zero output; increase input"));
+        }
 
-        let (_expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
+        let (expected_output_mint, output_token_account) = match (&opts.sell_to, &market.market) {
             // Native SOL credit — router checks payer lamport Δ.
             (SellTo::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
                 (SYSTEM_PROGRAM, payer)
@@ -715,6 +849,7 @@ impl RouterClient {
             min_out,
             FEE_ASSET_TOKEN,
             opts.fixed_output.is_some(),
+            &expected_output_mint,
             &legs,
         );
 
@@ -744,7 +879,8 @@ impl RouterClient {
         match (&opts.buy_with, &market.market) {
             // —— PumpFun WSOL-quote: native SOL always uses V1 layout (sol-trade-sdk) ——
             (BuyWith::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
-                let expected = pumpfun_buy_token_out(pool, spend);
+                prepare_pumpfun_native_accounts(&self.program_id, &payer, pool, true, setup);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -756,7 +892,7 @@ impl RouterClient {
             }
             // —— PumpFun WSOL-quote + use_v2: settle via existing WSOL ATA ——
             (BuyWith::Wsol, Market::PumpFunInner(pool)) if pool.uses_wsol_ata_settlement() => {
-                let expected = pumpfun_buy_token_out(pool, spend);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -775,7 +911,7 @@ impl RouterClient {
                         "PumpFun WSOL-quote: use BuyWith::Sol (native) or BuyWith::Wsol (use_v2)"
                     ));
                 }
-                let expected = pumpfun_buy_token_out(pool, spend);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_buy_token_out(pool, spend)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1059,7 +1195,8 @@ impl RouterClient {
         match (&opts.sell_to, &market.market) {
             // —— PumpFun WSOL-quote: native SOL always V1 ——
             (SellTo::Sol, Market::PumpFunInner(pool)) if pool.is_native_sol_quote() => {
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                prepare_pumpfun_native_accounts(&self.program_id, &payer, pool, pool.is_cashback_coin, setup);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1071,7 +1208,7 @@ impl RouterClient {
             }
             // —— PumpFun WSOL-quote + use_v2: credit WSOL ATA ——
             (SellTo::Wsol, Market::PumpFunInner(pool)) if pool.uses_wsol_ata_settlement() => {
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1091,7 +1228,7 @@ impl RouterClient {
                 if *out_mint != pool.quote_mint {
                     return Err(anyhow!("PumpFun V2 receive mint must be pool quote"));
                 }
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = if opts.min_out.is_some() { 0 } else { pumpfun_sell_sol_out(pool, sell_amt)? };
                 let min_out = opts
                     .min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1110,7 +1247,7 @@ impl RouterClient {
                     &opts.ata,
                 ),
             (SellTo::Token(out_mint), Market::CpmmOuter(pool)) => self.sell_cpmm_to_mint(
-                sell_amt, pool, meme, *out_mint, slip, opts.min_out, setup, touched, &opts.ata,
+                sell_amt, pool, meme, *out_mint, slip, opts.min_out, opts.fixed_output, setup, touched, &opts.ata,
             ),
             (SellTo::Token(out_mint), Market::PumpSwapOuter(pool)) => {
                 let tp = pool.quote_token_program;
@@ -1133,7 +1270,7 @@ impl RouterClient {
                     AtaKind::Quote
                 };
                 push_create_ata(setup, &opts.ata, kind, &payer, out_mint, &TOKEN_PROGRAM);
-                self.sell_raydium_v4_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out)
+                self.sell_raydium_v4_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Token(out_mint), Market::MeteoraDammV2(pool)) => {
                 let tp = if *out_mint == pool.token_a_mint {
@@ -1149,7 +1286,7 @@ impl RouterClient {
                     AtaKind::Quote
                 };
                 push_create_ata(setup, &opts.ata, kind, &payer, out_mint, &tp);
-                self.sell_meteora_v2_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out)
+                self.sell_meteora_v2_to_mint(sell_amt, pool, *out_mint, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Token(out_mint), Market::RaydiumClmm(pool)) => {
                 let tp = if *out_mint == pool.token_0_mint {
@@ -1256,6 +1393,7 @@ impl RouterClient {
                     WSOL_MINT,
                     slip,
                     opts.min_out,
+                    opts.fixed_output,
                     setup,
                     touched,
                     &opts.ata,
@@ -1269,12 +1407,12 @@ impl RouterClient {
             (SellTo::Sol | SellTo::Wsol, Market::RaydiumAmmV4(pool))
                 if !market.market.needs_sol_bridge() =>
             {
-                self.sell_raydium_v4_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out)
+                self.sell_raydium_v4_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Sol | SellTo::Wsol, Market::MeteoraDammV2(pool))
                 if !market.market.needs_sol_bridge() =>
             {
-                self.sell_meteora_v2_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out)
+                self.sell_meteora_v2_to_mint(sell_amt, pool, WSOL_MINT, slip, opts.min_out, opts.fixed_output)
             }
             (SellTo::Sol | SellTo::Wsol, Market::RaydiumClmm(pool))
                 if !market.market.needs_sol_bridge() =>
@@ -1415,8 +1553,10 @@ impl RouterClient {
         if out_mint != pool.quote_mint {
             return Err(anyhow!("PumpSwap receive mint must be pool quote"));
         }
-        let expected = pumpswap_sell_quote_out(pool, sell_amt)?;
-        let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
+        let min_out = match explicit_min_out {
+            Some(minimum) => minimum,
+            None => apply_slippage_min_out(pumpswap_sell_quote_out(pool, sell_amt)?, slip),
+        };
         let output_ata = ata(&self.payer, &out_mint, &pool.quote_token_program);
         Ok((
             vec![pumpswap_sell_leg(&self.payer, pool, sell_amt, min_out)?],
@@ -1467,6 +1607,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
     ) -> Result<(Vec<Leg>, u64, Pubkey)> {
         let input_mint = if output_mint == pool.coin_mint {
             pool.pc_mint
@@ -1475,6 +1616,12 @@ impl RouterClient {
         } else {
             return Err(anyhow!("Raydium AMM V4 output mint does not match pool"));
         };
+        if let Some(target) = fixed_output {
+            let (legs, minimum) = self.buy_raydium_v4_with_mint(
+                sell_amt, pool, input_mint, slip, explicit_min_out, Some(target),
+            )?;
+            return Ok((legs, minimum, ata(&self.payer, &output_mint, &TOKEN_PROGRAM)));
+        }
         let expected = raydium_amm_v4_out(pool, sell_amt, input_mint == pool.coin_mint)?;
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
         Ok((
@@ -1506,19 +1653,21 @@ impl RouterClient {
                 vec![meteora_damm_v2_swap_leg(
                     &self.payer,
                     &exact,
-                    spend, // max amount in
-                    amount_out,
+                    amount_out, // amount_0 = output in exact-out mode
+                    spend, // amount_1 = maximum input
                     input_mint,
                 )?],
                 amount_out,
             ));
         }
-        let expected = meteora_damm_v2_out(pool, spend, input_mint == pool.token_a_mint)?;
+        let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, spend, input_mint == pool.token_a_mint)? };
+        let mut exact = pool.clone();
+        exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
         Ok((
             vec![meteora_damm_v2_swap_leg(
                 &self.payer,
-                pool,
+                &exact,
                 spend,
                 min_out,
                 input_mint,
@@ -1534,6 +1683,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
     ) -> Result<(Vec<Leg>, u64, Pubkey)> {
         let (input_mint, output_program) = if output_mint == pool.token_a_mint {
             (pool.token_b_mint, pool.token_a_program)
@@ -1542,12 +1692,20 @@ impl RouterClient {
         } else {
             return Err(anyhow!("Meteora DAMM V2 output mint does not match pool"));
         };
-        let expected = meteora_damm_v2_out(pool, sell_amt, input_mint == pool.token_a_mint)?;
+        if let Some(target) = fixed_output {
+            let (legs, minimum) = self.buy_meteora_v2_with_mint(
+                sell_amt, pool, input_mint, slip, explicit_min_out, Some(target),
+            )?;
+            return Ok((legs, minimum, ata(&self.payer, &output_mint, &output_program)));
+        }
+        let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, sell_amt, input_mint == pool.token_a_mint)? };
         let min_out = explicit_min_out.unwrap_or_else(|| apply_slippage_min_out(expected, slip));
+        let mut exact = pool.clone();
+        exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
         Ok((
             vec![meteora_damm_v2_swap_leg(
                 &self.payer,
-                pool,
+                &exact,
                 sell_amt,
                 min_out,
                 input_mint,
@@ -1565,6 +1723,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1601,6 +1760,7 @@ impl RouterClient {
             pool.token_1_program,
             "Raydium CLMM",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1630,6 +1790,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1660,6 +1821,7 @@ impl RouterClient {
             pool.token_program_b,
             "Orca Whirlpool",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1683,6 +1845,7 @@ impl RouterClient {
         slip: u64,
         explicit: Option<u64>,
     ) -> Result<(Vec<Leg>, u64)> {
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1719,6 +1882,7 @@ impl RouterClient {
             pool.token_y_program,
             "Meteora DLMM",
         )?;
+        assert_quote_direction(pool.quoted_input_mint, input, explicit)?;
         let min = concentrated_min_out(
             pool.expected_out,
             pool.quoted_amount_in,
@@ -1870,6 +2034,7 @@ impl RouterClient {
         output_mint: Pubkey,
         slip: u64,
         explicit_min_out: Option<u64>,
+        fixed_output: Option<u64>,
         setup: &mut Vec<Instruction>,
         touched: &mut TouchedAtas,
         policy: &AtaPolicy,
@@ -1896,6 +2061,12 @@ impl RouterClient {
             AtaKind::Quote
         };
         push_create_ata(setup, policy, kind, &payer, &output_mint, &output_tp);
+        if let Some(target) = fixed_output {
+            let leg = cpmm_swap_exact_out_leg(
+                &payer, pool, sell_amt, target, input_mint, output_mint, user_in, user_out,
+            )?;
+            return Ok((vec![leg], target, user_out));
+        }
         let expected = cpmm_out(pool, sell_amt, input_is_base)?;
         let min_out = explicit_min_out
             .unwrap_or_else(|| apply_slippage_min_out(expected, slip));
@@ -1999,7 +2170,7 @@ impl RouterClient {
                 if pool.quote_mint != quote {
                     return Err(anyhow!("PumpFun V2 bridge quote mismatch"));
                 }
-                let expected = pumpfun_buy_token_out(pool, hop1_min);
+                let expected = match explicit_min_out { Some(min) => min, None => pumpfun_buy_token_out(pool, hop1_min)? };
                 let min = explicit_min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slippage_bps));
                 (pumpfun_buy_v2_leg(&payer, pool, hop1_min, min), expected)
@@ -2020,11 +2191,13 @@ impl RouterClient {
                 )
             }
             Market::MeteoraDammV2(pool) => {
-                let expected = meteora_damm_v2_out(pool, hop1_min, quote == pool.token_a_mint)?;
+                let expected = match explicit_min_out { Some(min) => min, None => meteora_damm_v2_out(pool, hop1_min, quote == pool.token_a_mint)? };
                 let min = explicit_min_out
                     .unwrap_or_else(|| apply_slippage_min_out(expected, slippage_bps));
+                let mut exact = pool.clone();
+                exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
                 (
-                    meteora_damm_v2_swap_leg(&payer, pool, hop1_min, min, quote)?,
+                    meteora_damm_v2_swap_leg(&payer, &exact, hop1_min, min, quote)?,
                     expected,
                 )
             }
@@ -2183,7 +2356,7 @@ impl RouterClient {
                 if pool.quote_mint != quote {
                     return Err(anyhow!("PumpFun V2 bridge quote mismatch"));
                 }
-                let expected = pumpfun_sell_sol_out(pool, sell_amt);
+                let expected = pumpfun_sell_sol_out(pool, sell_amt)?;
                 let hop1_min = bridge_intermediate_min_out(expected);
                 (pumpfun_sell_v2_leg(&payer, pool, sell_amt, hop1_min), hop1_min)
             }
@@ -2205,14 +2378,17 @@ impl RouterClient {
                 let input = market.base_mint();
                 let expected = meteora_damm_v2_out(pool, sell_amt, input == pool.token_a_mint)?;
                 let hop1_min = bridge_intermediate_min_out(expected);
+                let mut exact = pool.clone();
+                exact.swap_mode = crate::constants::METEORA_DAMM_V2_EXACT_IN;
                 (
-                    meteora_damm_v2_swap_leg(&payer, pool, sell_amt, hop1_min, input)?,
+                    meteora_damm_v2_swap_leg(&payer, &exact, sell_amt, hop1_min, input)?,
                     hop1_min,
                 )
             }
             // Intermediate CL hop pins expected_out (slippage_bps=0); final hop applies slip.
             Market::RaydiumClmm(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2228,6 +2404,7 @@ impl RouterClient {
             }
             Market::Whirlpool(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2243,6 +2420,7 @@ impl RouterClient {
             }
             Market::MeteoraDlmm(pool) => {
                 let input = market.base_mint();
+                assert_quote_direction(pool.quoted_input_mint, input, None)?;
                 let quote_est = concentrated_min_out(
                     pool.expected_out,
                     pool.quoted_amount_in,
@@ -2313,6 +2491,13 @@ impl RouterClient {
     }
 }
 
+fn assert_quote_direction(quoted_input: Option<Pubkey>, input: Pubkey, explicit: Option<u64>) -> Result<()> {
+    if explicit.is_none() && quoted_input != Some(input) {
+        return Err(anyhow!("quote input mint/direction is missing or mismatched; refresh quote or provide min_out"));
+    }
+    Ok(())
+}
+
 fn concentrated_min_out(
     expected: Option<u64>,
     quoted_amount_in: Option<u64>,
@@ -2321,6 +2506,7 @@ fn concentrated_min_out(
     slippage_bps: u64,
     dex: &str,
 ) -> Result<u64> {
+    if let Some(min) = explicit { return Ok(min); }
     match quoted_amount_in {
         Some(qin) if qin == amount_in => {}
         Some(qin) => {
@@ -2377,20 +2563,18 @@ fn pair_input_and_output_program(
 
 /// Smallest `amount_in` such that `amount_in - fee_amount(amount_in, fee_bps) >= spend`.
 #[inline]
-fn route_amount_in_for_spend(spend: u64, fee_bps: u16) -> u64 {
-    if fee_bps == 0 || spend == 0 {
-        return spend;
+fn route_amount_in_for_spend(spend: u64, fee_bps: u16) -> Result<u64> {
+    if fee_bps >= 10_000 {
+        return Err(anyhow!("router fee must be below 10_000 bps"));
     }
-    let bps = fee_bps as u128;
-    let denom = 10_000u128.saturating_sub(bps);
-    if denom == 0 {
-        return u64::MAX;
+    if spend == 0 {
+        return Ok(0);
     }
-    let mut amount = (spend as u128).saturating_mul(10_000).div_ceil(denom);
-    while amount.saturating_sub(amount.saturating_mul(bps) / 10_000) < spend as u128 {
-        amount = amount.saturating_add(1);
-    }
-    amount.min(u64::MAX as u128) as u64
+    // On-chain fees round down, so net = ceil(gross * (10000 - bps) / 10000).
+    // The first gross amount reaching spend is floor((spend - 1) * 10000 / d) + 1.
+    let denominator = 10_000u128 - fee_bps as u128;
+    let amount = (spend as u128 - 1) * 10_000 / denominator + 1;
+    u64::try_from(amount).map_err(|_| anyhow!("router input including fee exceeds u64"))
 }
 
 fn resolve_shared_mint(pool: &CpmmPool, bridge: &BridgePool) -> Result<Pubkey> {
@@ -2495,15 +2679,32 @@ mod tests {
 
     #[test]
     fn route_amount_in_covers_spend_after_fee() {
-        for bps in [0u16, 1, 25, 100, 1000] {
+        for bps in [0u16, 1, 25, 100, 1000, 9_999] {
             for spend in [1u64, 999, 1_000_000, 12_345_678] {
-                let amount = route_amount_in_for_spend(spend, bps);
+                let amount = route_amount_in_for_spend(spend, bps).unwrap();
                 let net = amount.saturating_sub(fee_amount(amount, bps));
                 assert!(
                     net >= spend,
                     "bps={bps} spend={spend} amount={amount} net={net}"
                 );
+                if amount > 0 {
+                    let previous = amount - 1;
+                    assert!(previous - fee_amount(previous, bps) < spend,
+                        "gross input is not minimal: bps={bps} spend={spend} amount={amount}");
+                }
             }
         }
+        assert_eq!(route_amount_in_for_spend(0, 100).unwrap(), 0);
+        assert_eq!(route_amount_in_for_spend(u64::MAX, 0).unwrap(), u64::MAX);
+        for bps in [1, 25, 9_999] {
+            let reachable = u64::MAX - fee_amount(u64::MAX, bps);
+            let gross = route_amount_in_for_spend(reachable, bps).unwrap();
+            assert_eq!(gross - fee_amount(gross, bps), reachable);
+            assert!(route_amount_in_for_spend(reachable + 1, bps).is_err());
+        }
+        for bps in [10_000, 10_001, u16::MAX] {
+            assert!(route_amount_in_for_spend(1, bps).is_err());
+        }
+
     }
 }

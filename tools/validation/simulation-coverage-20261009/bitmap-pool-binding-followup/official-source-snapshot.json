@@ -1,0 +1,26 @@
+{
+  "recorded_date": "2026-10-09",
+  "scope": "Official PDA derivation sources; not full swap or mainnet execution",
+  "packages": [
+    {
+      "package": "@raydium-io/raydium-sdk-v2",
+      "version": "0.2.74-alpha",
+      "tarball": "https://registry.npmjs.org/@raydium-io/raydium-sdk-v2/-/raydium-sdk-v2-0.2.74-alpha.tgz",
+      "integrity": "sha512-OD+GeNHuIYMyfsSfKzeIvrPQj/akqiKz3cKnKB/f5jQG67LZsxUCoYYL2QwDsrKiV65aEsuWeBeuSAJthiQwxw==",
+      "integrity_verified": true,
+      "file": "package/src/raydium/clmm/libraries/pda.ts",
+      "sha256": "a41340fb86ad022affad4fa5272cc04050e3446662b33df2064f04a882d46fa6"
+    },
+    {
+      "package": "@meteora-ag/dlmm",
+      "version": "1.9.14",
+      "tarball": "https://registry.npmjs.org/@meteora-ag/dlmm/-/dlmm-1.9.14.tgz",
+      "integrity": "sha512-3xJGBaYgkHWSZ7sjfaMYTuCUE9/FGibIwhoNKSaP3iXX3kZck4b3qrtFwDl/1+JaflTeiZQY4zO25e+u2V/9ug==",
+      "integrity_verified": true,
+      "file": "package/dist/index.js",
+      "sha256": "362b367730cd9af14a37f5173416b25123274541d98d923afbb3acbb251ac929"
+    }
+  ],
+  "trade_revision": "e6d5c64b2c39764f76be8f4b1633f375c59dcd71",
+  "parser_revision": "51460a91ca3326663a59651ac0860744ac10fdc0"
+}

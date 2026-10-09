@@ -29,6 +29,8 @@ pub struct LaunchLabPool {
     pub total_base_sell: u128,
     /// 0 = constant-product (only type we quote).
     pub curve_type: u8,
+    /// True only after current configuration and mint fee state have been supplied.
+    pub fee_rates_known: bool,
     pub trade_fee_rate: u64,
     pub platform_fee_rate: u64,
     pub creator_fee_rate: u64,
@@ -60,6 +62,8 @@ pub struct CpmmPool {
     pub quote_token_program: Pubkey,
     pub base_reserve: u64,
     pub quote_reserve: u64,
+    /// True only after current configuration and mint fee state have been supplied.
+    pub fee_rates_known: bool,
     pub trade_fee_rate: u64,
     pub creator_fee_rate: u64,
     /// 0 = always on input; 1 = on input when base_in; 2 = on input when quote_in.
@@ -151,8 +155,11 @@ pub struct PumpFunPool {
     /// Virtual *quote* reserves (lamports for WSOL quote; USDC units for USDC quote V2).
     pub virtual_sol_reserves: u64,
     pub real_token_reserves: u64,
-    /// 0 → use `95 + (has_creator ? 30 : 0)`; else override.
+    /// Actual charged protocol rate; zero is a valid rate when fee_rates_known.
     pub protocol_fee_bps: u64,
+    pub creator_fee_bps: u64,
+    /// False for params lacking current Global/FeeConfig rates; auto-quotes fail.
+    pub fee_rates_known: bool,
     pub has_creator: bool,
     /// Cashback coins need `user_volume_accumulator` on sell + track_volume=1 on buy.
     pub is_cashback_coin: bool,
@@ -198,8 +205,12 @@ pub struct PumpSwapPool {
     pub coin_creator_vault_authority: Pubkey,
     pub coin_creator: Pubkey,
     pub base_reserve: u64,
+    /// Raw quote-vault balance, including fees reserved for future sweeps.
     pub quote_reserve: u64,
     pub virtual_quote_reserves: i128,
+    /// Protocol + creator fees held in the quote vault. None means unknown;
+    /// automatic sell quotes require a current Pool account overlay.
+    pub quote_fee_reserves: Option<u64>,
     pub lp_fee_bps: u64,
     pub protocol_fee_bps: u64,
     pub creator_fee_bps: u64,
@@ -208,6 +219,28 @@ pub struct PumpSwapPool {
     pub protocol_fee_recipient: Pubkey,
     /// Buyback fee recipient (remaining account). Prefer GlobalConfig list.
     pub buyback_fee_recipient: Pubkey,
+}
+
+impl PumpSwapPool {
+    /// Supply sweep-reserved fees from the same authoritative Pool/vault snapshot
+    /// as this market. Legacy params and trade events do not contain these totals.
+    pub fn apply_pool_fee_reserves(
+        &mut self,
+        state: &sol_trade_sdk::instruction::utils::pumpswap_types::Pool,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(state.base_mint == self.base_mint && state.quote_mint == self.quote_mint
+            && state.pool_base_token_account == self.pool_base_token_account
+            && state.pool_quote_token_account == self.pool_quote_token_account
+            && state.virtual_quote_reserves == self.virtual_quote_reserves
+            && state.coin_creator == self.coin_creator
+            && state.is_cashback_coin == self.is_cashback_coin,
+            "PumpSwap Pool changed or does not match the market snapshot; reload state");
+        let fees = state.protocol_fees.checked_add(state.creator_fees)
+            .filter(|fees| *fees <= self.quote_reserve)
+            .ok_or_else(|| anyhow::anyhow!("PumpSwap reserved fees exceed quote vault balance"))?;
+        self.quote_fee_reserves = Some(fees);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -233,8 +266,9 @@ pub struct RaydiumAmmV4Pool {
     pub pc_reserve: u64,
     /// From AmmInfo — default 25 (0.25%).
     pub trade_fee_numerator: u64,
-    /// From AmmInfo — default 25 (taken from trade_fee, deducted from out).
+    /// SwapBaseInV2 input fee from AmmInfo (not a fee on output).
     pub swap_fee_numerator: u64,
+    pub swap_fee_denominator: u64,
 }
 
 impl RaydiumAmmV4Pool {
@@ -261,8 +295,10 @@ pub struct MeteoraDammV2Pool {
     pub fee_bps: u64,
     /// Input size this `expected_out` was quoted for (required when using expected_out).
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
-    /// `swap2` mode: only `0` (exact-in) is supported by the router fee_source check.
+    /// `swap2` mode: 0 (exact-in) or 2 (exact-out); partial-fill mode 1 is rejected.
     pub swap_mode: u8,
     pub referral_token_account: Option<Pubkey>,
     pub include_rate_limiter_sysvar: bool,
@@ -282,6 +318,8 @@ pub struct RaydiumClmmPool {
     pub tick_arrays: Vec<Pubkey>,
     pub tick_array_bitmap_extension: Option<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }
@@ -295,8 +333,11 @@ pub struct WhirlpoolPool {
     pub vault_b: Pubkey,
     pub token_program_a: Pubkey,
     pub token_program_b: Pubkey,
+    /// Three fixed tick arrays followed by up to three supplemental tick arrays.
     pub tick_arrays: Vec<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }
@@ -314,6 +355,8 @@ pub struct MeteoraDlmmPool {
     pub oracle: Pubkey,
     pub bin_arrays: Vec<Pubkey>,
     pub quoted_amount_in: Option<u64>,
+    /// Input mint of the externally computed quote; never infer from reserves.
+    pub quoted_input_mint: Option<Pubkey>,
     pub expected_out: Option<u64>,
     pub fee_bps: u16,
 }
@@ -398,20 +441,8 @@ impl Market {
             Self::CpmmOuter(p) => p.meme_mint(),
             Self::PumpFunInner(p) => p.mint,
             Self::PumpSwapOuter(p) => p.base_mint,
-            Self::RaydiumAmmV4(p) => {
-                if p.coin_mint == WSOL_MINT || p.coin_mint == USDC_MINT {
-                    p.pc_mint
-                } else {
-                    p.coin_mint
-                }
-            }
-            Self::MeteoraDammV2(p) => {
-                if p.token_a_mint == WSOL_MINT || p.token_a_mint == USDC_MINT {
-                    p.token_b_mint
-                } else {
-                    p.token_a_mint
-                }
-            }
+            Self::RaydiumAmmV4(p) => pair_base(p.coin_mint, p.pc_mint),
+            Self::MeteoraDammV2(p) => pair_base(p.token_a_mint, p.token_b_mint),
             Self::RaydiumClmm(p) => pair_base(p.token_0_mint, p.token_1_mint),
             Self::Whirlpool(p) => pair_base(p.mint_a, p.mint_b),
             Self::MeteoraDlmm(p) => pair_base(p.token_x_mint, p.token_y_mint),
@@ -425,22 +456,8 @@ impl Market {
             Self::CpmmOuter(p) => p.pay_mint(),
             Self::PumpFunInner(p) => p.quote_mint,
             Self::PumpSwapOuter(p) => p.quote_mint,
-            Self::RaydiumAmmV4(p) => {
-                if p.coin_mint == WSOL_MINT || p.coin_mint == USDC_MINT {
-                    p.coin_mint
-                } else {
-                    p.pc_mint
-                }
-            }
-            Self::MeteoraDammV2(p) => {
-                if p.token_a_mint == WSOL_MINT || p.token_b_mint == WSOL_MINT {
-                    WSOL_MINT
-                } else if p.token_a_mint == USDC_MINT {
-                    USDC_MINT
-                } else {
-                    p.token_b_mint
-                }
-            }
+            Self::RaydiumAmmV4(p) => pair_quote(p.coin_mint, p.pc_mint),
+            Self::MeteoraDammV2(p) => pair_quote(p.token_a_mint, p.token_b_mint),
             Self::RaydiumClmm(p) => pair_quote(p.token_0_mint, p.token_1_mint),
             Self::Whirlpool(p) => pair_quote(p.mint_a, p.mint_b),
             Self::MeteoraDlmm(p) => pair_quote(p.token_x_mint, p.token_y_mint),
@@ -575,7 +592,8 @@ impl RoutedMarket {
         }
     }
 
-    /// For non-WSOL CPMM pairs, set `pool.base_mint` = meme and provide `bridge`.
+    /// For non-WSOL CPMM pairs, the bridge identifies the payment mint.
+    /// Keep the original pool mint, vault and reserve ordering.
     pub fn stonk_outer(pool: CpmmPool, bridge: Option<BridgePool>) -> Self {
         Self {
             market: Market::CpmmOuter(pool),
@@ -635,6 +653,25 @@ impl RoutedMarket {
                     .unwrap_or(self.market.base_token_program())
             }
             _ => self.market.base_token_program(),
+        }
+    }
+
+    /// Payment/receive mint for this routed market. A CPMM bridge can select
+    /// either pool side as quote; raw base/quote ordering is not trade direction.
+    pub fn quote_mint(&self) -> Pubkey {
+        match &self.market {
+            Market::CpmmOuter(pool) => pool.other_mint(&self.meme_mint())
+                .unwrap_or_else(|| pool.pay_mint()),
+            _ => self.market.quote_mint(),
+        }
+    }
+
+    /// Token program for the payment/receive mint selected by this routed market.
+    pub fn quote_token_program(&self) -> Pubkey {
+        match &self.market {
+            Market::CpmmOuter(pool) => pool.token_program_for(&self.quote_mint())
+                .unwrap_or_else(|| self.market.quote_token_program()),
+            _ => self.market.quote_token_program(),
         }
     }
 }

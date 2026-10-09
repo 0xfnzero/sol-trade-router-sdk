@@ -33,6 +33,31 @@ fn ensure_leg_account_budget(n: usize) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn require_token_programs(programs: &[Pubkey], dex: &str) -> Result<()> {
+    if programs.iter().any(|program| *program != TOKEN_PROGRAM && *program != TOKEN_2022_PROGRAM) {
+        return Err(anyhow!("{dex} mint token program is missing or unsupported; supply actual mint owners"));
+    }
+    Ok(())
+}
+
+pub(crate) fn require_mint_programs(mints: &[(Pubkey, Pubkey)], dex: &str) -> Result<()> {
+    for &(mint, program) in mints {
+        require_token_programs(&[program], dex)?;
+        // Token-2022's native mint has a different address from classic WSOL.
+        if mint == WSOL_MINT && program != TOKEN_PROGRAM {
+            return Err(anyhow!("{dex} canonical WSOL mint requires classic WSOL token program"));
+        }
+    }
+    Ok(())
+}
+
+fn require_array_addresses(addresses: &[Pubkey], dex: &str) -> Result<()> {
+    if addresses.iter().any(|key| *key == Pubkey::default()) {
+        return Err(anyhow!("{dex} snapshot has a missing liquidity array address"));
+    }
+    Ok(())
+}
+
 #[inline(always)]
 fn encode_u64_triple(disc: &[u8; 8], a: u64, b: u64, c: u64) -> [u8; 32] {
     let mut data = [0u8; 32];
@@ -137,6 +162,8 @@ pub fn cpmm_swap_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
@@ -195,6 +222,8 @@ pub fn cpmm_swap_exact_out_leg(
     user_input_ata: Pubkey,
     user_output_ata: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "Raydium CPMM")?;
     let (input_vault, output_vault, input_tp, output_tp) =
         if input_mint == pool.base_mint && output_mint == pool.quote_mint {
             (
@@ -251,11 +280,12 @@ pub fn pumpfun_buy_leg(
     min_tokens_out: u64,
     user_token_ata: Pubkey,
 ) -> Leg {
-    let mut data = [0u8; 25];
+    let mut data = [0u8; 26];
     data[..8].copy_from_slice(&PUMPFUN_BUY_EXACT_SOL_IN);
     data[8..16].copy_from_slice(&lamports_in.to_le_bytes());
     data[16..24].copy_from_slice(&min_tokens_out.to_le_bytes());
     data[24] = pool.track_volume_byte();
+    data[25] = 0; // partial_fill: OptionBool(false); preserve exact-input spending.
 
     let uva = pumpfun_user_volume_accumulator(user);
     let bonding_curve_v2 = if pool.bonding_curve_v2 == Pubkey::default() {
@@ -426,7 +456,9 @@ pub fn pumpfun_buy_v2_leg(
     quote_in: u64,
     min_tokens_out: u64,
 ) -> Leg {
-    let data = encode_u64_pair(&PUMPFUN_BUY_EXACT_QUOTE_IN_V2, quote_in, min_tokens_out);
+    let mut data =
+        encode_u64_pair(&PUMPFUN_BUY_EXACT_QUOTE_IN_V2, quote_in, min_tokens_out).to_vec();
+    data.push(0); // partial_fill: OptionBool(false).
     Leg {
         program_id: PUMPFUN_PROGRAM,
         accounts: pumpfun_v2_accounts(user, pool, true),
@@ -449,6 +481,8 @@ pub fn pumpfun_sell_v2_leg(
 }
 
 fn pumpswap_accounts(user: &Pubkey, pool: &PumpSwapPool, is_buy: bool) -> Result<Vec<AccountMeta>> {
+    require_mint_programs(&[(pool.base_mint, pool.base_token_program),
+        (pool.quote_mint, pool.quote_token_program)], "PumpSwap")?;
     let user_base = ata(user, &pool.base_mint, &pool.base_token_program);
     let user_quote = ata(user, &pool.quote_mint, &pool.quote_token_program);
     // Observed protocol fee recipient (mayhem or standard). Do not hardcode only
@@ -599,6 +633,9 @@ pub fn raydium_amm_v4_swap_leg(
     } else {
         pool.token_program
     };
+    if tp != TOKEN_PROGRAM {
+        return Err(anyhow!("Raydium AMM V4 V2 supports only classic SPL Token"));
+    }
     let mut data = [0u8; 17];
     data[1..9].copy_from_slice(&amount_in.to_le_bytes());
     data[9..17].copy_from_slice(&min_out.to_le_bytes());
@@ -624,7 +661,7 @@ pub fn raydium_amm_v4_swap_leg(
     })
 }
 
-/// Exact-out AMM V4 swap (tag 17): amount_out + max_amount_in.
+/// Exact-out AMM V4 swap (tag 17): max_amount_in + amount_out.
 pub fn raydium_amm_v4_swap_exact_out_leg(
     user: &Pubkey,
     pool: &RaydiumAmmV4Pool,
@@ -649,6 +686,9 @@ pub fn raydium_amm_v4_swap_exact_out_leg(
     } else {
         pool.token_program
     };
+    if tp != TOKEN_PROGRAM {
+        return Err(anyhow!("Raydium AMM V4 V2 supports only classic SPL Token"));
+    }
     let mut data = [0u8; 17];
     data[0] = RAYDIUM_AMM_V4_SWAP_BASE_OUT_V2;
     data[1..9].copy_from_slice(&max_amount_in.to_le_bytes());
@@ -679,6 +719,8 @@ pub fn meteora_damm_v2_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.token_a_mint, pool.token_a_program),
+        (pool.token_b_mint, pool.token_b_program)], "Meteora DAMM V2")?;
     if pool.swap_mode == METEORA_DAMM_V2_PARTIAL_FILL {
         return Err(anyhow!(
             "Meteora DAMM V2 partial-fill unsupported (router requires exact-in/exact-out spend)"
@@ -757,10 +799,13 @@ pub fn raydium_clmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.token_0_mint, pool.token_0_program),
+        (pool.token_1_mint, pool.token_1_program)], "Raydium CLMM")?;
     let bitmap_pda = crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state);
-    let mut bitmap = pool
-        .tick_array_bitmap_extension
-        .filter(|b| *b == bitmap_pda);
+    if pool.tick_array_bitmap_extension.is_some_and(|key| key != bitmap_pda) {
+        return Err(anyhow!("Raydium CLMM bitmap extension does not match pool PDA"));
+    }
+    let mut bitmap = pool.tick_array_bitmap_extension;
     let mut tick_arrays = Vec::with_capacity(pool.tick_arrays.len());
     for &key in &pool.tick_arrays {
         if key == bitmap_pda {
@@ -772,6 +817,7 @@ pub fn raydium_clmm_swap_leg(
     if tick_arrays.is_empty() {
         return Err(anyhow!("Raydium CLMM snapshot has no tick arrays"));
     }
+    require_array_addresses(&tick_arrays, "Raydium CLMM")?;
     let (output_mint, input_vault, output_vault, input_program, output_program) =
         if input_mint == pool.token_0_mint {
             (
@@ -840,12 +886,18 @@ pub fn whirlpool_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.mint_a, pool.token_program_a),
+        (pool.mint_b, pool.token_program_b)], "Orca Whirlpool")?;
     if pool.tick_arrays.len() < 3 {
         return Err(anyhow!(
             "Whirlpool swap_v2 requires 3 tick arrays (got {})",
             pool.tick_arrays.len()
         ));
     }
+    if pool.tick_arrays.len() > 6 {
+        return Err(anyhow!("Whirlpool allows at most 3 supplemental tick arrays"));
+    }
+    require_array_addresses(&pool.tick_arrays, "Orca Whirlpool")?;
     let a_to_b = if input_mint == pool.mint_a {
         true
     } else if input_mint == pool.mint_b {
@@ -868,7 +920,17 @@ pub fn whirlpool_swap_leg(
     data.extend_from_slice(&sqrt_limit.to_le_bytes());
     data.push(1); // amount_specified_is_input
     data.push(u8::from(a_to_b));
-    data.push(0); // remaining_accounts_info: None
+    let supplemental = &pool.tick_arrays[3..];
+    if supplemental.is_empty() {
+        data.push(0); // remaining_accounts_info: None
+    } else {
+        // Official Whirlpool IDL: Some(RemainingAccountsInfo { slices: vec![
+        // RemainingAccountsSlice { accounts_type: SupplementalTickArrays (6), length } ] }).
+        data.push(1);
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.push(6);
+        data.push(supplemental.len() as u8);
+    }
     let owner_a = ata(user, &pool.mint_a, &pool.token_program_a);
     let owner_b = ata(user, &pool.mint_b, &pool.token_program_b);
     let oracle = Pubkey::find_program_address(
@@ -876,7 +938,7 @@ pub fn whirlpool_swap_leg(
         &ORCA_WHIRLPOOL_PROGRAM,
     )
     .0;
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new_readonly(pool.token_program_a, false),
         AccountMeta::new_readonly(pool.token_program_b, false),
         MEMO_PROGRAM_META,
@@ -893,6 +955,8 @@ pub fn whirlpool_swap_leg(
         AccountMeta::new(ticks[2], false),
         AccountMeta::new(oracle, false),
     ];
+    accounts.extend(supplemental.iter().map(|key| AccountMeta::new(*key, false)));
+    ensure_leg_account_budget(accounts.len())?;
     Ok(Leg {
         program_id: ORCA_WHIRLPOOL_PROGRAM,
         accounts,
@@ -907,8 +971,15 @@ pub fn meteora_dlmm_swap_leg(
     min_out: u64,
     input_mint: Pubkey,
 ) -> Result<Leg> {
+    require_mint_programs(&[(pool.token_x_mint, pool.token_x_program),
+        (pool.token_y_mint, pool.token_y_program)], "Meteora DLMM")?;
     if pool.bin_arrays.is_empty() {
         return Err(anyhow!("Meteora DLMM snapshot has no bin arrays"));
+    }
+    require_array_addresses(&pool.bin_arrays, "Meteora DLMM")?;
+    let bitmap_pda = sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&pool.lb_pair);
+    if pool.bitmap_extension.is_some_and(|key| key != bitmap_pda && key != METEORA_DLMM_PROGRAM) {
+        return Err(anyhow!("Meteora DLMM bitmap extension does not match pair PDA"));
     }
     let output_mint = if input_mint == pool.token_x_mint {
         pool.token_y_mint
@@ -935,6 +1006,7 @@ pub fn meteora_dlmm_swap_leg(
     let mut accounts = Vec::with_capacity(16 + pool.bin_arrays.len());
     // Official SDK: missing bitmap extension → program-id sentinel (readonly).
     let bitmap_meta = match pool.bitmap_extension {
+        Some(key) if key == METEORA_DLMM_PROGRAM => AccountMeta::new_readonly(key, false),
         Some(key) => AccountMeta::new(key, false),
         None => AccountMeta::new_readonly(METEORA_DLMM_PROGRAM, false),
     };
@@ -1001,6 +1073,8 @@ mod tests {
             virtual_sol_reserves: 2_000_000,
             real_token_reserves: 900_000,
             protocol_fee_bps: 95,
+            creator_fee_bps: 30,
+            fee_rates_known: true,
             has_creator: true,
             is_cashback_coin: false,
         }
@@ -1015,6 +1089,10 @@ mod tests {
         assert_eq!(buy.accounts.len(), 27);
         assert_eq!(sell.accounts.len(), 26);
         assert_eq!(&buy.data[..8], &PUMPFUN_BUY_EXACT_QUOTE_IN_V2);
+        // pump-public-docs 8cda1fa: OptionBool(false) follows min_tokens_out.
+        assert_eq!(buy.data.len(), 25);
+        assert_eq!(buy.data[24], 0);
+        assert_eq!(sell.data.len(), 24);
         assert_eq!(&sell.data[..8], &PUMPFUN_SELL_V2);
         assert!(buy.accounts[8].is_writable);
         assert_eq!(
@@ -1049,6 +1127,7 @@ mod tests {
                 &key(2),
             )),
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 25,
         };
@@ -1071,6 +1150,7 @@ mod tests {
             token_program_b: TOKEN_PROGRAM,
             tick_arrays: vec![key(6), key(7), key(8)],
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 30,
         };
@@ -1099,6 +1179,7 @@ mod tests {
             oracle: key(6),
             bin_arrays: vec![key(7), key(8)],
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             fee_bps: 20,
         };
@@ -1134,6 +1215,7 @@ mod tests {
             pc_reserve: 2_000,
             trade_fee_numerator: 25,
             swap_fee_numerator: 25,
+            swap_fee_denominator: 10_000,
         };
         assert!(!pool.uses_openbook_market());
         let ix = raydium_amm_v4_swap_leg(&user, &pool, 100, 90, key(2)).unwrap();
@@ -1158,6 +1240,7 @@ mod tests {
             token_b_reserve: 1_000_000,
             fee_bps: 25,
             quoted_amount_in: Some(100),
+            quoted_input_mint: None,
             expected_out: Some(90),
             swap_mode: METEORA_DAMM_V2_EXACT_IN,
             referral_token_account: None,
@@ -1182,6 +1265,10 @@ mod tests {
         pool.user_volume_accumulator = key(99);
         let buy = pumpfun_buy_leg(&user, &pool, 100, 90, ata(&user, &pool.mint, &TOKEN_PROGRAM));
         let sell = pumpfun_sell_leg(&user, &pool, 100, 90, ata(&user, &pool.mint, &TOKEN_PROGRAM));
+        assert_eq!(buy.data.len(), 26);
+        assert_eq!(buy.data[24], pool.track_volume_byte());
+        assert_eq!(buy.data[25], 0); // partial_fill is explicitly disabled.
+        assert_eq!(sell.data.len(), 24);
         let expected_uva = pumpfun_user_volume_accumulator(&user);
         assert_eq!(buy.accounts[13].pubkey, expected_uva);
         assert_ne!(buy.accounts[13].pubkey, key(99));
@@ -1210,6 +1297,7 @@ mod tests {
             base_reserve: 1,
             quote_reserve: 1,
             virtual_quote_reserves: 0,
+            quote_fee_reserves: Some(0),
             lp_fee_bps: 20,
             protocol_fee_bps: 5,
             creator_fee_bps: 0,

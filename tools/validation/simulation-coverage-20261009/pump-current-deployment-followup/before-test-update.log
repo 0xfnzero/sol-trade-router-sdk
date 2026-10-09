@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/scripts/test-pump-v3-local.py", line 236, in <module>
+    main()
+  File "/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/scripts/test-pump-v3-local.py", line 207, in main
+    feature_probe(pump)
+  File "/Users/wangwei/WorkSpace/SolanaProjects/Solana-SDK-Projects/sol-trade-router-sdk/scripts/test-pump-v3-local.py", line 190, in feature_probe
+    assert "InstructionErrorCustom(101)" in str(result.err()), result.meta().logs()
+AssertionError: ['Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]', 'Program log: Instruction: SetMaxCurveDepth', 'Program log: AnchorError caused by account: global. Error Code: AccountNotEnoughKeys. Error Number: 3005. Error Message: Not enough account keys given to the instruction.', 'Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 1717 of 200000 compute units', 'Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0xbbd']

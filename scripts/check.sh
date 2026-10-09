@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Host-side compile check for SDK + program (no SBF toolchain required).
+# Offline checks by default; --mainnet explicitly runs the existing live suites.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
-echo "==> cargo check -p sol-trade-router-sdk"
-cargo check -p sol-trade-router-sdk
-
-echo "==> cargo check -p sol-trade-router"
-cargo check -p sol-trade-router
-
-echo "==> ok"
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--mainnet" ) ]]; then
+  echo "Usage: scripts/check.sh [--mainnet]" >&2
+  exit 2
+fi
+cargo check --workspace
+cargo test --workspace
+if [[ ${1:-} == "--mainnet" ]]; then
+  export ROUTER_TEST_EVIDENCE_DIR="${ROUTER_TEST_EVIDENCE_DIR:-$ROOT/target/mainnet-evidence}"
+  cargo test -p sol-trade-router-sdk mainnet_ -- --ignored --nocapture --test-threads=1
+fi

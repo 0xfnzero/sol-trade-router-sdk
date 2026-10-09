@@ -31,6 +31,7 @@ mod legs;
 mod market;
 mod parser;
 mod pool_guard;
+mod pumpfun_v3;
 mod quote;
 mod route_ix;
 mod trade;
@@ -38,7 +39,7 @@ mod transfer_fee;
 
 pub use adapter::{
     bonk_to_launchlab, cpmm_from_params, damm_v2_from_params, dlmm_from_params,
-    load_routed_market_by_rpc, pumpfun_from_params, pumpswap_from_params,
+    load_pumpfun_v3_by_rpc, load_routed_market_by_rpc, pumpfun_from_params, pumpswap_from_params,
     raydium_amm_v4_from_params, raydium_clmm_from_params, to_routed_market,
     to_routed_market_for_user, whirlpool_from_params, LoadMarketRequest,
 };
@@ -81,6 +82,10 @@ pub use pool_guard::{
     assert_routed_market_ok, cpmm_observation_pda, cpmm_pool_pda, cpmm_vault_pda, is_stonkfun_platform,
     launchlab_pool_pda, launchlab_vault_pda, pump_pool_authority_pda, pumpfun_bonding_curve_pda,
     pumpswap_canonical_pool_pda, PoolGuardPolicy,
+};
+pub use pumpfun_v3::{
+    PumpFunV3Pool, PumpFunV3Trade, PUMPFUN_BUY_EXACT_QUOTE_IN_V3, PUMPFUN_BUY_V3,
+    PUMPFUN_SELL_V3,
 };
 pub use quote::{
     apply_slippage_min_out, clamp_slippage_bps, cpmm_out, fee_amount, launchlab_buy_base_out,

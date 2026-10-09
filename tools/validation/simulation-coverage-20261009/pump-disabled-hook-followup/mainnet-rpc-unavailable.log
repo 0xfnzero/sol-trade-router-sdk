@@ -1,0 +1,30 @@
+warning: constant `CPMM_DEFAULT_TRADE_FEE_RATE` is never used
+   --> crates/sdk/src/constants.rs:108:11
+    |
+108 | pub const CPMM_DEFAULT_TRADE_FEE_RATE: u64 = 2_500;
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sol-trade-router-sdk` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.82s
+     Running unittests src/lib.rs (target/debug/deps/sol_trade_router_sdk-5225f172ff08f755)
+
+running 1 test
+test mainnet_sim_tests::mainnet_sim_pumpfun_buy_then_sell_roundtrip_legs ... [get_slot] rpc attempt=1 err=error sending request for url ([RPC]/)
+[get_slot] rpc attempt=2 err=error sending request for url ([RPC]/)
+[get_slot] rpc attempt=3 err=error sending request for url ([RPC]/)
+
+thread 'mainnet_sim_tests::mainnet_sim_pumpfun_buy_then_sell_roundtrip_legs' (50296426) panicked at crates/sdk/src/mainnet_sim.rs:273:13:
+mainnet test was requested but RPC is unavailable: error sending request for url ([RPC]/)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    mainnet_sim_tests::mainnet_sim_pumpfun_buy_then_sell_roundtrip_legs
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 173 filtered out; finished in 39.24s
+
+error: test failed, to rerun pass `-p sol-trade-router-sdk --lib`

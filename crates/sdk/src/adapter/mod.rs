@@ -2,6 +2,7 @@
 
 mod from_params;
 mod from_rpc;
+mod pumpfun_state;
 
 pub use from_params::{
     bonk_to_launchlab, cpmm_from_params, damm_v2_from_params, dlmm_from_params,
@@ -9,3 +10,7 @@ pub use from_params::{
     to_routed_market, to_routed_market_for_user, whirlpool_from_params,
 };
 pub use from_rpc::{load_routed_market_by_rpc, LoadMarketRequest};
+#[cfg(test)]
+pub(crate) use from_rpc::{refresh_pumpswap_fee_reserves, validate_route_mints};
+
+pub use pumpfun_state::load_pumpfun_v3_by_rpc;

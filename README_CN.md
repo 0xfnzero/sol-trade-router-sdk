@@ -61,7 +61,7 @@
 4. **DexType 全覆盖** — PumpFun、PumpSwap、LaunchLab/StonkFun/Bonk、Raydium CPMM / AMM V4 / CLMM、Orca Whirlpool、Meteora DLMM / DAMM V2
 5. **热路径零 RPC 池快照** — `market_from_dex_event` / `to_routed_market(DexParamEnum)`
 6. **ATA 策略** — WSOL / quote 冷路径准备；meme ATA 买入同笔创建
-7. **手续费完整性** — 链上校验 `fee_source` 花费 ≥ `amount_in`
+7. **花费 / 产出完整性** — exact-in 总花费必须等于 `amount_in`；exact-out 不超过预算；校验目标 mint / 原生 SOL 与最低到账量
 8. **Pool guard** — 可选 PDA / 白名单 / `stonk_strict`
 
 ## 📚 文档
@@ -79,23 +79,21 @@
 
 ## 📦 安装
 
-客户端 crate 当前为 **`publish = false`**，请用 git / path 依赖：
+客户端已准备为 crates.io **0.2.0** 版本。正式发布前可使用 `main` 分支的 Git 依赖：
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", package = "sol-trade-router-sdk" }
-# 仅在代码里 `use sol_parser_sdk::...`（订 gRPC/Shred）时再声明：
-sol-parser-sdk = "0.7.6"
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
+# 正式发布后：sol-trade-router-sdk = "=0.2.0"
+# 仅直接导入解析器类型的订阅程序需要：
+sol-parser-sdk = "=0.7.12"
 ```
 
-间接依赖（crates.io，自动拉取）：
+依赖使用已发布的 **sol-trade-sdk 6.0.0** 和 **sol-parser-sdk 0.7.12**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
 
-| Crate | 版本 | 作用 |
-|-------|------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.5` | SWQoS 提交、参数、基础设施（已 re-export） |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.6` | gRPC / Shred 事件（只有订阅时才需直接依赖） |
+详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
 
-一般**不必**再写 `sol-trade-sdk`：交易相关类型从 `sol_trade_router_sdk::*` 即可导入。
+一般**不必**额外依赖 `sol-trade-sdk`，交易类型已经从 `sol_trade_router_sdk::*` 导出。
 
 ## 🆚 与 sol-trade-sdk 的差异
 
@@ -201,6 +199,10 @@ let ixs = client.sell_to_sol(amount, &market)?.into_instructions();
 | WSOL | `buy_with_wsol` | `sell_to_wsol` |
 | quote | `buy_with_token` | `sell_to_token` |
 
+复用 `TradeOpts` 时，调用 `sell_to_wsol()` 或 `sell_to_token(...)` 会清除
+`sell_to_sol()` 设置的 WSOL 关闭策略。需要自定义关闭行为时，请在选择接收资产后
+调用 `close_wsol(...)` 或 `with_ata(...)` 覆盖策略。
+
 ### 3. 从事件 / 参数构建市场
 
 ```rust
@@ -221,6 +223,27 @@ let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```rust
 client.prepare_buy_atas(&market, BuyWith::Sol);
 ```
+
+SOL 交易对的 Pump 曲线设置 `use_v2=true` 后，使用 `BuyWith::Wsol` 或
+`SellTo::Wsol` 准备对应的 WSOL ATA。原生 SOL 结算仍跳过这些账户；
+V1 曲线不支持 WSOL 结算。
+
+`TradeBuyParams` / `TradeSellParams` 中的 `TradeTokenType::Token(WSOL_MINT)`
+与 `TradeTokenType::WSOL` 使用相同的 WSOL 账户创建和关闭标记。
+原生 SOL 卖出设置 `close_output_token_ata=true` 时，会关闭并解包 WSOL 输出。
+
+Router 交易及余额查询始终使用标准 ATA，覆盖 Token 和 Token-2022；
+共享交易配置中的 `use_seed_optimize` 不改变 Router 的账户地址。
+
+高层 Router 客户端尚未实现 PumpFun/PumpSwap 的 `BuyAmount::WithMaxInput`
+（`use_exact_sol_amount=false`），请求该模式会明确报错。
+可使用精确输入或已支持的固定输出目标；固定输出目标优先。
+
+`TradeBuyParams` / `TradeSellParams` 的 `mint` 必须对应市场选定的目标代币，
+`dex_type` 必须匹配 `extension_params`；仅构建指令的接口也会拒绝不匹配的请求。
+
+原生 SOL 买入设置 `close_input_token_ata=true` 时，会在路由后关闭实际使用的 WSOL ATA，
+返还租金并将账户内全部剩余 WSOL 转回 SOL。直接使用原生 SOL 的 PumpFun 路径不会关闭 WSOL ATA。
 
 ### 5. 管理指令（部署后）
 
