@@ -1,7 +1,7 @@
 # Orca Router example
 
 Run from the repository root with a local `.env` containing `RPC_URL`,
-`PRIVATE_KEY`, `QUOTE_AMOUNT_RAW`, `MIN_OUT_RAW`, and `ORCA_POOL`.
+`ROUTER_PROGRAM_ID` (your self-deployed matching Router), `PRIVATE_KEY`, `QUOTE_AMOUNT_RAW`, `MIN_OUT_RAW`, and `ORCA_POOL`.
 The example uses the program and mint addresses declared in `src/main.rs`.
 
 ```sh

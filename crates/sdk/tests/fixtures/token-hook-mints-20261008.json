@@ -1,0 +1,55 @@
+{
+  "source_sha256": "0daebe4c9bea9ae0248eaac924393c173fda6af2a9e9994ec4ed11a41875c4ac",
+  "source_commit": "34d3637305b3145755db2ecb09f402e94be4946c",
+  "scope": "Actual Token-2022 bank-created mint bytes; active hooks rejected before cached trade preparation, inactive/disabled hooks accepted. Callback execution is not supported by these SDKs.",
+  "cases": [
+    {
+      "name": "inactive_send",
+      "mint_hex": "010000001359a0ba6d0408648aa3516505a89fba0906b181341176b12f0664098076431640420f000000000006010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010e0040001359a0ba6d0408648aa3516505a89fba0906b181341176b12f066409807643160000000000000000000000000000000000000000000000000000000000000000",
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "reject_hook": false,
+      "bank_validation": {
+        "name": "inactive_send",
+        "error": null,
+        "slot": 454555608,
+        "broadcasts": 0,
+        "status": "execution_verified",
+        "sdk_guard_rejects_active_hook": false,
+        "active_hook": false,
+        "credit": 10001
+      }
+    },
+    {
+      "name": "disable_then_send",
+      "mint_hex": "010000001359a0ba6d0408648aa3516505a89fba0906b181341176b12f0664098076431640420f000000000006010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010e0040001359a0ba6d0408648aa3516505a89fba0906b181341176b12f066409807643160000000000000000000000000000000000000000000000000000000000000000",
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "reject_hook": false,
+      "bank_validation": {
+        "name": "disable_then_send",
+        "error": null,
+        "slot": 454555624,
+        "broadcasts": 0,
+        "status": "execution_verified",
+        "sdk_guard_rejects_active_hook": false,
+        "active_hook": false,
+        "credit": 10001
+      }
+    },
+    {
+      "name": "active_no_send",
+      "mint_hex": "010000001359a0ba6d0408648aa3516505a89fba0906b181341176b12f0664098076431640420f000000000006010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010e0040001359a0ba6d0408648aa3516505a89fba0906b181341176b12f06640980764316054a535a992921064d24e87160da387c7c35b5ddbc92bb81e41fa8404105448d",
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "reject_hook": true,
+      "bank_validation": {
+        "name": "active_no_send",
+        "error": null,
+        "slot": 454555663,
+        "broadcasts": 0,
+        "status": "execution_verified",
+        "sdk_guard_rejects_active_hook": true,
+        "active_hook": true,
+        "credit": 0
+      }
+    }
+  ]
+}

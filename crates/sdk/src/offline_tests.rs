@@ -755,7 +755,7 @@ fn offline_routed_market_helpers() {
         POOL_STATE_SIZE, POOL_STATE_DISCRIMINATOR, AMM_CONFIG_SIZE, AMM_CONFIG_DISCRIMINATOR,
     };
     let hook_fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../scripts/fixtures/token-hook-mints-20261008.json")).unwrap();
+        "../tests/fixtures/token-hook-mints-20261008.json")).unwrap();
     let mint_bytes = |case: &serde_json::Value| case["mint_hex"].as_str().unwrap()
         .as_bytes().chunks_exact(2)
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(),16).unwrap())

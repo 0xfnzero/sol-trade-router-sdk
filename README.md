@@ -77,29 +77,21 @@ Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Tradin
 
 ## 📦 Installation
 
-This workspace client crate is currently **`publish = false`**. Depend on a git checkout (or path):
+The client is prepared for crates.io as version **0.2.0**. Until that version is published, use the `main` Git branch:
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "fix/router-safety-regressions", package = "sol-trade-router-sdk" }
-# Streaming bots only — declare if you `use sol_parser_sdk::...`:
-sol-parser-sdk = "=0.7.10"
-
-[patch.crates-io]
-sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "e6d5c64b2c39764f76be8f4b1633f375c59dcd71" }
-sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
+# After publication: sol-trade-router-sdk = "=0.2.0"
+# Streaming bots only, if importing parser types directly:
+sol-parser-sdk = "=0.7.12"
 ```
 
-The parser and CLMM loader fixes are not yet crates.io releases. Cargo only reads `[patch]` from the consuming workspace root, so git/path consumers must include the pinned patch above as well. The checkout uses the same pinned revisions; no floating dependency branch is used. See [validation and deployment status](docs/MAINNET_TEST_REVIEW.md). The repaired router SDK must be used with a compatible upgraded router program; the current mainnet deployment still rejects its restored legacy header.
+Dependencies use published **sol-trade-sdk 6.0.0** and **sol-parser-sdk 0.7.12**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
 
-Resolved SDK dependencies (pulled automatically):
+See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
 
-| Crate | Version | Role |
-|-------|---------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.7` + fixed Git revision | SWQoS submit, params, infra (re-exported) |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.10` + fixed Git revision | gRPC / Shred events (direct dep only if you subscribe) |
-
-Do **not** add `sol-trade-sdk` to your `Cargo.toml` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
+Do **not** add `sol-trade-sdk` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
 
 ## 🆚 vs sol-trade-sdk
 

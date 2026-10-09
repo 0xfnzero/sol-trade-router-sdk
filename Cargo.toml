@@ -13,7 +13,7 @@ members = [
 default-members = ["crates/sdk"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["0xfnzero"]
@@ -31,22 +31,12 @@ thiserror = "2"
 solana-sdk = "4.0.1"
 solana-system-interface = { version = "3.0.0", features = ["bincode"] }
 solana-commitment-config = { version = "3.1.1", features = ["serde"] }
-sol-parser-sdk = { version = "=0.7.10", default-features = false, features = ["parse-borsh"] }
-sol-trade-sdk = { version = "=5.0.7", default-features = false }
+sol-parser-sdk = { version = "=0.7.12", default-features = false, features = ["parse-borsh"] }
+sol-trade-sdk = { version = "=6.0.0", default-features = false }
 tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
 solana-hash = "4.4.0"
 solana-message = "4.4.0"
 core_affinity = "0.8"
-
-[patch.crates-io]
-# Use initialized CLMM bitmaps and signed simulation authorities until release.
-sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "e6d5c64b2c39764f76be8f4b1633f375c59dcd71" }
-# Fix repeated AMM V4 invocation/log attribution consistently for both the
-# router and sol-trade-sdk until a crates.io release contains this revision.
-sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
-# Yellowstone 13.5.0 imports UnixStream unconditionally; the local copy
-# gates its UDS-only API on Unix so Windows RPC examples can compile.
-yellowstone-grpc-client = { path = "vendor/yellowstone-grpc-client" }
 
 [profile.release.package.sol-trade-router]
 # Keep size tuning local to the on-chain program; client SDK builds stay unchanged.

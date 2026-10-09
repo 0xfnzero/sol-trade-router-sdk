@@ -79,29 +79,21 @@
 
 ## 📦 安装
 
-客户端 crate 当前为 **`publish = false`**，请用 git / path 依赖：
+客户端已准备为 crates.io **0.2.0** 版本。正式发布前可使用 `main` 分支的 Git 依赖：
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "fix/router-safety-regressions", package = "sol-trade-router-sdk" }
-# 仅在代码里 `use sol_parser_sdk::...`（订 gRPC/Shred）时再声明：
-sol-parser-sdk = "=0.7.10"
-
-[patch.crates-io]
-sol-trade-sdk = { git = "https://github.com/0xfnzero/sol-trade-sdk.git", rev = "e6d5c64b2c39764f76be8f4b1633f375c59dcd71" }
-sol-parser-sdk = { git = "https://github.com/0xfnzero/sol-parser-sdk.git", rev = "51460a91ca3326663a59651ac0860744ac10fdc0" }
+sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
+# 正式发布后：sol-trade-router-sdk = "=0.2.0"
+# 仅直接导入解析器类型的订阅程序需要：
+sol-parser-sdk = "=0.7.12"
 ```
 
-解析器和 CLMM 加载器修复尚未发布到 crates.io。Cargo 只读取使用方 workspace 根目录的 `[patch]`，所以 git/path 使用方也需要加入上面的固定提交补丁。本仓库使用相同的固定提交，不依赖浮动依赖分支。详见[验证与部署状态](docs/MAINNET_TEST_REVIEW.md)。修复版 SDK 需要兼容的升级版链上 router；当前主网部署仍拒绝恢复的旧指令头。
+依赖使用已发布的 **sol-trade-sdk 6.0.0** 和 **sol-parser-sdk 0.7.12**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
 
-自动解析的 SDK 依赖：
+详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
 
-| Crate | 版本 | 作用 |
-|-------|------|------|
-| [sol-trade-sdk](https://crates.io/crates/sol-trade-sdk) | `=5.0.7` + 固定 Git 提交 | SWQoS 提交、参数、基础设施（已 re-export） |
-| [sol-parser-sdk](https://crates.io/crates/sol-parser-sdk) | `=0.7.10` + 固定 Git 提交 | gRPC / Shred 事件（只有订阅时才需直接依赖） |
-
-一般**不必**再写 `sol-trade-sdk`：交易相关类型从 `sol_trade_router_sdk::*` 即可导入。
+一般**不必**额外依赖 `sol-trade-sdk`，交易类型已经从 `sol_trade_router_sdk::*` 导出。
 
 ## 🆚 与 sol-trade-sdk 的差异
 

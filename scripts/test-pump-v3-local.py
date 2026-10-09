@@ -56,8 +56,10 @@ def account_with_program(account, program):
 
 
 def send(vm, payer, instruction):
-    return vm.send_transaction(Transaction.new_signed_with_payer(
-        [instruction], payer.pubkey(), [payer], vm.latest_blockhash()))
+    tx = Transaction.new_signed_with_payer(
+        [instruction], payer.pubkey(), [payer], vm.latest_blockhash())
+    tx.verify()
+    return vm.send_transaction(tx)
 
 
 def run_case(router_code, pump_code, *, boundary=False, token2022=False,
@@ -283,8 +285,10 @@ def run_case(router_code, pump_code, *, boundary=False, token2022=False,
                 AccountMeta(SYSTEM, False, False)]))
         # Repeating preparation in the same transaction must not charge rent twice.
         setup = setup + setup
-    result = vm.send_transaction(Transaction.new_signed_with_payer(
-        setup + [route_instruction], user, [payer], vm.latest_blockhash()))
+    tx = Transaction.new_signed_with_payer(
+        setup + [route_instruction], user, [payer], vm.latest_blockhash())
+    tx.verify()
+    result = vm.send_transaction(tx)
     error = str(result.err()) if isinstance(result, FailedTransactionMetadata) else None
     tokens = struct.unpack_from("<Q", vm.get_account(user_base).data, 64)[0]
     observed = {"mode": "exact_out" if exact_out is not None else "quote_input",

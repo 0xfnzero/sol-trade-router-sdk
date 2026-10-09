@@ -513,7 +513,7 @@ mod tests {
         pool.quote_mint = quote_key;
         curve.data[83..115].copy_from_slice(quote_key.as_ref());
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../scripts/fixtures/token-hook-mints-20261008.json"
+            "../../tests/fixtures/token-hook-mints-20261008.json"
         )).unwrap();
         for case in fixture["cases"].as_array().unwrap() {
             let data = case["mint_hex"].as_str().unwrap().as_bytes().chunks_exact(2)

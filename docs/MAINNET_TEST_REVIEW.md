@@ -1,3 +1,5 @@
+> Historical validation journal: dependency pins and deployment blockers below describe the state when each entry was recorded. Current publication dependencies, self-deployment requirements and final local results are in [RELEASE_0.2.0.md](RELEASE_0.2.0.md). Parser #32 and Rust trade #123 are merged and their published fixes are used by this release. Historical default-program incompatibility does not block use with a matching self-deployed Router.
+
 # Mainnet test review — 2026-10-08
 
 Scope: source fixes and validation. Deployment is outside this task.

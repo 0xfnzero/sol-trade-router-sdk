@@ -3,8 +3,14 @@ name = "sol-trade-router-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+readme = "README.md"
 description = "Client SDK for sol-trade-router-sdk — simple multi-hop buys/sells with no RPC on the hot path"
-publish = false
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version = "1.91"
+keywords = ["solana", "trading", "router", "defi", "sdk"]
+include = ["src/**", "tests/fixtures/**", "Cargo.toml", "LICENSE", "README.md"]
 
 [dependencies]
 anyhow = { workspace = true }
