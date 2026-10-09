@@ -736,3 +736,34 @@ and outstanding fresh-bank validation remain.
 Evidence: tools/validation/simulation-coverage-20261009/fault-target-coverage-followup/.
 Review coverage: 7 changed/added files reviewed, zero skipped (100%), including
 all three Rust files, documentation and all three evidence logs.
+
+
+### Mutated Router instruction fault identity — 2026-10-09
+
+The separate mainnet Router wrong-program test still accepted any Soft/Hard
+simulation error. A failed funding/setup instruction could count as rejection
+of the mutated route. Binding only the program is insufficient here because
+System Program also executes funding and WSOL preparation before the route.
+The existing offline classification test reproduces acceptance of instruction 1
+failing when the mutation belongs to instruction 4.
+
+Require an InstructionError with the exact mutated route index, followed by
+runtime invocation/failure evidence for System Program using the shared DEX
+fault assertion. The live test requires BuiltTrade.route to exist before mutation.
+Its expected transaction index is setup.len() + 1: the existing funded simulator
+prepends exactly one virtual funding instruction. Legacy and V1 compilation
+preserve that order; V1 transaction configuration does not insert instructions.
+
+The existing regression now rejects failed setup, unavailable/Ok results, RPC
+errors, missing logs, another program's failure and index 40 when index 4 is
+expected. A valid instruction-4 failure is exercised through the real Solana
+TransactionError/InstructionError types and the existing response classifier.
+All 110 offline tests pass; 81 live cases and one doctest remain ignored. No new
+live run was attempted after the recent recorded RPC transport failure. These
+are synthetic response checks, not mainnet rejection proof. No transaction
+builder, protocol dependency or on-chain source/binary change, deploy or broadcast.
+Existing mainnet router compatibility limitations remain.
+
+Evidence: tools/validation/simulation-coverage-20261009/router-fault-index-followup/.
+Review coverage: 5 changed/added files reviewed, zero skipped (100%), including
+both Rust files, documentation and both evidence logs.

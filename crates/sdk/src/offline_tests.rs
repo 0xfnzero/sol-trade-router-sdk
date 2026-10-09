@@ -1191,6 +1191,22 @@ fn offline_router_client_builds_pumpswap_buy() {
 
 #[test]
 fn offline_classify_soft_vs_hard() {
+    let setup_error = SimVerdict::Hard("InstructionError(1, InvalidArgument); logs=Program 11111111111111111111111111111111 invoke [1] | Program 11111111111111111111111111111111 failed: invalid argument".into());
+    assert!(std::panic::catch_unwind(|| crate::mainnet_router_tests::assert_bad_route_failure(
+        4, Some(setup_error))).is_err());
+    for verdict in [None, Some(SimVerdict::Ok), Some(SimVerdict::Hard("RPC unavailable".into())),
+        Some(SimVerdict::Hard("InstructionError(4, InvalidInstructionData); logs=".into())),
+        Some(SimVerdict::Hard(format!("InstructionError(4, InvalidInstructionData); logs=Program {RAYDIUM_CPMM_PROGRAM} invoke [1] | Program {RAYDIUM_CPMM_PROGRAM} failed: error"))),
+        Some(SimVerdict::Hard("InstructionError(40, InvalidInstructionData); logs=Program 11111111111111111111111111111111 invoke [1] | Program 11111111111111111111111111111111 failed: error".into()))] {
+        assert!(std::panic::catch_unwind(|| crate::mainnet_router_tests::assert_bad_route_failure(
+            4, verdict)).is_err());
+    }
+    let logs = vec![format!("Program {} invoke [1]", crate::constants::SYSTEM_PROGRAM),
+        format!("Program {} failed: invalid instruction data", crate::constants::SYSTEM_PROGRAM)];
+    let verdict = crate::mainnet_sim::classify_response(
+        Some(solana_sdk::transaction::TransactionError::InstructionError(4,
+            solana_sdk::instruction::InstructionError::InvalidInstructionData)), Some(logs));
+    crate::mainnet_router_tests::assert_bad_route_failure(4, Some(verdict));
     let target = RAYDIUM_CPMM_PROGRAM;
     let other = crate::constants::ASSOCIATED_TOKEN_PROGRAM;
     let setup_failure = format!("InstructionError; logs=Program {other} invoke [1] | Program {other} failed: custom program error: 0x1");

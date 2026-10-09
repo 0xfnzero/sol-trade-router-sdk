@@ -1569,20 +1569,27 @@ fn mainnet_router_fault_bad_route_program_is_soft_or_hard() {
                 .with_ata(route_buy_ata()),
         )
         .expect("build");
-    if let Some(route) = built.route.as_mut() {
-        // Point Route at System Program — must not execute as Route CPI.
-        route.program_id = Pubkey::default(); // invalid / non-router program
-    }
-    // Soft (wrong program / undeployed semantics) or Hard (invalid instruction) both prove detection.
-    match crate::mainnet_sim::simulate_with_fresh_wallet(
-        &client,
-        &wallet,
-        built.into_instructions(),
-    ) {
+    // Point Route at System Program — must not execute as Route CPI.
+    built.route.as_mut().expect("built trade must contain route").program_id = SYSTEM_PROGRAM;
+    // simulate_with_fresh_wallet prepends exactly one virtual funding instruction.
+    let route_index = built.setup.len() + 1;
+    assert_bad_route_failure(route_index, crate::mainnet_sim::simulate_with_fresh_wallet(
+        &client, &wallet, built.into_instructions(),
+    ));
+}
+
+pub(crate) fn assert_bad_route_failure(route_index: usize, verdict: Option<SimVerdict>) {
+    match verdict {
         None => panic!("funder required"),
         Some(SimVerdict::Ok) => panic!("mutated route program must not succeed"),
         Some(SimVerdict::Soft(m)) | Some(SimVerdict::Hard(m)) => {
-            println!("[router_fault_bad_program] rejected as expected: {m}");
+            // System Program also runs during funding/wrapping. Its runtime
+            // failure alone cannot prove the mutated route was exercised.
+            assert!(m.starts_with(&format!("InstructionError({route_index},")),
+                "failure must belong to mutated route instruction {route_index}, got: {m}");
+            crate::mainnet_sim_tests::assert_funded_fault(
+                "router_fault_bad_program", SYSTEM_PROGRAM, Some(SimVerdict::Hard(m)),
+            );
         }
     }
 }
