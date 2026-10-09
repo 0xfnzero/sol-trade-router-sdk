@@ -767,3 +767,34 @@ Existing mainnet router compatibility limitations remain.
 Evidence: tools/validation/simulation-coverage-20261009/router-fault-index-followup/.
 Review coverage: 5 changed/added files reviewed, zero skipped (100%), including
 both Rust files, documentation and both evidence logs.
+
+
+### CLMM / DLMM bitmap account pool binding — 2026-10-09
+
+CLMM silently discarded an explicitly supplied bitmap extension belonging to a
+different pool; DLMM accepted any supplied extension as writable. Reject these
+mismatches before instruction construction using each protocol's pool-derived
+PDA. CLMM still accepts no extension and extracts the canonical extension from
+legacy tick-array lists exactly once. DLMM still accepts no extension or an
+explicit program-id sentinel, both readonly; canonical extensions are writable.
+This does not establish the derivation/index correctness of tick/bin arrays.
+
+Verified fresh official Raydium SDK 0.2.74-alpha and Meteora DLMM 1.9.14 sources
+against their npm integrity values. Raydium uses pool_tick_array_bitmap_extension
+and the pool key; DLMM uses bitmap and the pair key. Executed the unmodified
+official DLMM PDA helper for two distinct pools and retained the results. This
+is a helper check, not an official swap or RPC simulation. Dependency pins remain
+unchanged.
+
+Expanded the existing all-DEX builder test with both directions, default/random/
+foreign-pool extensions, CLMM legacy extraction and DLMM readonly sentinel cases.
+The regression failed before the production fix. Updated existing dummy pools
+and the same-pool CLMM parser-overlay fixture to canonical bitmap PDAs; retained
+the existing signing and foreign-event coverage rather than adding a new suite.
+All 110 offline tests pass (93 SDK, 15 program, 2 example); 81 live cases and one
+doctest remain ignored. No new mainnet run, deployment or broadcast. The current
+mainnet Router binary compatibility limitations remain unresolved by source fixes.
+
+Evidence: tools/validation/simulation-coverage-20261009/bitmap-pool-binding-followup/.
+Review coverage: 7 changed/added files reviewed, zero skipped (100%), including
+both Rust files, documentation, all three logs and the official-source snapshot.

@@ -802,9 +802,10 @@ pub fn raydium_clmm_swap_leg(
     require_mint_programs(&[(pool.token_0_mint, pool.token_0_program),
         (pool.token_1_mint, pool.token_1_program)], "Raydium CLMM")?;
     let bitmap_pda = crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state);
-    let mut bitmap = pool
-        .tick_array_bitmap_extension
-        .filter(|b| *b == bitmap_pda);
+    if pool.tick_array_bitmap_extension.is_some_and(|key| key != bitmap_pda) {
+        return Err(anyhow!("Raydium CLMM bitmap extension does not match pool PDA"));
+    }
+    let mut bitmap = pool.tick_array_bitmap_extension;
     let mut tick_arrays = Vec::with_capacity(pool.tick_arrays.len());
     for &key in &pool.tick_arrays {
         if key == bitmap_pda {
@@ -976,6 +977,10 @@ pub fn meteora_dlmm_swap_leg(
         return Err(anyhow!("Meteora DLMM snapshot has no bin arrays"));
     }
     require_array_addresses(&pool.bin_arrays, "Meteora DLMM")?;
+    let bitmap_pda = sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&pool.lb_pair);
+    if pool.bitmap_extension.is_some_and(|key| key != bitmap_pda && key != METEORA_DLMM_PROGRAM) {
+        return Err(anyhow!("Meteora DLMM bitmap extension does not match pair PDA"));
+    }
     let output_mint = if input_mint == pool.token_x_mint {
         pool.token_y_mint
     } else if input_mint == pool.token_y_mint {
@@ -1001,6 +1006,7 @@ pub fn meteora_dlmm_swap_leg(
     let mut accounts = Vec::with_capacity(16 + pool.bin_arrays.len());
     // Official SDK: missing bitmap extension → program-id sentinel (readonly).
     let bitmap_meta = match pool.bitmap_extension {
+        Some(key) if key == METEORA_DLMM_PROGRAM => AccountMeta::new_readonly(key, false),
         Some(key) => AccountMeta::new(key, false),
         None => AccountMeta::new_readonly(METEORA_DLMM_PROGRAM, false),
     };

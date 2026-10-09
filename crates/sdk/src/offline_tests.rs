@@ -194,9 +194,10 @@ fn dummy_damm_v2() -> MeteoraDammV2Pool {
 }
 
 fn dummy_clmm() -> RaydiumClmmPool {
+    let pool_state = Pubkey::new_unique();
     RaydiumClmmPool {
         amm_config: Pubkey::new_unique(),
-        pool_state: Pubkey::new_unique(),
+        pool_state,
         observation_state: Pubkey::new_unique(),
         token_0_mint: WSOL_MINT,
         token_1_mint: Pubkey::new_unique(),
@@ -205,7 +206,7 @@ fn dummy_clmm() -> RaydiumClmmPool {
         token_0_program: TOKEN_PROGRAM,
         token_1_program: TOKEN_PROGRAM,
         tick_arrays: vec![Pubkey::new_unique(); 3],
-        tick_array_bitmap_extension: Some(Pubkey::new_unique()),
+        tick_array_bitmap_extension: Some(crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool_state)),
         quoted_amount_in: Some(1_000_000),
         quoted_input_mint: None,
         expected_out: Some(500_000),
@@ -231,9 +232,10 @@ fn dummy_whirlpool() -> WhirlpoolPool {
 }
 
 fn dummy_dlmm() -> MeteoraDlmmPool {
+    let lb_pair = Pubkey::new_unique();
     MeteoraDlmmPool {
-        lb_pair: Pubkey::new_unique(),
-        bitmap_extension: Some(Pubkey::new_unique()),
+        lb_pair,
+        bitmap_extension: Some(sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&lb_pair)),
         reserve_x: Pubkey::new_unique(),
         reserve_y: Pubkey::new_unique(),
         token_x_mint: WSOL_MINT,
@@ -365,6 +367,48 @@ fn offline_all_dex_leg_builders() {
     let clmm = dummy_clmm();
     let wp = dummy_whirlpool();
     let dlmm = dummy_dlmm();
+    for invalid in [Pubkey::default(), Pubkey::new_unique(),
+        crate::constants::raydium_clmm_tick_array_bitmap_extension(&Pubkey::new_unique())] {
+        let mut bad = clmm.clone();
+        bad.tick_array_bitmap_extension = Some(invalid);
+        for input in [bad.token_0_mint, bad.token_1_mint] {
+            assert!(raydium_clmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
+                "CLMM must reject a mismatched bitmap extension");
+        }
+    }
+    for invalid in [Pubkey::default(), Pubkey::new_unique(),
+        sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&Pubkey::new_unique())] {
+        let mut bad = dlmm.clone();
+        bad.bitmap_extension = Some(invalid);
+        for input in [bad.token_x_mint, bad.token_y_mint] {
+            assert!(meteora_dlmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
+                "DLMM must reject a mismatched bitmap extension");
+        }
+    }
+    let mut inferred_clmm = clmm.clone();
+    inferred_clmm.tick_array_bitmap_extension = None;
+    let bitmap = crate::constants::raydium_clmm_tick_array_bitmap_extension(&clmm.pool_state);
+    for input in [clmm.token_0_mint, clmm.token_1_mint] {
+        assert!(!raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input).unwrap()
+            .accounts.iter().any(|meta| meta.pubkey == bitmap));
+        inferred_clmm.tick_arrays.push(bitmap);
+        assert_eq!(raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input).unwrap()
+            .accounts.iter().filter(|meta| meta.pubkey == bitmap).count(), 1);
+        inferred_clmm.tick_arrays.pop();
+        let mut bad = inferred_clmm.clone();
+        bad.tick_arrays.push(bitmap);
+        bad.tick_array_bitmap_extension = Some(Pubkey::new_unique());
+        assert!(raydium_clmm_swap_leg(&user, &bad, 100, 1, input).is_err());
+    }
+    for extension in [None, Some(crate::constants::METEORA_DLMM_PROGRAM)] {
+        let mut absent_dlmm = dlmm.clone();
+        absent_dlmm.bitmap_extension = extension;
+        for input in [dlmm.token_x_mint, dlmm.token_y_mint] {
+            let leg = meteora_dlmm_swap_leg(&user, &absent_dlmm, 100, 1, input).unwrap();
+            assert_eq!(leg.accounts[1].pubkey, crate::constants::METEORA_DLMM_PROGRAM);
+            assert!(!leg.accounts[1].is_writable);
+        }
+    }
     // Array counts alone cannot make a missing tick/bin address usable.
     let mut supplemental_wp = wp.clone();
     supplemental_wp.tick_arrays.extend((0..3).map(|_| Pubkey::new_unique()));
@@ -3405,7 +3449,8 @@ fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
     update.tick_arrays = (0..3).map(|_| Pubkey::new_unique()).collect();
     update.amm_config = Pubkey::new_unique();
     update.observation_state = Pubkey::new_unique();
-    update.tick_array_bitmap_extension = Some(Pubkey::new_unique());
+    update.tick_array_bitmap_extension =
+        Some(crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state));
     update.amount_0 = 100;
     for key in [Pubkey::new_unique(), Pubkey::default()] {
         update.pool_state = key;
