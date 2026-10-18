@@ -99,6 +99,7 @@ const PUMPSWAP_PROGRAM_ID: [u8; 32] = [
 const LAUNCHLAB_BUY_EXACT_IN: [u8; 8] = [250, 234, 13, 123, 213, 156, 19, 236];
 const CPMM_SWAP_BASE_IN: [u8; 8] = [143, 190, 90, 218, 196, 30, 51, 222];
 const PUMPSWAP_SELL: [u8; 8] = [51, 230, 133, 164, 1, 127, 131, 173];
+const PUMPSWAP_BUY_EXACT_QUOTE_IN: [u8; 8] = [198, 46, 21, 82, 180, 217, 232, 112];
 const METEORA_DLMM_SWAP2: [u8; 8] = [65, 75, 63, 76, 235, 91, 91, 136];
 const CLMM_SWAP_V2: [u8; 8] = [43, 4, 237, 11, 26, 201, 30, 98];
 const NO_ACCOUNT: usize = usize::MAX;
@@ -155,6 +156,22 @@ fn dynamic_second_leg(program_id: &Address, data: &[u8]) -> Result<DynamicSecond
             input_program: 8,
             output_mint: 11,
             output_program: 9,
+            paired_mints: false,
+        })
+    } else if addr_eq(program_id, &PUMPSWAP_PROGRAM_ID)
+        && data.len() == 25
+        && data[..8] == PUMPSWAP_BUY_EXACT_QUOTE_IN
+        && data[24] <= 1
+    {
+        Ok(DynamicSecondLeg {
+            input_account: 6,
+            output_account: 5,
+            signer: 1,
+            amount_offset: 8,
+            input_mint: 4,
+            input_program: 12,
+            output_mint: 3,
+            output_program: 11,
             paired_mints: false,
         })
     } else if addr_eq(program_id, &PUMPSWAP_PROGRAM_ID)
@@ -1286,6 +1303,31 @@ mod tests {
         );
         damm_data[24] = 2; // exact-out cannot spend the previous hop's actual output
         assert!(dynamic_second_leg(&damm, &damm_data).is_err());
+    }
+
+    #[test]
+    fn pumpswap_buy_patches_quote_input_without_changing_output_floor() {
+        let pump = Address::new_from_array(PUMPSWAP_PROGRAM_ID);
+        let mut data = [0u8; 25];
+        data[..8].copy_from_slice(&PUMPSWAP_BUY_EXACT_QUOTE_IN);
+        data[16..24].copy_from_slice(&17u64.to_le_bytes());
+        data[24] = 1;
+        let layout = dynamic_second_leg(&pump, &data).unwrap();
+        assert_eq!((layout.input_account, layout.output_account, layout.signer), (6, 5, 1));
+        assert_eq!((layout.input_mint, layout.output_mint), (4, 3));
+        assert_eq!((layout.input_program, layout.output_program), (12, 11));
+        let mut scratch = [0; MAX_DYNAMIC_LEG_DATA];
+        let patched = patch_second_leg_amount(&data, 375, layout.amount_offset, &mut scratch);
+        assert_eq!(read_u64(patched, 8).unwrap(), 375);
+        assert_eq!(read_u64(patched, 16).unwrap(), 17);
+        assert_eq!(patched[24], 1);
+        assert!(dynamic_second_leg(&pump, &data[..24]).is_err());
+        data[24] = 2;
+        assert!(dynamic_second_leg(&pump, &data).is_err());
+        data[24] = 0;
+        assert!(dynamic_second_leg(&pump, &data).is_ok());
+        data[..8].copy_from_slice(&[102, 6, 61, 18, 1, 218, 235, 234]); // Buy exact-out
+        assert!(dynamic_second_leg(&pump, &data).is_err());
     }
 
     #[test]

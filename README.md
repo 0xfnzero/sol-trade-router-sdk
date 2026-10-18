@@ -34,6 +34,32 @@
     <a href="https://discord.gg/vuazbGkqQE">Discord</a>
 </p>
 
+
+## PumpSwap and parser synchronization (0.2.0)
+
+This release pins `sol-trade-sdk =6.0.2` and `sol-parser-sdk =0.7.14`.
+PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
+ATA against the actual quote mint/token program before constructing CPI accounts.
+Missing token programs or fee recipients are rejected instead of guessed. Exact-output
+Buy includes the volume flag; protocol recipients and global volume stay readonly.
+
+Use `LoadMarketRequest::PumpSwapPool { pool }` to cold-load an explicit pool address,
+including non-WSOL quote pools. For SOL-funded trades, prepare the resolved bridge
+and target snapshots, then call `build_dynamic_quote_buy` for WSOL → quote → target.
+PumpSwap can be either hop, with buy/sell chosen by the actual mint direction.
+The matching Router program spends only each preceding hop's newly credited output.
+Set up the required ATAs and fund/sync WSOL before the route; the builder does no RPC.
+The high-level pool guard still requires explicitly trusting noncanonical pools.
+
+A trade SDK `PumpSwapQuoteRoute` may contain splits and merges and cannot be converted
+to one `RoutedMarket`; use explicit Router legs and the two/three-hop builders.
+Parser `PumpRouteIntent` events describe instructions before execution and are not
+converted into trade/reserve snapshots. Use executed trade events plus current pool
+state for those snapshots.
+
+Build and deploy the matching Router source to use dynamic PumpSwap buys. Publishing
+the SDK does not change an existing on-chain deployment.
+
 ## 📋 Table of Contents
 
 - [✨ Features](#-features)
@@ -77,17 +103,16 @@ Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Tradin
 
 ## 📦 Installation
 
-The client is prepared for crates.io as version **0.2.0**. Until that version is published, use the `main` Git branch:
+Install the complete client release **0.2.0** from crates.io:
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
-# After publication: sol-trade-router-sdk = "=0.2.0"
+sol-trade-router-sdk = "=0.2.0"
 # Streaming bots only, if importing parser types directly:
-sol-parser-sdk = "=0.7.12"
+sol-parser-sdk = "=0.7.14"
 ```
 
-Dependencies use published **sol-trade-sdk 6.0.0** and **sol-parser-sdk 0.7.12**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
+Dependencies use published **sol-trade-sdk 6.0.2** and **sol-parser-sdk 0.7.14**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
 
 See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
 

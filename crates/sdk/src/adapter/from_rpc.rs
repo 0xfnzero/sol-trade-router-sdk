@@ -89,6 +89,8 @@ pub(crate) async fn refresh_pumpswap_fee_reserves(
 pub enum LoadMarketRequest {
     PumpFun { mint: Pubkey },
     PumpSwap { mint: Pubkey },
+    /// Load a specific PumpSwap pool, including non-WSOL quote pools.
+    PumpSwapPool { pool: Pubkey },
     LaunchLab { mint: Pubkey },
     Bonk { mint: Pubkey },
     StonkFun { mint: Pubkey },
@@ -116,7 +118,7 @@ impl LoadMarketRequest {
     pub fn dex_type(&self) -> DexType {
         match self {
             Self::PumpFun { .. } => DexType::PumpFun,
-            Self::PumpSwap { .. } => DexType::PumpSwap,
+            Self::PumpSwap { .. } | Self::PumpSwapPool { .. } => DexType::PumpSwap,
             Self::LaunchLab { .. } => DexType::LaunchLab,
             Self::Bonk { .. } => DexType::Bonk,
             Self::StonkFun { .. } => DexType::StonkFun,
@@ -139,7 +141,8 @@ impl LoadMarketRequest {
             Self::RaydiumClmm { output_mint, .. }
             | Self::OrcaWhirlpool { output_mint, .. }
             | Self::MeteoraDlmm { output_mint, .. } => *output_mint,
-            Self::RaydiumCpmm { .. }
+            Self::PumpSwapPool { .. }
+            | Self::RaydiumCpmm { .. }
             | Self::RaydiumAmmV4 { .. }
             | Self::MeteoraDammV2 { .. } => Pubkey::default(),
         }
@@ -159,6 +162,9 @@ pub async fn load_routed_market_by_rpc(
         }
         LoadMarketRequest::PumpSwap { mint } => {
             DexParamEnum::PumpSwap(PumpSwapParams::from_mint_by_rpc(rpc, mint).await?)
+        }
+        LoadMarketRequest::PumpSwapPool { pool } => {
+            DexParamEnum::PumpSwap(PumpSwapParams::from_pool_address_by_rpc(rpc, pool).await?)
         }
         LoadMarketRequest::LaunchLab { mint } => {
             DexParamEnum::LaunchLab(BonkParams::from_mint_by_rpc(rpc, mint, false).await?)
@@ -202,6 +208,7 @@ pub async fn load_routed_market_by_rpc(
     };
 
     let mint = match &extension {
+        DexParamEnum::PumpSwap(p) => p.base_mint,
         DexParamEnum::RaydiumCpmm(p) => {
             if p.base_mint == crate::constants::WSOL_MINT {
                 p.quote_mint

@@ -177,8 +177,8 @@ pub fn pumpswap_from_params(p: &PumpSwapParams) -> PumpSwapPool {
         quote_mint: p.quote_mint,
         pool_base_token_account: p.pool_base_token_account,
         pool_quote_token_account: p.pool_quote_token_account,
-        base_token_program: token_program_or_spl(p.base_token_program),
-        quote_token_program: token_program_or_spl(p.quote_token_program),
+        base_token_program: p.base_token_program,
+        quote_token_program: p.quote_token_program,
         coin_creator_vault_ata: p.coin_creator_vault_ata,
         coin_creator_vault_authority: p.coin_creator_vault_authority,
         coin_creator: p.coin_creator,
@@ -337,6 +337,11 @@ pub fn to_routed_market_for_user(
     Ok(match params {
         DexParamEnum::PumpFun(p) => RoutedMarket::pumpfun(pumpfun_from_params(p, mint, user)?),
         DexParamEnum::PumpSwap(p) => RoutedMarket::pumpswap(pumpswap_from_params(p)),
+        DexParamEnum::PumpSwapQuoteRoute(_) => {
+            return Err(anyhow!(
+                "PumpSwapQuoteRoute contains multiple pools; use explicit dynamic Router legs instead of single-market conversion"
+            ));
+        }
         DexParamEnum::LaunchLab(p) | DexParamEnum::Bonk(p) | DexParamEnum::StonkFun(p) => {
             RoutedMarket::stonk_inner(bonk_to_launchlab(p, mint), None)
         }

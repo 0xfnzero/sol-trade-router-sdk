@@ -1,0 +1,43 @@
+{
+  "version": "0.2.0",
+  "date": "2026-10-18",
+  "dependencies": {
+    "sol-trade-sdk": "=6.0.2",
+    "sol-parser-sdk": "=0.7.14"
+  },
+  "workspace_check": "passed",
+  "workspace_tests": {
+    "passed": 116,
+    "ignored_live_tests": 81,
+    "ignored_doctests": 1
+  },
+  "cargo_package": "passed; registry dependencies; preflight allows dirty working tree",
+  "extracted_package_tests": {
+    "passed": 97,
+    "ignored_live_tests": 81,
+    "ignored_doctests": 1
+  },
+  "sbf_tools_version": "v1.53",
+  "security_vm": {
+    "passed": 15
+  },
+  "multihop_vm": {
+    "passed": 96
+  },
+  "artifacts": {
+    "router": {
+      "path": "target/deploy/sol_trade_router.so",
+      "sha256": "4d67e9fab1595476143f58f0b946d82a74dc873b71c584117ec838679f1269a4"
+    },
+    "mock_dex": {
+      "path": "scripts/mock-dex/target/deploy/router_test_dex.so",
+      "sha256": "756ad01940ec7b64308621ed00c902fe6960c176e65f7e372f9ed8d651e5887b"
+    }
+  },
+  "on_chain_deployment": false,
+  "limits": [
+    "Local multi-hop VM uses mock DEX pricing and real SPL/Token-2022 transfer CPIs.",
+    "Live tests and optional captured Pump program matrices were not rerun.",
+    "Dynamic PumpSwap buys require deployment of matching Router program source."
+  ]
+}

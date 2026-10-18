@@ -12,7 +12,7 @@ use crate::{
         BUY_EXACT_IN_LAUNCHLAB, CLMM_SWAP_V2, CPMM_SWAP_BASE_IN, LAUNCHLAB_PROGRAM,
         METEORA_DAMM_V2_EXACT_IN, METEORA_DAMM_V2_PROGRAM, METEORA_DAMM_V2_SWAP2,
         METEORA_DLMM_PROGRAM, METEORA_DLMM_SWAP2, ORCA_WHIRLPOOL_PROGRAM, PUMPSWAP_PROGRAM,
-        PUMPSWAP_SELL, RAYDIUM_AMM_V4_PROGRAM, RAYDIUM_AMM_V4_SWAP_BASE_IN_V2,
+        PUMPSWAP_BUY_EXACT_QUOTE_IN, PUMPSWAP_SELL, RAYDIUM_AMM_V4_PROGRAM, RAYDIUM_AMM_V4_SWAP_BASE_IN_V2,
         RAYDIUM_CLMM_PROGRAM, RAYDIUM_CPMM_PROGRAM, SYSTEM_PROGRAM, TOKEN_2022_PROGRAM,
         TOKEN_PROGRAM, WHIRLPOOL_SWAP_V2,
     },
@@ -66,6 +66,9 @@ fn dynamic_leg_layout(leg: &Leg) -> Result<DynamicLegLayout> {
         && data[..8] == CPMM_SWAP_BASE_IN
     {
         (4, 5, 0, 8, 12)
+    } else if leg.program_id == PUMPSWAP_PROGRAM && data.len() == 25
+        && data[..8] == PUMPSWAP_BUY_EXACT_QUOTE_IN && data[24] <= 1 {
+        (6, 5, 1, 8, 13)
     } else if leg.program_id == PUMPSWAP_PROGRAM && data.len() == 24 && data[..8] == PUMPSWAP_SELL {
         // PumpSwap sell: user base -> user quote, with the exact base input at offset 8.
         (5, 6, 1, 8, 13)
@@ -723,8 +726,8 @@ mod tests {
             pool_quote_token_account: Pubkey::new_unique(),
             base_token_program: TOKEN_PROGRAM,
             quote_token_program: TOKEN_PROGRAM,
-            coin_creator_vault_ata: Pubkey::new_unique(),
-            coin_creator_vault_authority: Pubkey::new_unique(),
+            coin_creator_vault_ata: crate::offline_tests::creator_vault_ata(Pubkey::default(), quote, TOKEN_PROGRAM),
+            coin_creator_vault_authority: crate::offline_tests::creator_vault_authority(Pubkey::default()),
             coin_creator: Pubkey::default(),
             base_reserve: 0,
             quote_reserve: 0,

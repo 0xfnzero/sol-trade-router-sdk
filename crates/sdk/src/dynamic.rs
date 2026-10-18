@@ -273,6 +273,15 @@ fn quote_to_target_leg(
     min_out: u64,
 ) -> Result<(Leg, Pubkey, Pubkey)> {
     match pool {
+        Market::PumpSwapOuter(p) => {
+            if p.quote_mint == quote_mint && p.quote_token_program == quote_program {
+                Ok((pumpswap_buy_leg(user, p, 1, min_out)?, p.base_mint, p.base_token_program))
+            } else if p.base_mint == quote_mint && p.base_token_program == quote_program {
+                Ok((pumpswap_sell_leg(user, p, 1, min_out)?, p.quote_mint, p.quote_token_program))
+            } else {
+                bail!("target PumpSwap mint/token program does not match first hop");
+            }
+        }
         Market::LaunchLabInner(p) => {
             require_mint_programs(&[(p.base_mint, p.base_token_program),
                 (p.quote_mint, p.quote_token_program)], "LaunchLab")?;
@@ -309,7 +318,7 @@ fn quote_to_target_leg(
             )?;
             Ok((leg, output_mint, output_program))
         }
-        _ => bail!("second hop must be LaunchLab or Raydium CPMM"),
+        _ => bail!("second hop must be PumpSwap, LaunchLab or Raydium CPMM"),
     }
 }
 

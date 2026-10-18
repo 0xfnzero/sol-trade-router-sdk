@@ -94,6 +94,7 @@ fn dummy_cpmm() -> CpmmPool {
 }
 
 fn dummy_pumpswap() -> PumpSwapPool {
+    let creator = Pubkey::new_unique();
     PumpSwapPool {
         pool: Pubkey::new_unique(),
         base_mint: Pubkey::new_unique(),
@@ -102,9 +103,9 @@ fn dummy_pumpswap() -> PumpSwapPool {
         pool_quote_token_account: Pubkey::new_unique(),
         base_token_program: TOKEN_PROGRAM,
         quote_token_program: TOKEN_PROGRAM,
-        coin_creator_vault_ata: Pubkey::new_unique(),
-        coin_creator_vault_authority: Pubkey::new_unique(),
-        coin_creator: Pubkey::new_unique(),
+        coin_creator_vault_ata: crate::offline_tests::creator_vault_ata(creator, WSOL_MINT, TOKEN_PROGRAM),
+        coin_creator_vault_authority: crate::offline_tests::creator_vault_authority(creator),
+        coin_creator: creator,
         base_reserve: 1_000_000_000,
         quote_reserve: 30_000_000_000,
         virtual_quote_reserves: 0,
@@ -116,6 +117,138 @@ fn dummy_pumpswap() -> PumpSwapPool {
         protocol_fee_recipient: Pubkey::new_unique(),
         buyback_fee_recipient: Pubkey::new_unique(),
     }
+}
+
+pub(crate) fn creator_vault_authority(creator: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[b"creator_vault", creator.as_ref()], &PUMPSWAP_PROGRAM).0
+}
+
+pub(crate) fn creator_vault_ata(creator: Pubkey, quote: Pubkey, program: Pubkey) -> Pubkey {
+    crate::ata::ata(&creator_vault_authority(creator), &quote, &program)
+}
+
+fn bind_pumpswap_creator(pool: &mut PumpSwapPool) {
+    pool.coin_creator_vault_authority = creator_vault_authority(pool.coin_creator);
+    pool.coin_creator_vault_ata = creator_vault_ata(pool.coin_creator, pool.quote_mint, pool.quote_token_program);
+}
+
+#[test]
+fn offline_pumpswap_reported_3007_rejects_missing_vaults_and_matches_corrected_accounts() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/pumpswap_reported_failure.json"
+    )).unwrap();
+    let mut keys: Vec<Pubkey> = fixture["instruction_accounts"].as_array().unwrap().iter()
+        .map(|v| v.as_str().unwrap().parse().unwrap()).collect();
+    let mut pool = dummy_pumpswap();
+    pool.pool = keys[0];
+    pool.base_mint = keys[3]; pool.quote_mint = keys[4];
+    pool.pool_base_token_account = keys[7]; pool.pool_quote_token_account = keys[8];
+    pool.protocol_fee_recipient = keys[9]; pool.buyback_fee_recipient = keys[24];
+    pool.base_token_program = keys[11]; pool.quote_token_program = keys[12];
+    pool.coin_creator = fixture["coin_creator"].as_str().unwrap().parse().unwrap();
+    pool.coin_creator_vault_ata = keys[17]; pool.coin_creator_vault_authority = keys[18];
+    assert!(pumpswap_buy_exact_out_leg(&keys[1], &pool, 1, 100).is_err());
+    keys[17] = fixture["correct_creator_vault_ata"].as_str().unwrap().parse().unwrap();
+    keys[18] = fixture["correct_creator_vault_authority"].as_str().unwrap().parse().unwrap();
+    pool.coin_creator_vault_ata = keys[17]; pool.coin_creator_vault_authority = keys[18];
+    let mut data: Vec<u8> = fixture["instruction_data"].as_array().unwrap().iter()
+        .map(|v| v.as_u64().unwrap() as u8).collect();
+    let out = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    let max_in = u64::from_le_bytes(data[16..24].try_into().unwrap());
+    let leg = pumpswap_buy_exact_out_leg(&keys[1], &pool, out, max_in).unwrap();
+    assert_eq!(leg.accounts.iter().map(|a| a.pubkey).collect::<Vec<_>>(), keys);
+    data.truncate(24); data.push(1);
+    assert_eq!(leg.data, data);
+    for (index, account) in leg.accounts.iter().enumerate() {
+        assert_eq!(account.is_signer, index == 1);
+        assert_eq!(account.is_writable, [0, 1, 5, 6, 7, 8, 10, 17, 20, 25].contains(&index));
+    }
+}
+
+#[test]
+fn offline_pumpswap_custom_quote_creator_binding_and_incomplete_snapshots() {
+    let user = Pubkey::new_unique();
+    for quote_program in [TOKEN_PROGRAM, crate::TOKEN_2022_PROGRAM] {
+        let mut pool = dummy_pumpswap();
+        pool.quote_mint = Pubkey::new_unique(); pool.quote_token_program = quote_program;
+        assert!(pumpswap_buy_leg(&user, &pool, 100, 1).is_err(), "WSOL creator ATA reused for custom quote");
+        bind_pumpswap_creator(&mut pool);
+        for leg in [pumpswap_buy_leg(&user, &pool, 100, 1).unwrap(),
+            pumpswap_buy_exact_out_leg(&user, &pool, 1, 100).unwrap(),
+            pumpswap_sell_leg(&user, &pool, 100, 1).unwrap()] {
+            assert_eq!(leg.accounts[12].pubkey, quote_program);
+            assert_eq!(leg.accounts[17].pubkey, crate::ata::ata(
+                &pool.coin_creator_vault_authority, &pool.quote_mint, &quote_program));
+            assert_eq!(leg.accounts[10].pubkey, crate::ata::ata(
+                &pool.protocol_fee_recipient, &pool.quote_mint, &quote_program));
+            assert!(!leg.accounts[9].is_writable);
+        }
+        for bad_field in 0..9 {
+            let mut bad = pool.clone();
+            match bad_field {
+                0 => bad.coin_creator_vault_ata = Pubkey::default(),
+                1 => bad.coin_creator_vault_authority = Pubkey::new_unique(),
+                2 => bad.coin_creator = Pubkey::new_unique(),
+                3 => bad.quote_mint = Pubkey::new_unique(),
+                4 => bad.quote_token_program = Pubkey::default(),
+                5 => bad.base_token_program = Pubkey::default(),
+                6 => bad.protocol_fee_recipient = Pubkey::default(),
+                7 => bad.buyback_fee_recipient = Pubkey::default(),
+                _ => bad.pool_quote_token_account = bad.pool_base_token_account,
+            }
+            assert!(pumpswap_buy_leg(&user, &bad, 100, 1).is_err());
+            assert!(pumpswap_buy_exact_out_leg(&user, &bad, 1, 100).is_err());
+            assert!(pumpswap_sell_leg(&user, &bad, 100, 1).is_err());
+        }
+    }
+    let event = sol_parser_sdk::core::events::PumpSwapBuyEvent::default();
+    let incomplete = crate::pumpswap_from_buy(&event);
+    assert_eq!(incomplete.quote_token_program, Pubkey::default());
+    assert!(pumpswap_buy_leg(&user, &incomplete, 100, 1).is_err());
+}
+
+#[test]
+fn offline_dynamic_quote_buy_supports_pumpswap_targets_in_both_directions() {
+    let user = Pubkey::new_unique(); let fee = Pubkey::new_unique();
+    for program in [TOKEN_PROGRAM, crate::TOKEN_2022_PROGRAM] {
+        let mut bridge = dummy_pumpswap();
+        bridge.base_token_program = program;
+        let quote = bridge.base_mint;
+        for reverse in [false, true] {
+            let mut target = dummy_pumpswap();
+            target.quote_mint = quote; target.quote_token_program = program;
+            if reverse {
+                std::mem::swap(&mut target.base_mint, &mut target.quote_mint);
+                std::mem::swap(&mut target.base_token_program, &mut target.quote_token_program);
+            }
+            bind_pumpswap_creator(&mut target);
+            let output = if reverse { target.quote_mint } else { target.base_mint };
+            let build = |target| crate::build_dynamic_quote_buy(&crate::PROGRAM_ID, &user, &fee,
+                100, 100, 10, 1, &Market::PumpSwapOuter(bridge.clone()), &Market::PumpSwapOuter(target));
+            let route = build(target.clone()).unwrap();
+            assert_eq!(route.quote_mint, quote); assert_eq!(route.quote_token_program, program);
+            assert_eq!(route.output_mint, output);
+            assert_eq!(route.instruction.data[0], crate::TAG_ROUTE_DYNAMIC);
+            if reverse { target.base_token_program = Pubkey::new_unique(); }
+            else { target.quote_token_program = Pubkey::new_unique(); }
+            assert!(build(target).is_err(), "conflicting intermediate token programs accepted");
+        }
+    }
+}
+
+#[test]
+fn offline_parser_intents_and_prepared_routes_are_not_single_pool_snapshots() {
+    use sol_parser_sdk::core::events::{DexEvent, PumpRouteIntentEvent, PumpRouteKind};
+    let event = DexEvent::PumpRouteIntent(Box::new(PumpRouteIntentEvent {
+        metadata: Default::default(), kind: PumpRouteKind::MultiHopSwap,
+        program: PUMPSWAP_PROGRAM, instruction_index: 1, user: Pubkey::new_unique(),
+        input_account: Pubkey::new_unique(), output_account: Pubkey::new_unique(),
+        amount_in: Some(100), min_amount_out: Some(1), hops: vec![], instruction_data: vec![],
+    }));
+    assert!(crate::market_from_dex_event(&event).is_none());
+    let route = crate::DexParamEnum::PumpSwapQuoteRoute(Default::default());
+    assert!(crate::to_routed_market(&route, Pubkey::new_unique()).unwrap_err()
+        .to_string().contains("multiple pools"));
 }
 
 fn dummy_launchlab() -> LaunchLabPool {
@@ -1772,6 +1905,7 @@ fn offline_pumpswap_cashback_inserts_volume_ata() {
     let mut pool = dummy_pumpswap();
     pool.is_cashback_coin = true;
     pool.coin_creator = Pubkey::new_unique();
+    bind_pumpswap_creator(&mut pool);
     let leg = pumpswap_buy_leg(&user, &pool, 1_000_000, 0).unwrap();
     let non_cashback = {
         let mut p = pool.clone();
@@ -3241,6 +3375,7 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     params.protocol_fee_recipient_override = Some(protocol);
     params.protocol_extra_fee_recipient_override = Some(buyback);
     let mut pool = crate::adapter::pumpswap_from_params(&params);
+    bind_pumpswap_creator(&mut pool);
     assert_eq!(pool.quote_fee_reserves, None);
     let mut state = sol_trade_sdk::instruction::utils::pumpswap_types::Pool {
         base_mint:pool.base_mint, quote_mint:pool.quote_mint,
@@ -3341,7 +3476,8 @@ fn offline_pumpswap_mayhem_fallback_does_not_use_regular_recipient() {
         0,
     );
     assert!(params.is_mayhem_mode && params.protocol_fee_recipient_override.is_none());
-    let pool = crate::adapter::pumpswap_from_params(&params);
+    let mut pool = crate::adapter::pumpswap_from_params(&params);
+    bind_pumpswap_creator(&mut pool);
     assert_eq!(pool.protocol_fee_recipient, MAYHEM_FEE_RECIPIENT);
     assert_eq!(
         pumpswap_buy_leg(&k(), &pool, 100, 1).unwrap().accounts[9].pubkey,

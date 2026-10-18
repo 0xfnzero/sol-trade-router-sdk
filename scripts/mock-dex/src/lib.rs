@@ -1,4 +1,4 @@
-//! Local-only CPMM-layout fixture. It uses real token CPIs, not real DEX pricing.
+//! Local-only CPMM/PumpSwap-layout fixture with real token CPIs and synthetic pricing.
 #![no_std]
 use pinocchio::{
     cpi::invoke_with_slice,
@@ -45,12 +45,20 @@ fn checked_transfer(
 }
 
 fn process_instruction(_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-    if accounts.len() != 13
-        || data.len() != 24
-        || data[..8] != [143, 190, 90, 218, 196, 30, 51, 222]
-    {
+    if accounts.len() != 13 || data.len() < 24 {
         return Err(ProgramError::InvalidInstructionData);
     }
+    let (input, output, sink, reserve, signer, input_mint, output_mint, input_program, output_program) =
+        if data.len() == 24 && data[..8] == [143, 190, 90, 218, 196, 30, 51, 222] {
+            (4, 5, 6, 7, 0, 10, 11, 8, 9)
+        } else if data.len() == 25 && data[..8] == [198, 46, 21, 82, 180, 217, 232, 112]
+            && data[24] <= 1 {
+            (6, 5, 8, 7, 1, 4, 3, 12, 11)
+        } else if data.len() == 24 && data[..8] == [51, 230, 133, 164, 1, 127, 131, 173] {
+            (5, 6, 7, 8, 1, 3, 4, 11, 12)
+        } else {
+            return Err(ProgramError::InvalidInstructionData);
+        };
     let amount = u64::from_le_bytes(
         data[8..16]
             .try_into()
@@ -73,22 +81,22 @@ fn process_instruction(_id: &Address, accounts: &mut [AccountView], data: &[u8])
         _ => return Err(ProgramError::InvalidInstructionData),
     };
     checked_transfer(
-        &accounts[4],
-        &accounts[10],
-        &accounts[6],
-        &accounts[0],
-        &accounts[8],
+        &accounts[input],
+        &accounts[input_mint],
+        &accounts[sink],
+        &accounts[signer],
+        &accounts[input_program],
         spent,
     )?;
     let out = amount
         .checked_mul(2)
         .ok_or(ProgramError::ArithmeticOverflow)?;
     checked_transfer(
-        &accounts[7],
-        &accounts[11],
-        &accounts[5],
-        &accounts[0],
-        &accounts[9],
+        &accounts[reserve],
+        &accounts[output_mint],
+        &accounts[output],
+        &accounts[signer],
+        &accounts[output_program],
         out,
     )
 }

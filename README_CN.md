@@ -34,6 +34,26 @@
     <a href="https://discord.gg/vuazbGkqQE">Discord</a>
 </p>
 
+
+## PumpSwap 与 parser 同步（0.2.0）
+
+依赖固定为 `sol-trade-sdk =6.0.2` 和 `sol-parser-sdk =0.7.14`。
+PumpSwap 买入、定量输出买入和卖出，在构建 CPI 前校验 creator vault authority、ATA
+与实际 quote mint/token program 的一致性。缺失的 token program 或 fee recipient
+会直接报错。定量输出 Buy 补齐 volume 标志；协议收款人和全局 volume 账户保持只读。
+
+使用 `LoadMarketRequest::PumpSwapPool { pool }` 按明确池地址冷加载，包括非 WSOL 报价池。
+用 SOL 买入时，先准备完整的桥接池和目标池快照，再调用 `build_dynamic_quote_buy`
+构建 WSOL → 报价币 → 目标币。PumpSwap 可作为第一跳或目标跳，按实际 mint 方向买入或卖出；
+配套 Router 仅消费上一跳新增到账余额。调用前需创建必要 ATA 并注资/sync WSOL，构建热路径不调用 RPC。
+高级交易接口的池校验仍要求显式信任非标准池。
+
+trade SDK 的 `PumpSwapQuoteRoute` 可包含分支及合流，不能缩成一个 `RoutedMarket`；
+应使用明确的 Router legs 和两跳/三跳构建器。parser 的 `PumpRouteIntent` 是执行前意图，
+不会当作成交或储备快照使用；这类快照应来自已执行交易事件和当前池状态。
+
+动态 PumpSwap 买入需要部署本版本配套的 Router 合约；发布 SDK 不会升级已有链上部署。
+
 ## 📋 目录
 
 - [✨ 项目特性](#-项目特性)
@@ -79,17 +99,16 @@
 
 ## 📦 安装
 
-客户端已准备为 crates.io **0.2.0** 版本。正式发布前可使用 `main` 分支的 Git 依赖：
+从 crates.io 安装完整客户端版本 **0.2.0**：
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = { git = "https://github.com/0xfnzero/sol-trade-router-sdk", branch = "main", package = "sol-trade-router-sdk" }
-# 正式发布后：sol-trade-router-sdk = "=0.2.0"
+sol-trade-router-sdk = "=0.2.0"
 # 仅直接导入解析器类型的订阅程序需要：
-sol-parser-sdk = "=0.7.12"
+sol-parser-sdk = "=0.7.14"
 ```
 
-依赖使用已发布的 **sol-trade-sdk 6.0.0** 和 **sol-parser-sdk 0.7.12**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
+依赖使用已发布的 **sol-trade-sdk 6.0.2** 和 **sol-parser-sdk 0.7.14**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
 
 详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
 

@@ -483,15 +483,12 @@ pub fn pumpfun_sell_v2_leg(
 fn pumpswap_accounts(user: &Pubkey, pool: &PumpSwapPool, is_buy: bool) -> Result<Vec<AccountMeta>> {
     require_mint_programs(&[(pool.base_mint, pool.base_token_program),
         (pool.quote_mint, pool.quote_token_program)], "PumpSwap")?;
+    pool.validate_accounts()?;
     let user_base = ata(user, &pool.base_mint, &pool.base_token_program);
     let user_quote = ata(user, &pool.quote_mint, &pool.quote_token_program);
     // Observed protocol fee recipient (mayhem or standard). Do not hardcode only
     // PUMPSWAP_PROTOCOL_FEE_RECIPIENT — mayhem pools require the mayhem fee pool.
-    let protocol_fee = if pool.protocol_fee_recipient != Pubkey::default() {
-        pool.protocol_fee_recipient
-    } else {
-        PUMPSWAP_PROTOCOL_FEE_RECIPIENT
-    };
+    let protocol_fee = pool.protocol_fee_recipient;
     let fee_ata = ata(&protocol_fee, &pool.quote_mint, &pool.quote_token_program);
     let mut accounts = Vec::with_capacity(28);
     accounts.extend([
@@ -587,7 +584,11 @@ pub fn pumpswap_buy_exact_out_leg(
     base_amount_out: u64,
     max_quote_in: u64,
 ) -> Result<Leg> {
-    let data = encode_u64_pair(&PUMPSWAP_BUY, base_amount_out, max_quote_in);
+    let mut data = [0u8; 25];
+    data[..8].copy_from_slice(&PUMPSWAP_BUY);
+    data[8..16].copy_from_slice(&base_amount_out.to_le_bytes());
+    data[16..24].copy_from_slice(&max_quote_in.to_le_bytes());
+    data[24] = 1;
     Ok(Leg {
         program_id: PUMPSWAP_PROGRAM,
         accounts: pumpswap_accounts(user, pool, true)?,
@@ -1291,8 +1292,8 @@ mod tests {
             pool_quote_token_account: key(4),
             base_token_program: TOKEN_PROGRAM,
             quote_token_program: TOKEN_PROGRAM,
-            coin_creator_vault_ata: key(5),
-            coin_creator_vault_authority: key(6),
+            coin_creator_vault_ata: crate::offline_tests::creator_vault_ata(Pubkey::default(), WSOL_MINT, TOKEN_PROGRAM),
+            coin_creator_vault_authority: crate::offline_tests::creator_vault_authority(Pubkey::default()),
             coin_creator: Pubkey::default(),
             base_reserve: 1,
             quote_reserve: 1,
@@ -1309,7 +1310,6 @@ mod tests {
         assert_eq!(ix.accounts[9].pubkey, PUMP_MAYHEM_FEE_RECIPIENT);
         assert!(!ix.accounts[9].is_writable);
         pool.protocol_fee_recipient = Pubkey::default();
-        let ix2 = pumpswap_buy_leg(&user, &pool, 100, 90).unwrap();
-        assert_eq!(ix2.accounts[9].pubkey, PUMPSWAP_PROTOCOL_FEE_RECIPIENT);
+        assert!(pumpswap_buy_leg(&user, &pool, 100, 90).is_err());
     }
 }

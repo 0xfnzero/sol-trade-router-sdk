@@ -1,12 +1,12 @@
-# SDK 0.2.0 release readiness
+# SDK 0.2.0 release
 
 This release fixes output-mint validation, input-budget accounting, dynamic two/three-hop fresh-credit consumption, Token-2022 fee transfers, and native Pump setup-rent accounting. It rejects unsupported exact-output paths and missing/unbound quote state rather than silently producing a misleading quote. SDK APIs and dynamic route formats changed; use 0.2.0 with matching Router source.
 
 ## Installation and self-deployment
 
-The SDK package is prepared for crates.io publication, but this change does not publish it. Before publication use the repository's `main` branch as shown in the root README. The package depends on published `sol-trade-sdk =6.0.0` and `sol-parser-sdk =0.7.12`; no Git or local registry patches are required. Package fixtures and MIT license are included.
+The complete SDK is published as `sol-trade-router-sdk =0.2.0`. It depends on published `sol-trade-sdk =6.0.2` and `sol-parser-sdk =0.7.14`; no Git or local registry patches are required. Package fixtures and MIT license are included. The October 18 synchronization adds creator-account validation, custom PumpSwap pool loading and dynamic exact-input PumpSwap buys. See [current release validation](RELEASE_0.2.0_SYNC.md).
 
-Users build/deploy the Router themselves. Use the deployed program ID with `RouterTradeConfig::with_program_id` or `RouterClient::with_program_id`; examples require `ROUTER_PROGRAM_ID`. Initialize that program's own config PDA and match its fee settings. The historical default address is not evidence of compatibility. Matching source supports static Route tag 2, dynamic tags 5/6 and Pump preparation tag 7. Legacy dynamic tags 3/4 are rejected. Nothing in this PR deploys or upgrades a contract.
+Users build/deploy the Router themselves. Use the deployed program ID with `RouterTradeConfig::with_program_id` or `RouterClient::with_program_id`; examples require `ROUTER_PROGRAM_ID`. Initialize that program's own config PDA and match its fee settings. The historical default address is not evidence of compatibility. Matching source supports static Route tag 2, dynamic tags 5/6 and Pump preparation tag 7. Legacy dynamic tags 3/4 are rejected. SDK publication does not deploy or upgrade a contract.
 
 The verified host is macOS/Unix. The upstream Yellowstone 13.5.0 dependency has an unconditional Unix import; Windows support is not claimed. The SDK manifest declares Rust 1.91; validation used the installed current host toolchain, not a separate minimum-version toolchain run.
 
@@ -31,7 +31,7 @@ bash scripts/check-release.sh
 
 The default fee snapshot is `scripts/fixtures/pump-v4-mainnet-fees.json`; override it with `ROUTER_PUMP_FEE_FIXTURE` when matching a different captured program. The script does not fetch external ELFs implicitly.
 
-## Evidence and limits
+## October 9 baseline evidence and limits
 
 The complete check exited successfully on 2026-10-09: 111 workspace tests, 93 extracted-package tests, and 147 local VM scenarios (15 security, 40 multi-hop, 86 native Pump rent, 6 disabled-hook round trips). The package tests run without repository-relative fixtures or workspace patches. Detailed outputs and ELF hashes are in [release evidence](../tools/validation/release-0.2.0/summary.json).
 

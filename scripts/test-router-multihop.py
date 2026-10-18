@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute Router SBF and a test-only CPMM-layout DEX in LiteSVM.
+"""Execute Router SBF and a test-only CPMM/PumpSwap-layout DEX in LiteSVM.
 
 The fixture uses real SPL/Token-2022 CPIs and synthetic 2:1 outputs. It tests
 Router accounting/rollback, not CPMM pricing or live DEX execution. No RPC,
@@ -25,12 +25,18 @@ helpers = runpy.run_path(str(Path(__file__).with_name("test-router-security.py")
 ROUTER = helpers["PROGRAM"]
 CPMM = Pubkey.from_string("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C")
 DISC = bytes([143, 190, 90, 218, 196, 30, 51, 222])
+PUMPSWAP = Pubkey.from_string("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA")
+PUMP_BUY = bytes([198, 46, 21, 82, 180, 217, 232, 112])
+PUMP_SELL = bytes([51, 230, 133, 164, 1, 127, 131, 173])
 
 
-def run_case(router_code, dex_code, hops, initial, transfer_fee, fault=None):
+def run_case(router_code, dex_code, hops, initial, transfer_fee, fault=None, layouts=None):
+    layouts = layouts or ["cpmm"] * hops
+    assert len(layouts) == hops
     vm = LiteSVM().with_default_programs()
     vm.add_program(ROUTER, router_code)
     vm.add_program(CPMM, dex_code)
+    vm.add_program(PUMPSWAP, dex_code)
     payer = Keypair()
     user = payer.pubkey()
     vm.airdrop(user, 1_000_000_000)
@@ -89,9 +95,27 @@ def run_case(router_code, dex_code, hops, initial, transfer_fee, fault=None):
                       AccountMeta(program, False, False), AccountMeta(program, False, False),
                       AccountMeta(mints[i], False, False), AccountMeta(mints[i + 1], False, False),
                       AccountMeta(Pubkey.default(), False, False)]
+        venue = CPMM
+        if layouts[i] != "cpmm":
+            buy = layouts[i] == "pump_buy"
+            venue = PUMPSWAP
+            leg_data = (PUMP_BUY if buy else PUMP_SELL) + struct.pack("<QQ", amount, mode)
+            if buy:
+                leg_data += bytes([2 if fault == "invalid_volume" and i == max(
+                    j for j, layout in enumerate(layouts) if layout == "pump_buy") else 1])
+            # PumpSwap base/quote account ordering is reversed for quote-input buys.
+            base, quote = (i + 1, i) if buy else (i, i + 1)
+            base_vault, quote_vault = (reserves[i], sinks[i]) if buy else (sinks[i], reserves[i])
+            leg_metas = [AccountMeta(Pubkey.default(), False, False), AccountMeta(user, True, False),
+                         AccountMeta(Pubkey.default(), False, False),
+                         AccountMeta(mints[base], False, False), AccountMeta(mints[quote], False, False),
+                         AccountMeta(wallets[base], False, True), AccountMeta(wallets[quote], False, True),
+                         AccountMeta(base_vault, False, True), AccountMeta(quote_vault, False, True),
+                         AccountMeta(Pubkey.default(), False, False), AccountMeta(Pubkey.default(), False, False),
+                         AccountMeta(program, False, False), AccountMeta(program, False, False)]
         metas += leg_metas
-        data += bytes(CPMM) + struct.pack("<BH", len(leg_metas), len(leg_data)) + leg_data
-    metas.append(AccountMeta(CPMM, False, False))
+        data += bytes(venue) + struct.pack("<BH", len(leg_metas), len(leg_data)) + leg_data
+    metas += [AccountMeta(CPMM, False, False), AccountMeta(PUMPSWAP, False, False)]
     tx = Transaction.new_signed_with_payer([Instruction(ROUTER, bytes(data), metas)],
                                          user, [payer], vm.latest_blockhash())
     tx.verify()
@@ -103,7 +127,7 @@ def run_case(router_code, dex_code, hops, initial, transfer_fee, fault=None):
     expected_error = None
     if fault:
         expected_error = (18 if fault == "wrong_mint" else 21 if fault == "alias"
-                          else 19 if fault == "nonzero_placeholder" else
+                          else 19 if fault in ("nonzero_placeholder", "invalid_volume") else
                           10 if "slippage" in fault else 20)
     assert failed == (expected_error is not None) and actual_error == expected_error, (fault, error)
     if failed:
@@ -117,8 +141,8 @@ def run_case(router_code, dex_code, hops, initial, transfer_fee, fault=None):
         for i, key in enumerate(intermediate, 1):
             assert balance(key) == initial + i, "pre-existing intermediate balance was spent"
         metadata = result
-        assert sum(log.startswith(f"Program {CPMM} invoke") for log in metadata.logs()) == hops
-    return {"hops": hops, "initial": initial, "token_2022_transfer_fee": transfer_fee,
+        assert sum(log.startswith((f"Program {CPMM} invoke", f"Program {PUMPSWAP} invoke")) for log in metadata.logs()) == hops
+    return {"hops": hops, "layouts": layouts, "initial": initial, "token_2022_transfer_fee": transfer_fee,
             "fault": fault, "success": not failed, "custom_error": actual_error}
 
 
@@ -142,6 +166,16 @@ def main():
         for fault in faults:
             for transfer_fee in [False, True]:
                 print(json.dumps(run_case(router_code, dex_code, hops, 777, transfer_fee, fault)))
+                cases += 1
+    for layouts in [["cpmm", "pump_buy"], ["pump_buy", "pump_buy"],
+                    ["pump_sell", "pump_buy"], ["cpmm", "pump_buy", "pump_sell"]]:
+        hops = len(layouts)
+        for transfer_fee in [False, True]:
+            for initial in [0, 777]:
+                print(json.dumps(run_case(router_code, dex_code, hops, initial, transfer_fee, layouts=layouts)))
+                cases += 1
+            for fault in ["underspend_1", "overspend_1", "wrong_mint", "final_slippage", "invalid_volume"]:
+                print(json.dumps(run_case(router_code, dex_code, hops, 777, transfer_fee, fault, layouts)))
                 cases += 1
     print(json.dumps({"passed": cases, "router_sha256": hashlib.sha256(router_code).hexdigest(),
                       "mock_dex_sha256": hashlib.sha256(dex_code).hexdigest()}))

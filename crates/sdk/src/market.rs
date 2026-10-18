@@ -222,6 +222,32 @@ pub struct PumpSwapPool {
 }
 
 impl PumpSwapPool {
+    /// Validate complete account identities before constructing any Router CPI.
+    /// Uses the same creator/quote/token-program checks as the direct trade SDK.
+    /// This does not prove account existence, ownership or snapshot freshness.
+    pub fn validate_accounts(&self) -> anyhow::Result<()> {
+        sol_trade_sdk::trading::core::params::PumpSwapParams::new(
+            self.pool,
+            self.base_mint,
+            self.quote_mint,
+            self.pool_base_token_account,
+            self.pool_quote_token_account,
+            self.base_reserve,
+            self.quote_reserve,
+            self.virtual_quote_reserves,
+            self.coin_creator_vault_ata,
+            self.coin_creator_vault_authority,
+            self.base_token_program,
+            self.quote_token_program,
+            self.protocol_fee_recipient,
+            self.coin_creator,
+            self.is_cashback_coin,
+            0,
+        )
+        .with_fee_recipients(self.protocol_fee_recipient, self.buyback_fee_recipient)
+        .validate_accounts()
+    }
+
     /// Supply sweep-reserved fees from the same authoritative Pool/vault snapshot
     /// as this market. Legacy params and trade events do not contain these totals.
     pub fn apply_pool_fee_reserves(
