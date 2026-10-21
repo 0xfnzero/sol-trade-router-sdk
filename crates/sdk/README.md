@@ -10,7 +10,7 @@ The historical default program ID is not a compatible deployment for this releas
 sol-trade-router-sdk = "=0.3.0"
 ```
 
-Dependencies use published sol-trade-sdk 9.0.0 and sol-parser-sdk 0.9.0. No Git
+Dependencies use published sol-trade-sdk 9.0.1 and sol-parser-sdk 0.9.0. No Git
 patches or local sibling checkouts are needed. The SDK preserves a zero-RPC hot
 path: load current mint/pool/fee state before building trades.
 
@@ -26,7 +26,7 @@ Yellowstone 13.5.0 dependency still has an upstream Windows import limitation.
 
 ## PumpSwap and parser synchronization (0.3.0)
 
-This release pins `sol-trade-sdk =9.0.0` and `sol-parser-sdk =0.9.0`.
+This release pins `sol-trade-sdk =9.0.1` and `sol-parser-sdk =0.9.1`.
 PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
 ATA against the actual quote mint/token program before constructing CPI accounts.
 Missing token programs or fee recipients are rejected instead of guessed. Exact-output
@@ -50,8 +50,8 @@ Build and deploy the matching Router source to use dynamic PumpSwap buys. Publis
 the SDK does not change an existing on-chain deployment.
 
 
-Stock bridge synchronization: this crate now uses parser 0.9.0 and trade 9.0.0.
+Stock bridge synchronization: this crate now uses parser 0.9.1 and trade 9.0.0.
 The root exports `stock_prices`, `PumpSwapRoutingConfig`, `PumpSwapRouting` and
-`PumpSwapRoutingFeed`. The shared catalog has 34 stock/ETF mints and 63 pools;
+`PumpSwapRoutingFeed`. The shared catalog has 33 stock/ETF mints and 58 pools;
 trade routing additionally registers WSOL/USDC. Re-exported routing builds
 direct trade-sdk instructions, not automatic router-program CPI dispatch.
