@@ -49,21 +49,19 @@ pub use ata::{
     ata, close_ata, close_wsol_ata, create_ata, create_wsol_ata, warm_ata_cache, wrap_sol,
     wrap_sol_with_options, AtaKind, AtaPolicy,
 };
-pub use client::{
-    validate_protocol_params, RouterTradeConfig, SolanaTrade, TradingClient,
-};
+pub use client::{validate_protocol_params, RouterTradeConfig, SolanaTrade, TradingClient};
 pub use constants::{
-    LAUNCHLAB_PROGRAM, MEMO_PROGRAM, METEORA_DAMM_V2_PROGRAM, METEORA_DLMM_PROGRAM,
-    ORCA_WHIRLPOOL_PROGRAM, PROGRAM_ID, PUMPSWAP_PROGRAM, RAYDIUM_AMM_V4_PROGRAM,
-    RAYDIUM_CLMM_PROGRAM, RAYDIUM_CPMM_PROGRAM, STONKFUN_REWARD_PLATFORM_CONFIG,
-    STONKFUN_STANDARD_PLATFORM_CONFIG, TOKEN_2022_PROGRAM, USDC_MINT, WSOL_MINT,
-    raydium_clmm_tick_array_bitmap_extension,
+    raydium_clmm_tick_array_bitmap_extension, LAUNCHLAB_PROGRAM, MEMO_PROGRAM,
+    METEORA_DAMM_V2_PROGRAM, METEORA_DLMM_PROGRAM, ORCA_WHIRLPOOL_PROGRAM, PROGRAM_ID,
+    PUMPSWAP_PROGRAM, RAYDIUM_AMM_V4_PROGRAM, RAYDIUM_CLMM_PROGRAM, RAYDIUM_CPMM_PROGRAM,
+    STONKFUN_REWARD_PLATFORM_CONFIG, STONKFUN_STANDARD_PLATFORM_CONFIG, TOKEN_2022_PROGRAM,
+    USDC_MINT, WSOL_MINT,
 };
 pub use dynamic::{build_deployed_dynamic_quote_buy, build_dynamic_quote_buy, DynamicBuyRoute};
 pub use legs::{
     cpmm_swap_leg, launchlab_buy_leg, launchlab_sell_leg, meteora_damm_v2_swap_leg,
-    meteora_dlmm_swap_leg, pumpswap_buy_leg, pumpswap_sell_leg,
-    raydium_amm_v4_swap_leg, raydium_clmm_swap_leg, whirlpool_swap_leg, Leg,
+    meteora_dlmm_swap_leg, pumpswap_buy_leg, pumpswap_sell_leg, raydium_amm_v4_swap_leg,
+    raydium_clmm_swap_leg, whirlpool_swap_leg, Leg,
 };
 pub use market::{
     launchlab_creator_associated_account, launchlab_platform_associated_account, BridgePool,
@@ -79,13 +77,12 @@ pub use parser::{
 };
 pub use pool_guard::{
     assert_cpmm_ok, assert_launchlab_ok, assert_market_ok, assert_pumpfun_ok, assert_pumpswap_ok,
-    assert_routed_market_ok, cpmm_observation_pda, cpmm_pool_pda, cpmm_vault_pda, is_stonkfun_platform,
-    launchlab_pool_pda, launchlab_vault_pda, pump_pool_authority_pda, pumpfun_bonding_curve_pda,
-    pumpswap_canonical_pool_pda, PoolGuardPolicy,
+    assert_routed_market_ok, cpmm_observation_pda, cpmm_pool_pda, cpmm_vault_pda,
+    is_stonkfun_platform, launchlab_pool_pda, launchlab_vault_pda, pump_pool_authority_pda,
+    pumpfun_bonding_curve_pda, pumpswap_canonical_pool_pda, PoolGuardPolicy,
 };
 pub use pumpfun_v3::{
-    PumpFunV3Pool, PumpFunV3Trade, PUMPFUN_BUY_EXACT_QUOTE_IN_V3, PUMPFUN_BUY_V3,
-    PUMPFUN_SELL_V3,
+    PumpFunV3Pool, PumpFunV3Trade, PUMPFUN_BUY_EXACT_QUOTE_IN_V3, PUMPFUN_BUY_V3, PUMPFUN_SELL_V3,
 };
 pub use quote::{
     apply_slippage_min_out, clamp_slippage_bps, cpmm_out, fee_amount, launchlab_buy_base_out,
@@ -95,42 +92,42 @@ pub use quote::{
     whirlpool_out, LaunchLabBuyQuote, MAX_SLIPPAGE_BPS,
 };
 pub use route_ix::{
-    build_dynamic_route_instruction, build_three_hop_route_instruction,
-    sol_fee_program, spl_fee_program, token_fee_program, RouteAccounts,
-    FEE_ASSET_EXACT_OUT, TAG_ROUTE_DYNAMIC, TAG_ROUTE_DYNAMIC_THREE,
+    build_dynamic_route_instruction, build_three_hop_route_instruction, sol_fee_program,
+    spl_fee_program, token_fee_program, RouteAccounts, FEE_ASSET_EXACT_OUT, TAG_ROUTE_DYNAMIC,
+    TAG_ROUTE_DYNAMIC_THREE,
 };
 pub use trade::{BuiltTrade, RouterClient, TradeOpts};
 pub use transfer_fee::TokenTransferFee;
 
 // ── Re-export sol-trade-sdk surface used by callers (parity) ─────────────────
+pub use sol_trade_sdk::common::keypair;
 pub use sol_trade_sdk::common::{
     GasFeeStrategy, InfrastructureConfig, TradeConfig, TradeTransactionVersion,
 };
-pub use sol_trade_sdk::{AstralaneTransport, DurableNonceInfo, SwqosTransport, fetch_nonce_info};
+pub use sol_trade_sdk::recommended_sender_thread_core_indices;
 pub use sol_trade_sdk::swqos::{SwqosClient, SwqosConfig, SwqosType, TradeType};
 pub use sol_trade_sdk::trading::{
-    factory::DexType,
-    MiddlewareManager, InstructionMiddleware,
     core::params::{
         BonkParams, DexParamEnum, LaunchLabParams, MeteoraDammV2Params, MeteoraDlmmParams,
         PumpFunParams, PumpSwapParams, RaydiumAmmV4Params, RaydiumClmmParams, RaydiumCpmmParams,
         StonkFunMemeLeg, StonkFunParams, StonkFunSolHop, StonkFunSwapParams, StonkFunViaSolParams,
         WhirlpoolParams,
     },
+    factory::DexType,
+    InstructionMiddleware, MiddlewareManager,
 };
+pub use sol_trade_sdk::{fetch_nonce_info, AstralaneTransport, DurableNonceInfo, SwqosTransport};
 pub use sol_trade_sdk::{
     AccountPolicy, BuyAmount, SellAmount, SimpleBuyParams, SimpleSellParams, TradeBuyParams,
     TradeRiskGate, TradeSellParams, TradeTokenType, TradingInfrastructure,
 };
-pub use sol_trade_sdk::common::keypair;
-pub use sol_trade_sdk::recommended_sender_thread_core_indices;
 
+#[cfg(test)]
+mod mainnet_router_tests;
 #[cfg(test)]
 mod mainnet_sim;
 #[cfg(test)]
 mod mainnet_sim_tests;
-#[cfg(test)]
-mod mainnet_router_tests;
 #[cfg(test)]
 mod offline_tests;
 
@@ -141,3 +138,8 @@ pub const CONFIG_SEED: &[u8] = b"config";
 pub fn config_pda(program_id: &solana_sdk::pubkey::Pubkey) -> (solana_sdk::pubkey::Pubkey, u8) {
     solana_sdk::pubkey::Pubkey::find_program_address(&[CONFIG_SEED], program_id)
 }
+
+/// Shared stock identities and cache-only direct-instruction bridge preparation.
+/// Prepared trades use sol-trade-sdk instructions, not the router program's CPI wrapper.
+pub use sol_parser_sdk::stock_prices;
+pub use sol_trade_sdk::{PumpSwapRouting, PumpSwapRoutingConfig, PumpSwapRoutingFeed};

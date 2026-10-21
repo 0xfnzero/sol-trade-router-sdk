@@ -1,7 +1,6 @@
 //! Convert `sol-trade-sdk` [`DexParamEnum`] / per-DEX params → router pool snapshots.
 
 use anyhow::{anyhow, Result};
-use solana_sdk::pubkey::Pubkey;
 use sol_trade_sdk::instruction::utils::pumpfun::{
     get_bonding_curve_v2_pda, get_user_volume_accumulator_pda,
 };
@@ -10,6 +9,7 @@ use sol_trade_sdk::trading::core::params::{
     PumpSwapParams, RaydiumAmmV4Params, RaydiumClmmParams, RaydiumCpmmParams, StonkFunMemeLeg,
     StonkFunSolHop, StonkFunViaSolParams, WhirlpoolParams,
 };
+use solana_sdk::pubkey::Pubkey;
 
 use crate::{
     constants::{
@@ -41,7 +41,8 @@ impl TransferFeeConvert for sol_trade_sdk::trading::core::params::TokenTransferF
 
 #[inline]
 fn quote_or_wsol(quote_mint: Pubkey) -> Pubkey {
-    if quote_mint == Pubkey::default() || quote_mint == sol_trade_sdk::constants::SOL_TOKEN_ACCOUNT {
+    if quote_mint == Pubkey::default() || quote_mint == sol_trade_sdk::constants::SOL_TOKEN_ACCOUNT
+    {
         WSOL_MINT
     } else {
         quote_mint
@@ -110,11 +111,7 @@ pub fn cpmm_from_params(p: &RaydiumCpmmParams) -> CpmmPool {
     }
 }
 
-pub fn pumpfun_from_params(
-    p: &PumpFunParams,
-    mint: Pubkey,
-    user: &Pubkey,
-) -> Result<PumpFunPool> {
+pub fn pumpfun_from_params(p: &PumpFunParams, mint: Pubkey, user: &Pubkey) -> Result<PumpFunPool> {
     let bc = p.bonding_curve.as_ref();
     if mint == Pubkey::default() {
         return Err(anyhow!("PumpFun mint is default"));
@@ -190,14 +187,16 @@ pub fn pumpswap_from_params(p: &PumpSwapParams) -> PumpSwapPool {
         protocol_fee_bps: fees.protocol_fee_basis_points,
         creator_fee_bps: fees.coin_creator_fee_basis_points,
         is_cashback_coin: p.is_cashback_coin,
-        protocol_fee_recipient: p.protocol_fee_recipient_override.unwrap_or(
-            if p.is_mayhem_mode {
+        protocol_fee_recipient: p
+            .protocol_fee_recipient_override
+            .unwrap_or(if p.is_mayhem_mode {
                 sol_trade_sdk::instruction::utils::pumpswap::accounts::MAYHEM_FEE_RECIPIENT
             } else {
                 sol_trade_sdk::instruction::utils::pumpswap::accounts::PROTOCOL_FEE_RECIPIENT
-            }
-        ),
-        buyback_fee_recipient: p.protocol_extra_fee_recipient_override.unwrap_or(PUMPFUN_BUYBACK_FEE_RECIPIENT),
+            }),
+        buyback_fee_recipient: p
+            .protocol_extra_fee_recipient_override
+            .unwrap_or(PUMPFUN_BUYBACK_FEE_RECIPIENT),
     }
 }
 
@@ -329,6 +328,8 @@ pub fn to_routed_market(params: &DexParamEnum, mint: Pubkey) -> Result<RoutedMar
 }
 
 /// Preferred converter when the payer is known (fills PumpFun user volume accumulator).
+/// Versioned PumpFun and multi-leg routes use explicit builders, such as
+/// `PumpFunV3Pool`; this adapter supports the declared published trade-sdk API.
 pub fn to_routed_market_for_user(
     params: &DexParamEnum,
     mint: Pubkey,
@@ -337,6 +338,9 @@ pub fn to_routed_market_for_user(
     Ok(match params {
         DexParamEnum::PumpFun(p) => RoutedMarket::pumpfun(pumpfun_from_params(p, mint, user)?),
         DexParamEnum::PumpSwap(p) => RoutedMarket::pumpswap(pumpswap_from_params(p)),
+        DexParamEnum::PumpSwapAutoRoute(_) => {
+            return Err(anyhow!("PumpSwapAutoRoute requires a fresh routing cache; use PumpSwapRouting::prepare instead of single-market conversion"));
+        }
         DexParamEnum::PumpSwapQuoteRoute(_) => {
             return Err(anyhow!(
                 "PumpSwapQuoteRoute contains multiple pools; use explicit dynamic Router legs instead of single-market conversion"
@@ -361,6 +365,12 @@ pub fn to_routed_market_for_user(
         DexParamEnum::RaydiumClmm(p) => RoutedMarket::raydium_clmm(raydium_clmm_from_params(p)),
         DexParamEnum::OrcaWhirlpool(p) => RoutedMarket::whirlpool(whirlpool_from_params(p)),
         DexParamEnum::MeteoraDlmm(p) => RoutedMarket::meteora_dlmm(dlmm_from_params(p)),
+        // Keep compatibility with the published dependency. Newer trade-sdk
+        // variants must not silently fall back to this legacy single-market ABI.
+        #[allow(unreachable_patterns)]
+        _ => return Err(anyhow!(
+            "Unsupported single-market conversion; use the explicit router builder (PumpFunV3Pool for V3) or the trade-sdk route executor"
+        )),
     })
 }
 
@@ -431,7 +441,10 @@ mod tests {
         };
         let via = StonkFunViaSolParams::curve_with_cpmm(curve, hop);
         let routed = to_routed_market(&DexParamEnum::StonkFunViaSol(via), meme).unwrap();
-        assert!(matches!(routed.bridge, Some(crate::market::BridgePool::Cpmm(_))));
+        assert!(matches!(
+            routed.bridge,
+            Some(crate::market::BridgePool::Cpmm(_))
+        ));
         assert!(matches!(routed.market, Market::LaunchLabInner(_)));
     }
 

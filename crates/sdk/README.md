@@ -1,16 +1,16 @@
 # Sol Trade Router SDK
 
-Version 0.2.0 provides the Rust client for the matching Pinocchio Router source
+Version 0.3.0 provides the Rust client for the matching Pinocchio Router source
 in this repository. Deploy that program yourself and pass its program ID with
 `RouterTradeConfig::with_program_id` or `RouterClient::with_program_id`.
 The historical default program ID is not a compatible deployment for this release.
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = "=0.2.0"
+sol-trade-router-sdk = "=0.3.0"
 ```
 
-Dependencies use published sol-trade-sdk 6.0.2 and sol-parser-sdk 0.7.14. No Git
+Dependencies use published sol-trade-sdk 9.0.0 and sol-parser-sdk 0.9.0. No Git
 patches or local sibling checkouts are needed. The SDK preserves a zero-RPC hot
 path: load current mint/pool/fee state before building trades.
 
@@ -24,9 +24,9 @@ network transactions. Current dependencies support Unix targets; the pinned
 Yellowstone 13.5.0 dependency still has an upstream Windows import limitation.
 
 
-## PumpSwap and parser synchronization (0.2.0)
+## PumpSwap and parser synchronization (0.3.0)
 
-This release pins `sol-trade-sdk =6.0.2` and `sol-parser-sdk =0.7.14`.
+This release pins `sol-trade-sdk =9.0.0` and `sol-parser-sdk =0.9.0`.
 PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
 ATA against the actual quote mint/token program before constructing CPI accounts.
 Missing token programs or fee recipients are rejected instead of guessed. Exact-output
@@ -42,9 +42,16 @@ The high-level pool guard still requires explicitly trusting noncanonical pools.
 
 A trade SDK `PumpSwapQuoteRoute` may contain splits and merges and cannot be converted
 to one `RoutedMarket`; use explicit Router legs and the two/three-hop builders.
-Parser `PumpRouteIntent` events describe instructions before execution and are not
-converted into trade/reserve snapshots. Use executed trade events plus current pool
-state for those snapshots.
+Unresolved parser candidates with `third_program` are not trade/reserve snapshots.
+Use executed trade events plus current pool state for those snapshots. The old
+`PumpRouteIntent` callback has been removed.
 
 Build and deploy the matching Router source to use dynamic PumpSwap buys. Publishing
 the SDK does not change an existing on-chain deployment.
+
+
+Stock bridge synchronization: this crate now uses parser 0.9.0 and trade 9.0.0.
+The root exports `stock_prices`, `PumpSwapRoutingConfig`, `PumpSwapRouting` and
+`PumpSwapRoutingFeed`. The shared catalog has 34 stock/ETF mints and 63 pools;
+trade routing additionally registers WSOL/USDC. Re-exported routing builds
+direct trade-sdk instructions, not automatic router-program CPI dispatch.

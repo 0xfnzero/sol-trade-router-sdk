@@ -103,7 +103,11 @@ fn dummy_pumpswap() -> PumpSwapPool {
         pool_quote_token_account: Pubkey::new_unique(),
         base_token_program: TOKEN_PROGRAM,
         quote_token_program: TOKEN_PROGRAM,
-        coin_creator_vault_ata: crate::offline_tests::creator_vault_ata(creator, WSOL_MINT, TOKEN_PROGRAM),
+        coin_creator_vault_ata: crate::offline_tests::creator_vault_ata(
+            creator,
+            WSOL_MINT,
+            TOKEN_PROGRAM,
+        ),
         coin_creator_vault_authority: crate::offline_tests::creator_vault_authority(creator),
         coin_creator: creator,
         base_reserve: 1_000_000_000,
@@ -129,39 +133,70 @@ pub(crate) fn creator_vault_ata(creator: Pubkey, quote: Pubkey, program: Pubkey)
 
 fn bind_pumpswap_creator(pool: &mut PumpSwapPool) {
     pool.coin_creator_vault_authority = creator_vault_authority(pool.coin_creator);
-    pool.coin_creator_vault_ata = creator_vault_ata(pool.coin_creator, pool.quote_mint, pool.quote_token_program);
+    pool.coin_creator_vault_ata =
+        creator_vault_ata(pool.coin_creator, pool.quote_mint, pool.quote_token_program);
 }
 
 #[test]
 fn offline_pumpswap_reported_3007_rejects_missing_vaults_and_matches_corrected_accounts() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../tests/fixtures/pumpswap_reported_failure.json"
-    )).unwrap();
-    let mut keys: Vec<Pubkey> = fixture["instruction_accounts"].as_array().unwrap().iter()
-        .map(|v| v.as_str().unwrap().parse().unwrap()).collect();
+    ))
+    .unwrap();
+    let mut keys: Vec<Pubkey> = fixture["instruction_accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().parse().unwrap())
+        .collect();
     let mut pool = dummy_pumpswap();
     pool.pool = keys[0];
-    pool.base_mint = keys[3]; pool.quote_mint = keys[4];
-    pool.pool_base_token_account = keys[7]; pool.pool_quote_token_account = keys[8];
-    pool.protocol_fee_recipient = keys[9]; pool.buyback_fee_recipient = keys[24];
-    pool.base_token_program = keys[11]; pool.quote_token_program = keys[12];
+    pool.base_mint = keys[3];
+    pool.quote_mint = keys[4];
+    pool.pool_base_token_account = keys[7];
+    pool.pool_quote_token_account = keys[8];
+    pool.protocol_fee_recipient = keys[9];
+    pool.buyback_fee_recipient = keys[24];
+    pool.base_token_program = keys[11];
+    pool.quote_token_program = keys[12];
     pool.coin_creator = fixture["coin_creator"].as_str().unwrap().parse().unwrap();
-    pool.coin_creator_vault_ata = keys[17]; pool.coin_creator_vault_authority = keys[18];
+    pool.coin_creator_vault_ata = keys[17];
+    pool.coin_creator_vault_authority = keys[18];
     assert!(pumpswap_buy_exact_out_leg(&keys[1], &pool, 1, 100).is_err());
-    keys[17] = fixture["correct_creator_vault_ata"].as_str().unwrap().parse().unwrap();
-    keys[18] = fixture["correct_creator_vault_authority"].as_str().unwrap().parse().unwrap();
-    pool.coin_creator_vault_ata = keys[17]; pool.coin_creator_vault_authority = keys[18];
-    let mut data: Vec<u8> = fixture["instruction_data"].as_array().unwrap().iter()
-        .map(|v| v.as_u64().unwrap() as u8).collect();
+    keys[17] = fixture["correct_creator_vault_ata"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    keys[18] = fixture["correct_creator_vault_authority"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    pool.coin_creator_vault_ata = keys[17];
+    pool.coin_creator_vault_authority = keys[18];
+    let mut data: Vec<u8> = fixture["instruction_data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap() as u8)
+        .collect();
     let out = u64::from_le_bytes(data[8..16].try_into().unwrap());
     let max_in = u64::from_le_bytes(data[16..24].try_into().unwrap());
     let leg = pumpswap_buy_exact_out_leg(&keys[1], &pool, out, max_in).unwrap();
-    assert_eq!(leg.accounts.iter().map(|a| a.pubkey).collect::<Vec<_>>(), keys);
-    data.truncate(24); data.push(1);
+    assert_eq!(
+        leg.accounts.iter().map(|a| a.pubkey).collect::<Vec<_>>(),
+        keys
+    );
+    data.truncate(24);
+    data.push(1);
     assert_eq!(leg.data, data);
     for (index, account) in leg.accounts.iter().enumerate() {
         assert_eq!(account.is_signer, index == 1);
-        assert_eq!(account.is_writable, [0, 1, 5, 6, 7, 8, 10, 17, 20, 25].contains(&index));
+        assert_eq!(
+            account.is_writable,
+            [0, 1, 5, 6, 7, 8, 10, 17, 20, 25].contains(&index)
+        );
     }
 }
 
@@ -170,17 +205,35 @@ fn offline_pumpswap_custom_quote_creator_binding_and_incomplete_snapshots() {
     let user = Pubkey::new_unique();
     for quote_program in [TOKEN_PROGRAM, crate::TOKEN_2022_PROGRAM] {
         let mut pool = dummy_pumpswap();
-        pool.quote_mint = Pubkey::new_unique(); pool.quote_token_program = quote_program;
-        assert!(pumpswap_buy_leg(&user, &pool, 100, 1).is_err(), "WSOL creator ATA reused for custom quote");
+        pool.quote_mint = Pubkey::new_unique();
+        pool.quote_token_program = quote_program;
+        assert!(
+            pumpswap_buy_leg(&user, &pool, 100, 1).is_err(),
+            "WSOL creator ATA reused for custom quote"
+        );
         bind_pumpswap_creator(&mut pool);
-        for leg in [pumpswap_buy_leg(&user, &pool, 100, 1).unwrap(),
+        for leg in [
+            pumpswap_buy_leg(&user, &pool, 100, 1).unwrap(),
             pumpswap_buy_exact_out_leg(&user, &pool, 1, 100).unwrap(),
-            pumpswap_sell_leg(&user, &pool, 100, 1).unwrap()] {
+            pumpswap_sell_leg(&user, &pool, 100, 1).unwrap(),
+        ] {
             assert_eq!(leg.accounts[12].pubkey, quote_program);
-            assert_eq!(leg.accounts[17].pubkey, crate::ata::ata(
-                &pool.coin_creator_vault_authority, &pool.quote_mint, &quote_program));
-            assert_eq!(leg.accounts[10].pubkey, crate::ata::ata(
-                &pool.protocol_fee_recipient, &pool.quote_mint, &quote_program));
+            assert_eq!(
+                leg.accounts[17].pubkey,
+                crate::ata::ata(
+                    &pool.coin_creator_vault_authority,
+                    &pool.quote_mint,
+                    &quote_program
+                )
+            );
+            assert_eq!(
+                leg.accounts[10].pubkey,
+                crate::ata::ata(
+                    &pool.protocol_fee_recipient,
+                    &pool.quote_mint,
+                    &quote_program
+                )
+            );
             assert!(!leg.accounts[9].is_writable);
         }
         for bad_field in 0..9 {
@@ -209,46 +262,67 @@ fn offline_pumpswap_custom_quote_creator_binding_and_incomplete_snapshots() {
 
 #[test]
 fn offline_dynamic_quote_buy_supports_pumpswap_targets_in_both_directions() {
-    let user = Pubkey::new_unique(); let fee = Pubkey::new_unique();
+    let user = Pubkey::new_unique();
+    let fee = Pubkey::new_unique();
     for program in [TOKEN_PROGRAM, crate::TOKEN_2022_PROGRAM] {
         let mut bridge = dummy_pumpswap();
         bridge.base_token_program = program;
         let quote = bridge.base_mint;
         for reverse in [false, true] {
             let mut target = dummy_pumpswap();
-            target.quote_mint = quote; target.quote_token_program = program;
+            target.quote_mint = quote;
+            target.quote_token_program = program;
             if reverse {
                 std::mem::swap(&mut target.base_mint, &mut target.quote_mint);
-                std::mem::swap(&mut target.base_token_program, &mut target.quote_token_program);
+                std::mem::swap(
+                    &mut target.base_token_program,
+                    &mut target.quote_token_program,
+                );
             }
             bind_pumpswap_creator(&mut target);
-            let output = if reverse { target.quote_mint } else { target.base_mint };
-            let build = |target| crate::build_dynamic_quote_buy(&crate::PROGRAM_ID, &user, &fee,
-                100, 100, 10, 1, &Market::PumpSwapOuter(bridge.clone()), &Market::PumpSwapOuter(target));
+            let output = if reverse {
+                target.quote_mint
+            } else {
+                target.base_mint
+            };
+            let build = |target| {
+                crate::build_dynamic_quote_buy(
+                    &crate::PROGRAM_ID,
+                    &user,
+                    &fee,
+                    100,
+                    100,
+                    10,
+                    1,
+                    &Market::PumpSwapOuter(bridge.clone()),
+                    &Market::PumpSwapOuter(target),
+                )
+            };
             let route = build(target.clone()).unwrap();
-            assert_eq!(route.quote_mint, quote); assert_eq!(route.quote_token_program, program);
+            assert_eq!(route.quote_mint, quote);
+            assert_eq!(route.quote_token_program, program);
             assert_eq!(route.output_mint, output);
             assert_eq!(route.instruction.data[0], crate::TAG_ROUTE_DYNAMIC);
-            if reverse { target.base_token_program = Pubkey::new_unique(); }
-            else { target.quote_token_program = Pubkey::new_unique(); }
-            assert!(build(target).is_err(), "conflicting intermediate token programs accepted");
+            if reverse {
+                target.base_token_program = Pubkey::new_unique();
+            } else {
+                target.quote_token_program = Pubkey::new_unique();
+            }
+            assert!(
+                build(target).is_err(),
+                "conflicting intermediate token programs accepted"
+            );
         }
     }
 }
 
 #[test]
-fn offline_parser_intents_and_prepared_routes_are_not_single_pool_snapshots() {
-    use sol_parser_sdk::core::events::{DexEvent, PumpRouteIntentEvent, PumpRouteKind};
-    let event = DexEvent::PumpRouteIntent(Box::new(PumpRouteIntentEvent {
-        metadata: Default::default(), kind: PumpRouteKind::MultiHopSwap,
-        program: PUMPSWAP_PROGRAM, instruction_index: 1, user: Pubkey::new_unique(),
-        input_account: Pubkey::new_unique(), output_account: Pubkey::new_unique(),
-        amount_in: Some(100), min_amount_out: Some(1), hops: vec![], instruction_data: vec![],
-    }));
-    assert!(crate::market_from_dex_event(&event).is_none());
+fn offline_prepared_routes_require_explicit_builders() {
     let route = crate::DexParamEnum::PumpSwapQuoteRoute(Default::default());
-    assert!(crate::to_routed_market(&route, Pubkey::new_unique()).unwrap_err()
-        .to_string().contains("multiple pools"));
+    assert!(crate::to_routed_market(&route, Pubkey::new_unique())
+        .unwrap_err()
+        .to_string()
+        .contains("multiple pools"));
 }
 
 fn dummy_launchlab() -> LaunchLabPool {
@@ -339,7 +413,9 @@ fn dummy_clmm() -> RaydiumClmmPool {
         token_0_program: TOKEN_PROGRAM,
         token_1_program: TOKEN_PROGRAM,
         tick_arrays: vec![Pubkey::new_unique(); 3],
-        tick_array_bitmap_extension: Some(crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool_state)),
+        tick_array_bitmap_extension: Some(
+            crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool_state),
+        ),
         quoted_amount_in: Some(1_000_000),
         quoted_input_mint: None,
         expected_out: Some(500_000),
@@ -368,7 +444,9 @@ fn dummy_dlmm() -> MeteoraDlmmPool {
     let lb_pair = Pubkey::new_unique();
     MeteoraDlmmPool {
         lb_pair,
-        bitmap_extension: Some(sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&lb_pair)),
+        bitmap_extension: Some(
+            sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&lb_pair),
+        ),
         reserve_x: Pubkey::new_unique(),
         reserve_y: Pubkey::new_unique(),
         token_x_mint: WSOL_MINT,
@@ -435,7 +513,10 @@ fn offline_cpmm_quote_positive() {
     };
     let client = RouterClient::new(Pubkey::new_unique(), Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
-    for result in [client.buy_with_sol(1, &market), client.sell_to_sol(1, &market)] {
+    for result in [
+        client.buy_with_sol(1, &market),
+        client.sell_to_sol(1, &market),
+    ] {
         assert!(result.unwrap_err().to_string().contains("zero output"));
     }
 }
@@ -500,33 +581,53 @@ fn offline_all_dex_leg_builders() {
     let clmm = dummy_clmm();
     let wp = dummy_whirlpool();
     let dlmm = dummy_dlmm();
-    for invalid in [Pubkey::default(), Pubkey::new_unique(),
-        crate::constants::raydium_clmm_tick_array_bitmap_extension(&Pubkey::new_unique())] {
+    for invalid in [
+        Pubkey::default(),
+        Pubkey::new_unique(),
+        crate::constants::raydium_clmm_tick_array_bitmap_extension(&Pubkey::new_unique()),
+    ] {
         let mut bad = clmm.clone();
         bad.tick_array_bitmap_extension = Some(invalid);
         for input in [bad.token_0_mint, bad.token_1_mint] {
-            assert!(raydium_clmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
-                "CLMM must reject a mismatched bitmap extension");
+            assert!(
+                raydium_clmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
+                "CLMM must reject a mismatched bitmap extension"
+            );
         }
     }
-    for invalid in [Pubkey::default(), Pubkey::new_unique(),
-        sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&Pubkey::new_unique())] {
+    for invalid in [
+        Pubkey::default(),
+        Pubkey::new_unique(),
+        sol_trade_sdk::instruction::utils::meteora_dlmm::bitmap_extension_pda(&Pubkey::new_unique()),
+    ] {
         let mut bad = dlmm.clone();
         bad.bitmap_extension = Some(invalid);
         for input in [bad.token_x_mint, bad.token_y_mint] {
-            assert!(meteora_dlmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
-                "DLMM must reject a mismatched bitmap extension");
+            assert!(
+                meteora_dlmm_swap_leg(&user, &bad, 100, 1, input).is_err(),
+                "DLMM must reject a mismatched bitmap extension"
+            );
         }
     }
     let mut inferred_clmm = clmm.clone();
     inferred_clmm.tick_array_bitmap_extension = None;
     let bitmap = crate::constants::raydium_clmm_tick_array_bitmap_extension(&clmm.pool_state);
     for input in [clmm.token_0_mint, clmm.token_1_mint] {
-        assert!(!raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input).unwrap()
-            .accounts.iter().any(|meta| meta.pubkey == bitmap));
+        assert!(!raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input)
+            .unwrap()
+            .accounts
+            .iter()
+            .any(|meta| meta.pubkey == bitmap));
         inferred_clmm.tick_arrays.push(bitmap);
-        assert_eq!(raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input).unwrap()
-            .accounts.iter().filter(|meta| meta.pubkey == bitmap).count(), 1);
+        assert_eq!(
+            raydium_clmm_swap_leg(&user, &inferred_clmm, 100, 1, input)
+                .unwrap()
+                .accounts
+                .iter()
+                .filter(|meta| meta.pubkey == bitmap)
+                .count(),
+            1
+        );
         inferred_clmm.tick_arrays.pop();
         let mut bad = inferred_clmm.clone();
         bad.tick_arrays.push(bitmap);
@@ -538,46 +639,106 @@ fn offline_all_dex_leg_builders() {
         absent_dlmm.bitmap_extension = extension;
         for input in [dlmm.token_x_mint, dlmm.token_y_mint] {
             let leg = meteora_dlmm_swap_leg(&user, &absent_dlmm, 100, 1, input).unwrap();
-            assert_eq!(leg.accounts[1].pubkey, crate::constants::METEORA_DLMM_PROGRAM);
+            assert_eq!(
+                leg.accounts[1].pubkey,
+                crate::constants::METEORA_DLMM_PROGRAM
+            );
             assert!(!leg.accounts[1].is_writable);
         }
     }
     // Array counts alone cannot make a missing tick/bin address usable.
     let mut supplemental_wp = wp.clone();
-    supplemental_wp.tick_arrays.extend((0..3).map(|_| Pubkey::new_unique()));
+    supplemental_wp
+        .tick_arrays
+        .extend((0..3).map(|_| Pubkey::new_unique()));
     let router = RouterClient::new(user, Pubkey::new_unique(), 0)
         .with_pool_guard(PoolGuardPolicy::disabled());
-    for template in [Market::CpmmOuter(dummy_cpmm()), Market::PumpSwapOuter(ps.clone()),
-        Market::MeteoraDammV2(damm.clone()), Market::RaydiumClmm(clmm.clone()),
-        Market::Whirlpool(wp.clone()), Market::MeteoraDlmm(dlmm.clone())] {
+    for template in [
+        Market::CpmmOuter(dummy_cpmm()),
+        Market::PumpSwapOuter(ps.clone()),
+        Market::MeteoraDammV2(damm.clone()),
+        Market::RaydiumClmm(clmm.clone()),
+        Market::Whirlpool(wp.clone()),
+        Market::MeteoraDlmm(dlmm.clone()),
+    ] {
         for wsol_side in 0..2 {
             let mut market = template.clone();
             let (a, b, ap, bp) = match &mut market {
-                Market::CpmmOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
-                    &mut p.base_token_program, &mut p.quote_token_program),
-                Market::PumpSwapOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
-                    &mut p.base_token_program, &mut p.quote_token_program),
-                Market::MeteoraDammV2(p) => (&mut p.token_a_mint, &mut p.token_b_mint,
-                    &mut p.token_a_program, &mut p.token_b_program),
-                Market::RaydiumClmm(p) => (&mut p.token_0_mint, &mut p.token_1_mint,
-                    &mut p.token_0_program, &mut p.token_1_program),
-                Market::Whirlpool(p) => (&mut p.mint_a, &mut p.mint_b,
-                    &mut p.token_program_a, &mut p.token_program_b),
-                Market::MeteoraDlmm(p) => (&mut p.token_x_mint, &mut p.token_y_mint,
-                    &mut p.token_x_program, &mut p.token_y_program),
+                Market::CpmmOuter(p) => (
+                    &mut p.base_mint,
+                    &mut p.quote_mint,
+                    &mut p.base_token_program,
+                    &mut p.quote_token_program,
+                ),
+                Market::PumpSwapOuter(p) => (
+                    &mut p.base_mint,
+                    &mut p.quote_mint,
+                    &mut p.base_token_program,
+                    &mut p.quote_token_program,
+                ),
+                Market::MeteoraDammV2(p) => (
+                    &mut p.token_a_mint,
+                    &mut p.token_b_mint,
+                    &mut p.token_a_program,
+                    &mut p.token_b_program,
+                ),
+                Market::RaydiumClmm(p) => (
+                    &mut p.token_0_mint,
+                    &mut p.token_1_mint,
+                    &mut p.token_0_program,
+                    &mut p.token_1_program,
+                ),
+                Market::Whirlpool(p) => (
+                    &mut p.mint_a,
+                    &mut p.mint_b,
+                    &mut p.token_program_a,
+                    &mut p.token_program_b,
+                ),
+                Market::MeteoraDlmm(p) => (
+                    &mut p.token_x_mint,
+                    &mut p.token_y_mint,
+                    &mut p.token_x_program,
+                    &mut p.token_y_program,
+                ),
                 _ => unreachable!(),
             };
             let token = Pubkey::new_unique();
             (*a, *b, *ap, *bp) = if wsol_side == 0 {
-                (WSOL_MINT, token, crate::constants::TOKEN_2022_PROGRAM, TOKEN_PROGRAM)
-            } else { (token, WSOL_MINT, TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM) };
+                (
+                    WSOL_MINT,
+                    token,
+                    crate::constants::TOKEN_2022_PROGRAM,
+                    TOKEN_PROGRAM,
+                )
+            } else {
+                (
+                    token,
+                    WSOL_MINT,
+                    TOKEN_PROGRAM,
+                    crate::constants::TOKEN_2022_PROGRAM,
+                )
+            };
             let inputs = [*a, *b];
             for input in inputs {
-                let output = if input == inputs[0] { inputs[1] } else { inputs[0] };
+                let output = if input == inputs[0] {
+                    inputs[1]
+                } else {
+                    inputs[0]
+                };
                 let mut results = vec![match &market {
-                    Market::CpmmOuter(p) => cpmm_swap_leg(&user, p, 100, 1,
-                        input, output, Pubkey::new_unique(), Pubkey::new_unique()),
-                    Market::PumpSwapOuter(p) if input == p.base_mint => pumpswap_sell_leg(&user, p, 100, 1),
+                    Market::CpmmOuter(p) => cpmm_swap_leg(
+                        &user,
+                        p,
+                        100,
+                        1,
+                        input,
+                        output,
+                        Pubkey::new_unique(),
+                        Pubkey::new_unique(),
+                    ),
+                    Market::PumpSwapOuter(p) if input == p.base_mint => {
+                        pumpswap_sell_leg(&user, p, 100, 1)
+                    }
                     Market::PumpSwapOuter(p) => pumpswap_buy_leg(&user, p, 100, 1),
                     Market::MeteoraDammV2(p) => meteora_damm_v2_swap_leg(&user, p, 100, 1, input),
                     Market::RaydiumClmm(p) => raydium_clmm_swap_leg(&user, p, 100, 1, input),
@@ -586,30 +747,59 @@ fn offline_all_dex_leg_builders() {
                     _ => unreachable!(),
                 }];
                 if let Market::CpmmOuter(p) = &market {
-                    results.push(cpmm_swap_exact_out_leg(&user, p, 100, 1,
-                        input, output, Pubkey::new_unique(), Pubkey::new_unique()));
+                    results.push(cpmm_swap_exact_out_leg(
+                        &user,
+                        p,
+                        100,
+                        1,
+                        input,
+                        output,
+                        Pubkey::new_unique(),
+                        Pubkey::new_unique(),
+                    ));
                 } else if let Market::PumpSwapOuter(p) = &market {
                     if input == p.quote_mint {
                         results.push(pumpswap_buy_exact_out_leg(&user, p, 1, 100));
                     }
                 }
                 for result in results {
-                    assert!(result.err().expect("DEX leg accepted Token-2022 canonical WSOL")
-                        .to_string().contains("classic WSOL"));
+                    assert!(result
+                        .err()
+                        .expect("DEX leg accepted Token-2022 canonical WSOL")
+                        .to_string()
+                        .contains("classic WSOL"));
                 }
             }
             let routed = RoutedMarket::new(market);
-            for result in [router.buy_with_opts(100, &routed,
-                TradeOpts::default().buy_with_token(routed.quote_mint()).with_min_out(1)),
-                router.sell_with_opts(100, &routed,
-                    TradeOpts::default().sell_to_token(routed.quote_mint()).with_min_out(1))] {
-                assert!(result.err().expect("Router accepted Token-2022 canonical WSOL")
-                    .to_string().contains("classic WSOL"));
+            for result in [
+                router.buy_with_opts(
+                    100,
+                    &routed,
+                    TradeOpts::default()
+                        .buy_with_token(routed.quote_mint())
+                        .with_min_out(1),
+                ),
+                router.sell_with_opts(
+                    100,
+                    &routed,
+                    TradeOpts::default()
+                        .sell_to_token(routed.quote_mint())
+                        .with_min_out(1),
+                ),
+            ] {
+                assert!(result
+                    .err()
+                    .expect("Router accepted Token-2022 canonical WSOL")
+                    .to_string()
+                    .contains("classic WSOL"));
             }
         }
     }
-    for template in [Market::RaydiumClmm(clmm.clone()),
-        Market::Whirlpool(supplemental_wp), Market::MeteoraDlmm(dlmm.clone())] {
+    for template in [
+        Market::RaydiumClmm(clmm.clone()),
+        Market::Whirlpool(supplemental_wp),
+        Market::MeteoraDlmm(dlmm.clone()),
+    ] {
         let count = match &template {
             Market::RaydiumClmm(p) => p.tick_arrays.len(),
             Market::Whirlpool(p) => p.tick_arrays.len(),
@@ -640,16 +830,36 @@ fn offline_all_dex_leg_builders() {
                     Market::MeteoraDlmm(p) => meteora_dlmm_swap_leg(&user, p, 100, 1, input),
                     _ => unreachable!(),
                 };
-                assert!(result.err().expect("missing array address accepted").to_string()
-                    .contains("array address"), "{label} slot {missing}");
+                assert!(
+                    result
+                        .err()
+                        .expect("missing array address accepted")
+                        .to_string()
+                        .contains("array address"),
+                    "{label} slot {missing}"
+                );
             }
             let routed = RoutedMarket::new(market);
-            for result in [router.buy_with_opts(100, &routed,
-                TradeOpts::default().buy_with_wsol().with_min_out(1)),
-                router.sell_with_opts(100, &routed,
-                    TradeOpts::default().sell_to_wsol().with_min_out(1))] {
-                assert!(result.err().expect("Router accepted missing array address").to_string()
-                    .contains("array address"), "{label} slot {missing}");
+            for result in [
+                router.buy_with_opts(
+                    100,
+                    &routed,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1),
+                ),
+                router.sell_with_opts(
+                    100,
+                    &routed,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1),
+                ),
+            ] {
+                assert!(
+                    result
+                        .err()
+                        .expect("Router accepted missing array address")
+                        .to_string()
+                        .contains("array address"),
+                    "{label} slot {missing}"
+                );
             }
         }
     }
@@ -675,14 +885,24 @@ fn offline_all_dex_leg_builders() {
     };
     let mut unknown_fee_pool = ps.clone();
     unknown_fee_pool.quote_fee_reserves = None;
-    let explicit_route = router.sell_with_opts(1_000,
-        &RoutedMarket::new(Market::PumpSwapOuter(unknown_fee_pool)),
-        TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap().route.unwrap();
+    let explicit_route = router
+        .sell_with_opts(
+            1_000,
+            &RoutedMarket::new(Market::PumpSwapOuter(unknown_fee_pool)),
+            TradeOpts::default().sell_to_wsol().with_min_out(1),
+        )
+        .unwrap()
+        .route
+        .unwrap();
     let cases = [
-        ("router_pumpswap_explicit_unknown_fee_route", Leg {
-            program_id:explicit_route.program_id, accounts:explicit_route.accounts,
-            data:explicit_route.data,
-        }),
+        (
+            "router_pumpswap_explicit_unknown_fee_route",
+            Leg {
+                program_id: explicit_route.program_id,
+                accounts: explicit_route.accounts,
+                data: explicit_route.data,
+            },
+        ),
         ("pumpfun_v3_buy", pf3.buy_leg(&user, 1000, 1).unwrap()),
         ("pumpfun_v3_sell", pf3.sell_leg(&user, 1000, 1).unwrap()),
         (
@@ -853,19 +1073,26 @@ fn offline_routed_market_helpers() {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use solana_sdk::account::Account;
     use std::collections::HashMap;
-    struct MintRpc { accounts: HashMap<Pubkey, Account> }
+    struct MintRpc {
+        accounts: HashMap<Pubkey, Account>,
+    }
     #[async_trait::async_trait]
     impl solana_client::rpc_sender::RpcSender for MintRpc {
-        async fn send(&self, request: solana_client::rpc_request::RpcRequest,
-            params: serde_json::Value) -> solana_client::client_error::Result<serde_json::Value> {
+        async fn send(
+            &self,
+            request: solana_client::rpc_request::RpcRequest,
+            params: serde_json::Value,
+        ) -> solana_client::client_error::Result<serde_json::Value> {
             use solana_client::rpc_request::RpcRequest;
             let account = |key: &serde_json::Value| {
                 let key = key.as_str().unwrap().parse::<Pubkey>().unwrap();
-                self.accounts.get(&key).map(|a| serde_json::json!({
-                    "data":[STANDARD.encode(&a.data),"base64"], "executable":false,
-                    "lamports":a.lamports,"owner":a.owner.to_string(),"rentEpoch":0,
-                    "space":a.data.len()
-                }))
+                self.accounts.get(&key).map(|a| {
+                    serde_json::json!({
+                        "data":[STANDARD.encode(&a.data),"base64"], "executable":false,
+                        "lamports":a.lamports,"owner":a.owner.to_string(),"rentEpoch":0,
+                        "space":a.data.len()
+                    })
+                })
             };
             Ok(match request {
                 RpcRequest::GetAccountInfo => serde_json::json!({
@@ -882,17 +1109,26 @@ fn offline_routed_market_helpers() {
         fn get_transport_stats(&self) -> solana_client::rpc_sender::RpcTransportStats {
             Default::default()
         }
-        fn url(&self) -> String { "mock://router-mint-guard".into() }
+        fn url(&self) -> String {
+            "mock://router-mint-guard".into()
+        }
     }
     use sol_trade_sdk::instruction::utils::raydium_cpmm_types::{
-        POOL_STATE_SIZE, POOL_STATE_DISCRIMINATOR, AMM_CONFIG_SIZE, AMM_CONFIG_DISCRIMINATOR,
+        AMM_CONFIG_DISCRIMINATOR, AMM_CONFIG_SIZE, POOL_STATE_DISCRIMINATOR, POOL_STATE_SIZE,
     };
     let hook_fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../tests/fixtures/token-hook-mints-20261008.json")).unwrap();
-    let mint_bytes = |case: &serde_json::Value| case["mint_hex"].as_str().unwrap()
-        .as_bytes().chunks_exact(2)
-        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(),16).unwrap())
-        .collect::<Vec<_>>();
+        "../tests/fixtures/token-hook-mints-20261008.json"
+    ))
+    .unwrap();
+    let mint_bytes = |case: &serde_json::Value| {
+        case["mint_hex"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+            .collect::<Vec<_>>()
+    };
     let mint_runtime = tokio::runtime::Runtime::new().unwrap();
     // Exercise the real RPC Pool decoder and reserve refresh with explicit
     // current-layout fee counters; mint/program validation is tested below.
@@ -900,10 +1136,20 @@ fn offline_routed_market_helpers() {
         let mut pool = dummy_pumpswap();
         pool.quote_reserve = 2_000_000;
         let mut data = vec![0u8; 8 + 279];
-        data[..8].copy_from_slice(&sol_trade_sdk::instruction::utils::pumpswap_types::POOL_DISCRIMINATOR);
-        for (i, key) in [Pubkey::new_unique(), pool.base_mint, pool.quote_mint,
-            Pubkey::new_unique(), pool.pool_base_token_account, pool.pool_quote_token_account]
-            .iter().enumerate() {
+        data[..8].copy_from_slice(
+            &sol_trade_sdk::instruction::utils::pumpswap_types::POOL_DISCRIMINATOR,
+        );
+        for (i, key) in [
+            Pubkey::new_unique(),
+            pool.base_mint,
+            pool.quote_mint,
+            Pubkey::new_unique(),
+            pool.pool_base_token_account,
+            pool.pool_quote_token_account,
+        ]
+        .iter()
+        .enumerate()
+        {
             data[11 + i * 32..11 + (i + 1) * 32].copy_from_slice(key.as_ref());
         }
         data[211..243].copy_from_slice(pool.coin_creator.as_ref());
@@ -911,21 +1157,37 @@ fn offline_routed_market_helpers() {
         data[245..261].copy_from_slice(&pool.virtual_quote_reserves.to_le_bytes());
         data[271..279].copy_from_slice(&1_800_000u64.to_le_bytes());
         data[279..287].copy_from_slice(&100_000u64.to_le_bytes());
-        let mut account = Account { lamports:10_000_000, data,
-            owner:PUMPSWAP_PROGRAM, executable:false, rent_epoch:0 };
+        let mut account = Account {
+            lamports: 10_000_000,
+            data,
+            owner: PUMPSWAP_PROGRAM,
+            executable: false,
+            rent_epoch: 0,
+        };
         match fault {
             1 => account.owner = PUMPFUN_PROGRAM,
             2 => account.data[0] ^= 1,
             3 => account.data[271..279].copy_from_slice(&2_000_000u64.to_le_bytes()),
-            4 => { account.data[271..287].fill(0); },
-            _ => {},
+            4 => {
+                account.data[271..287].fill(0);
+            }
+            _ => {}
         }
         let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-            MintRpc { accounts:HashMap::from([(pool.pool, account)]) }, Default::default());
-        let result = mint_runtime.block_on(crate::adapter::refresh_pumpswap_fee_reserves(&rpc, &mut pool));
+            MintRpc {
+                accounts: HashMap::from([(pool.pool, account)]),
+            },
+            Default::default(),
+        );
+        let result = mint_runtime.block_on(crate::adapter::refresh_pumpswap_fee_reserves(
+            &rpc, &mut pool,
+        ));
         assert_eq!(result.is_err(), matches!(fault, 1..=3));
         if result.is_ok() {
-            assert_eq!(pool.quote_fee_reserves, Some(if fault == 4 {0} else {1_900_000}));
+            assert_eq!(
+                pool.quote_fee_reserves,
+                Some(if fault == 4 { 0 } else { 1_900_000 })
+            );
             assert_eq!(pool.quote_reserve, 2_000_000);
         }
     }
@@ -934,47 +1196,81 @@ fn offline_routed_market_helpers() {
             let mut pool = dummy_cpmm();
             // Avoid treating a synthetic Token-2022 quote as canonical WSOL.
             pool.quote_mint = Pubkey::new_unique();
-            if hook_side == 0 { pool.base_token_program = crate::constants::TOKEN_2022_PROGRAM; }
-            else { pool.quote_token_program = crate::constants::TOKEN_2022_PROGRAM; }
+            if hook_side == 0 {
+                pool.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
+            } else {
+                pool.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
+            }
             let mut data = vec![0; 8 + POOL_STATE_SIZE];
             data[..8].copy_from_slice(&POOL_STATE_DISCRIMINATOR);
-            for (i, key) in [pool.amm_config, Pubkey::new_unique(), pool.base_vault,
-                pool.quote_vault, Pubkey::new_unique(), pool.base_mint, pool.quote_mint,
-                pool.base_token_program, pool.quote_token_program, pool.observation_state]
-                .iter().enumerate() {
+            for (i, key) in [
+                pool.amm_config,
+                Pubkey::new_unique(),
+                pool.base_vault,
+                pool.quote_vault,
+                Pubkey::new_unique(),
+                pool.base_mint,
+                pool.quote_mint,
+                pool.base_token_program,
+                pool.quote_token_program,
+                pool.observation_state,
+            ]
+            .iter()
+            .enumerate()
+            {
                 data[8 + i * 32..8 + (i + 1) * 32].copy_from_slice(key.as_ref());
             }
             let mut config = vec![0; 8 + AMM_CONFIG_SIZE];
             config[..8].copy_from_slice(&AMM_CONFIG_DISCRIMINATOR);
             config[12..20].copy_from_slice(&2500u64.to_le_bytes());
-            let make_account = |owner, data| Account { lamports:10_000_000, data,
-                owner, executable:false, rent_epoch:0 };
+            let make_account = |owner, data| Account {
+                lamports: 10_000_000,
+                data,
+                owner,
+                executable: false,
+                rent_epoch: 0,
+            };
             let mut accounts = HashMap::from([
                 (pool.pool_state, make_account(RAYDIUM_CPMM_PROGRAM, data)),
                 (pool.amm_config, make_account(RAYDIUM_CPMM_PROGRAM, config)),
             ]);
             let bytes = mint_bytes(case);
-            for (side, (mint, program, vault)) in [(pool.base_mint, pool.base_token_program,
-                pool.base_vault), (pool.quote_mint, pool.quote_token_program, pool.quote_vault)]
-                .into_iter().enumerate() {
+            for (side, (mint, program, vault)) in [
+                (pool.base_mint, pool.base_token_program, pool.base_vault),
+                (pool.quote_mint, pool.quote_token_program, pool.quote_vault),
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 let mut mint_data = bytes[..82].to_vec();
-                if side == hook_side { mint_data = bytes.clone(); }
+                if side == hook_side {
+                    mint_data = bytes.clone();
+                }
                 accounts.insert(mint, make_account(program, mint_data));
-                let mut vault_data = vec![0;165];
+                let mut vault_data = vec![0; 165];
                 vault_data[..32].copy_from_slice(mint.as_ref());
                 vault_data[64..72].copy_from_slice(&1_000_000_000u64.to_le_bytes());
                 vault_data[108] = 1;
                 accounts.insert(vault, make_account(program, vault_data));
             }
             let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-                MintRpc { accounts }, Default::default());
+                MintRpc { accounts },
+                Default::default(),
+            );
             let loaded = mint_runtime.block_on(crate::adapter::load_routed_market_by_rpc(
-                &rpc, crate::adapter::LoadMarketRequest::RaydiumCpmm {pool:pool.pool_state},
-                &Pubkey::new_unique()));
+                &rpc,
+                crate::adapter::LoadMarketRequest::RaydiumCpmm {
+                    pool: pool.pool_state,
+                },
+                &Pubkey::new_unique(),
+            ));
             let reject = case["reject_hook"].as_bool().unwrap();
             if reject {
-                assert!(format!("{:#}", loaded.err().expect("cold CPMM returned active Hook route"))
-                    .contains("transfer hook"));
+                assert!(format!(
+                    "{:#}",
+                    loaded.err().expect("cold CPMM returned active Hook route")
+                )
+                .contains("transfer hook"));
             } else {
                 let (_, route) = loaded.unwrap();
                 assert_eq!(route.market.base_mint(), pool.base_mint);
@@ -985,59 +1281,133 @@ fn offline_routed_market_helpers() {
     // Exercise the shared cold guard across all seven Token-2022 route venues,
     // both mint sides. This verifies guard wiring/metadata, not DEX execution.
     let mut guard_cases = 0;
-    for template in [Market::LaunchLabInner(dummy_launchlab()), Market::CpmmOuter(dummy_cpmm()),
-        Market::PumpSwapOuter(dummy_pumpswap()), Market::MeteoraDammV2(dummy_damm_v2()),
-        Market::RaydiumClmm(dummy_clmm()), Market::Whirlpool(dummy_whirlpool()),
-        Market::MeteoraDlmm(dummy_dlmm())] {
+    for template in [
+        Market::LaunchLabInner(dummy_launchlab()),
+        Market::CpmmOuter(dummy_cpmm()),
+        Market::PumpSwapOuter(dummy_pumpswap()),
+        Market::MeteoraDammV2(dummy_damm_v2()),
+        Market::RaydiumClmm(dummy_clmm()),
+        Market::Whirlpool(dummy_whirlpool()),
+        Market::MeteoraDlmm(dummy_dlmm()),
+    ] {
         for hook_side in 0..2 {
             let mut market = template.clone();
             let (a, b, ap, bp) = match &mut market {
-                Market::LaunchLabInner(p) => (&mut p.base_mint, &mut p.quote_mint,
-                    &mut p.base_token_program, &mut p.quote_token_program),
-                Market::CpmmOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
-                    &mut p.base_token_program, &mut p.quote_token_program),
-                Market::PumpSwapOuter(p) => (&mut p.base_mint, &mut p.quote_mint,
-                    &mut p.base_token_program, &mut p.quote_token_program),
-                Market::MeteoraDammV2(p) => (&mut p.token_a_mint, &mut p.token_b_mint,
-                    &mut p.token_a_program, &mut p.token_b_program),
-                Market::RaydiumClmm(p) => (&mut p.token_0_mint, &mut p.token_1_mint,
-                    &mut p.token_0_program, &mut p.token_1_program),
-                Market::Whirlpool(p) => (&mut p.mint_a, &mut p.mint_b,
-                    &mut p.token_program_a, &mut p.token_program_b),
-                Market::MeteoraDlmm(p) => (&mut p.token_x_mint, &mut p.token_y_mint,
-                    &mut p.token_x_program, &mut p.token_y_program),
+                Market::LaunchLabInner(p) => (
+                    &mut p.base_mint,
+                    &mut p.quote_mint,
+                    &mut p.base_token_program,
+                    &mut p.quote_token_program,
+                ),
+                Market::CpmmOuter(p) => (
+                    &mut p.base_mint,
+                    &mut p.quote_mint,
+                    &mut p.base_token_program,
+                    &mut p.quote_token_program,
+                ),
+                Market::PumpSwapOuter(p) => (
+                    &mut p.base_mint,
+                    &mut p.quote_mint,
+                    &mut p.base_token_program,
+                    &mut p.quote_token_program,
+                ),
+                Market::MeteoraDammV2(p) => (
+                    &mut p.token_a_mint,
+                    &mut p.token_b_mint,
+                    &mut p.token_a_program,
+                    &mut p.token_b_program,
+                ),
+                Market::RaydiumClmm(p) => (
+                    &mut p.token_0_mint,
+                    &mut p.token_1_mint,
+                    &mut p.token_0_program,
+                    &mut p.token_1_program,
+                ),
+                Market::Whirlpool(p) => (
+                    &mut p.mint_a,
+                    &mut p.mint_b,
+                    &mut p.token_program_a,
+                    &mut p.token_program_b,
+                ),
+                Market::MeteoraDlmm(p) => (
+                    &mut p.token_x_mint,
+                    &mut p.token_y_mint,
+                    &mut p.token_x_program,
+                    &mut p.token_y_program,
+                ),
                 _ => unreachable!(),
             };
-            *a = Pubkey::new_unique(); *b = Pubkey::new_unique();
-            *ap = if hook_side == 0 { crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
-            *bp = if hook_side == 1 { crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
+            *a = Pubkey::new_unique();
+            *b = Pubkey::new_unique();
+            *ap = if hook_side == 0 {
+                crate::constants::TOKEN_2022_PROGRAM
+            } else {
+                TOKEN_PROGRAM
+            };
+            *bp = if hook_side == 1 {
+                crate::constants::TOKEN_2022_PROGRAM
+            } else {
+                TOKEN_PROGRAM
+            };
             let hook_key = if hook_side == 0 { *a } else { *b };
             for case in hook_fixture["cases"].as_array().unwrap() {
                 let bytes = mint_bytes(case);
-                let make_accounts = || [(market.base_mint(), market.base_token_program()),
-                    (market.quote_mint(), market.quote_token_program())].into_iter()
-                    .map(|(key, owner)| (key, Account { lamports:10_000_000,
-                        data:if key == hook_key { bytes.clone() } else { bytes[..82].to_vec() },
-                        owner, executable:false, rent_epoch:0 })).collect::<HashMap<_,_>>();
+                let make_accounts = || {
+                    [
+                        (market.base_mint(), market.base_token_program()),
+                        (market.quote_mint(), market.quote_token_program()),
+                    ]
+                    .into_iter()
+                    .map(|(key, owner)| {
+                        (
+                            key,
+                            Account {
+                                lamports: 10_000_000,
+                                data: if key == hook_key {
+                                    bytes.clone()
+                                } else {
+                                    bytes[..82].to_vec()
+                                },
+                                owner,
+                                executable: false,
+                                rent_epoch: 0,
+                            },
+                        )
+                    })
+                    .collect::<HashMap<_, _>>()
+                };
                 // Valid state, missing account, wrong owner, uninitialized mint,
                 // malformed Hook length and truncated Hook payload.
                 for fault in 0..6 {
                     let mut accounts = make_accounts();
                     match fault {
-                        1 => { accounts.remove(&hook_key); },
+                        1 => {
+                            accounts.remove(&hook_key);
+                        }
                         2 => accounts.get_mut(&hook_key).unwrap().owner = TOKEN_PROGRAM,
                         3 => accounts.get_mut(&hook_key).unwrap().data[45] = 0,
                         4 => accounts.get_mut(&hook_key).unwrap().data[168..170]
                             .copy_from_slice(&63u16.to_le_bytes()),
-                        5 => { accounts.get_mut(&hook_key).unwrap().data.pop(); },
-                        _ => {},
+                        5 => {
+                            accounts.get_mut(&hook_key).unwrap().data.pop();
+                        }
+                        _ => {}
                     }
                     let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-                        MintRpc { accounts }, Default::default());
+                        MintRpc { accounts },
+                        Default::default(),
+                    );
                     let result = mint_runtime.block_on(crate::adapter::validate_route_mints(
-                        &rpc, &RoutedMarket::new(market.clone())));
-                    assert_eq!(result.is_err(), fault != 0 || case["reject_hook"].as_bool().unwrap(),
-                        "cold guard {:?}, side {hook_side}, {}, fault {fault}", market, case["name"]);
+                        &rpc,
+                        &RoutedMarket::new(market.clone()),
+                    ));
+                    assert_eq!(
+                        result.is_err(),
+                        fault != 0 || case["reject_hook"].as_bool().unwrap(),
+                        "cold guard {:?}, side {hook_side}, {}, fault {fault}",
+                        market,
+                        case["name"]
+                    );
                     guard_cases += 1;
                 }
             }
@@ -1054,41 +1424,93 @@ fn offline_routed_market_helpers() {
         let mut bridge = dummy_cpmm();
         bridge.base_mint = target.quote_mint;
         bridge.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
-        let account = |owner, data| Account { lamports:10_000_000, data,
-            owner, executable:false, rent_epoch:0 };
+        let account = |owner, data| Account {
+            lamports: 10_000_000,
+            data,
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        };
         let accounts = HashMap::from([
-            (bridge.base_mint, account(bridge.base_token_program, bytes.clone())),
-            (bridge.quote_mint, account(bridge.quote_token_program, bytes[..82].to_vec())),
+            (
+                bridge.base_mint,
+                account(bridge.base_token_program, bytes.clone()),
+            ),
+            (
+                bridge.quote_mint,
+                account(bridge.quote_token_program, bytes[..82].to_vec()),
+            ),
         ]);
-        let route = RoutedMarket { market:Market::PumpFunInner(target), bridge:Some(bridge.into()) };
+        let route = RoutedMarket {
+            market: Market::PumpFunInner(target),
+            bridge: Some(bridge.into()),
+        };
         let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-            MintRpc { accounts }, Default::default());
-        assert_eq!(mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route)).is_err(),
-            case["reject_hook"].as_bool().unwrap());
+            MintRpc { accounts },
+            Default::default(),
+        );
+        assert_eq!(
+            mint_runtime
+                .block_on(crate::adapter::validate_route_mints(&rpc, &route))
+                .is_err(),
+            case["reject_hook"].as_bool().unwrap()
+        );
     }
     let bytes = mint_bytes(&hook_fixture["cases"][0]);
     let amm = dummy_amm_v4();
     let mut target = dummy_pumpfun_v2();
     target.quote_mint = amm.coin_mint;
-    let accounts = [amm.coin_mint, amm.pc_mint].into_iter().map(|mint| (mint,
-        Account { lamports:10_000_000, data:bytes[..82].to_vec(), owner:TOKEN_PROGRAM,
-            executable:false, rent_epoch:0 })).collect();
+    let accounts = [amm.coin_mint, amm.pc_mint]
+        .into_iter()
+        .map(|mint| {
+            (
+                mint,
+                Account {
+                    lamports: 10_000_000,
+                    data: bytes[..82].to_vec(),
+                    owner: TOKEN_PROGRAM,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
     let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-        MintRpc { accounts }, Default::default());
-    let route = RoutedMarket { market:Market::PumpFunInner(target), bridge:Some(amm.into()) };
-    mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route)).unwrap();
+        MintRpc { accounts },
+        Default::default(),
+    );
+    let route = RoutedMarket {
+        market: Market::PumpFunInner(target),
+        bridge: Some(amm.into()),
+    };
+    mint_runtime
+        .block_on(crate::adapter::validate_route_mints(&rpc, &route))
+        .unwrap();
     let mut target = dummy_cpmm();
     let mut bridge = dummy_cpmm();
     bridge.base_mint = target.quote_mint;
     bridge.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
     // Inconsistent shared mint programs must fail before requesting accounts.
     target.quote_token_program = TOKEN_PROGRAM;
-    let route = RoutedMarket { market:Market::CpmmOuter(target), bridge:Some(bridge.into()) };
+    let route = RoutedMarket {
+        market: Market::CpmmOuter(target),
+        bridge: Some(bridge.into()),
+    };
     let rpc = sol_trade_sdk::common::SolanaRpcClient::new_sender(
-        MintRpc { accounts:HashMap::new() }, Default::default());
-    assert!(mint_runtime.block_on(crate::adapter::validate_route_mints(&rpc, &route))
-        .unwrap_err().to_string().contains("conflicting token programs"));
-    use solana_client::{rpc_request::RpcRequest, rpc_sender::{RpcSender, RpcTransportStats}};
+        MintRpc {
+            accounts: HashMap::new(),
+        },
+        Default::default(),
+    );
+    assert!(mint_runtime
+        .block_on(crate::adapter::validate_route_mints(&rpc, &route))
+        .unwrap_err()
+        .to_string()
+        .contains("conflicting token programs"));
+    use solana_client::{
+        rpc_request::RpcRequest,
+        rpc_sender::{RpcSender, RpcTransportStats},
+    };
     use std::sync::{Arc, Mutex};
     struct BalanceRpc {
         canonical: Vec<Pubkey>,
@@ -1096,8 +1518,11 @@ fn offline_routed_market_helpers() {
     }
     #[async_trait::async_trait]
     impl RpcSender for BalanceRpc {
-        async fn send(&self, request: RpcRequest, params: serde_json::Value)
-            -> solana_client::client_error::Result<serde_json::Value> {
+        async fn send(
+            &self,
+            request: RpcRequest,
+            params: serde_json::Value,
+        ) -> solana_client::client_error::Result<serde_json::Value> {
             assert_eq!(request, RpcRequest::GetAccountInfo);
             let address = params[0].as_str().unwrap().parse::<Pubkey>().unwrap();
             self.requests.lock().unwrap().push(address);
@@ -1111,52 +1536,92 @@ fn offline_routed_market_helpers() {
                 "rentEpoch":0, "space":165
             }}))
         }
-        fn get_transport_stats(&self) -> RpcTransportStats { RpcTransportStats::default() }
-        fn url(&self) -> String { "mock://router-balance".into() }
+        fn get_transport_stats(&self) -> RpcTransportStats {
+            RpcTransportStats::default()
+        }
+        fn url(&self) -> String {
+            "mock://router-balance".into()
+        }
     }
     let balance_wallet = Arc::new(Keypair::new());
     let balance_mint = Pubkey::new_unique();
     let programs = [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM];
-    let canonical: Vec<_> = programs.iter().map(|program|
-        crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, program)).collect();
-    assert_ne!(canonical[0], sol_trade_sdk::common::fast_fn::
-        get_associated_token_address_with_program_id_fast_use_seed(
-            &balance_wallet.pubkey(), &balance_mint, &TOKEN_PROGRAM, true));
+    let canonical: Vec<_> = programs
+        .iter()
+        .map(|program| crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, program))
+        .collect();
+    assert_ne!(
+        canonical[0],
+        sol_trade_sdk::common::fast_fn::get_associated_token_address_with_program_id_fast_use_seed(
+            &balance_wallet.pubkey(),
+            &balance_mint,
+            &TOKEN_PROGRAM,
+            true
+        )
+    );
     let requests = Arc::new(Mutex::new(Vec::new()));
     let rpc = solana_client::nonblocking::rpc_client::RpcClient::new_sender(
-        BalanceRpc { canonical: canonical.clone(), requests: requests.clone() }, Default::default());
+        BalanceRpc {
+            canonical: canonical.clone(),
+            requests: requests.clone(),
+        },
+        Default::default(),
+    );
     let infrastructure = Arc::new(sol_trade_sdk::TradingInfrastructure {
-        rpc: Arc::new(rpc), swqos_clients: Arc::new(Vec::new()),
+        rpc: Arc::new(rpc),
+        swqos_clients: Arc::new(Vec::new()),
         config: sol_trade_sdk::common::InfrastructureConfig::new(
-            "https://example.invalid".into(), Vec::new(),
-            solana_commitment_config::CommitmentConfig::processed()),
-        max_sender_concurrency: 1, effective_core_ids: Arc::new(Vec::new()),
+            "https://example.invalid".into(),
+            Vec::new(),
+            solana_commitment_config::CommitmentConfig::processed(),
+        ),
+        max_sender_concurrency: 1,
+        effective_core_ids: Arc::new(Vec::new()),
     });
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut balances = Vec::new();
     for seed in [false, true] {
         let client = crate::TradingClient::from_infrastructure(
-            balance_wallet.clone(), infrastructure.clone(), Pubkey::new_unique(), 100, seed)
-            .with_pool_guard(PoolGuardPolicy::disabled());
+            balance_wallet.clone(),
+            infrastructure.clone(),
+            Pubkey::new_unique(),
+            100,
+            seed,
+        )
+        .with_pool_guard(PoolGuardPolicy::disabled());
         for program in programs {
             let mut pool = dummy_cpmm();
             pool.base_mint = balance_mint;
             pool.base_token_program = program;
-            let built = client.build_buy_from_market(10_000,
-                &RoutedMarket::new(Market::CpmmOuter(pool)),
-                TradeOpts::default().buy_with_wsol().with_min_out(1)).unwrap();
-            assert_eq!(built.route.as_ref().unwrap().accounts[4].pubkey,
-                crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, &program));
+            let built = client
+                .build_buy_from_market(
+                    10_000,
+                    &RoutedMarket::new(Market::CpmmOuter(pool)),
+                    TradeOpts::default().buy_with_wsol().with_min_out(1),
+                )
+                .unwrap();
+            assert_eq!(
+                built.route.as_ref().unwrap().accounts[4].pubkey,
+                crate::ata::ata(&balance_wallet.pubkey(), &balance_mint, &program)
+            );
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &built.into_instructions(), Some(&balance_wallet.pubkey()), &[balance_wallet.as_ref()],
+                &built.into_instructions(),
+                Some(&balance_wallet.pubkey()),
+                &[balance_wallet.as_ref()],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
-            balances.push(runtime.block_on(client.get_payer_token_balance_with_program(
-                &balance_mint, &program)).unwrap());
+            balances.push(
+                runtime
+                    .block_on(client.get_payer_token_balance_with_program(&balance_mint, &program))
+                    .unwrap(),
+            );
         }
     }
-    assert_eq!(*requests.lock().unwrap(), [canonical.clone(), canonical].concat());
+    assert_eq!(
+        *requests.lock().unwrap(),
+        [canonical.clone(), canonical].concat()
+    );
     assert_eq!(balances, vec![42; 4]);
 
     let pool = dummy_cpmm();
@@ -1184,12 +1649,22 @@ fn offline_routed_market_helpers() {
         for stock_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
             let meme_program = if stock_program == TOKEN_PROGRAM {
                 crate::constants::TOKEN_2022_PROGRAM
-            } else { TOKEN_PROGRAM };
+            } else {
+                TOKEN_PROGRAM
+            };
             let mut target = dummy_cpmm();
             target.base_mint = if stock_on_base { stock } else { meme };
             target.quote_mint = if stock_on_base { meme } else { stock };
-            target.base_token_program = if stock_on_base { stock_program } else { meme_program };
-            target.quote_token_program = if stock_on_base { meme_program } else { stock_program };
+            target.base_token_program = if stock_on_base {
+                stock_program
+            } else {
+                meme_program
+            };
+            target.quote_token_program = if stock_on_base {
+                meme_program
+            } else {
+                stock_program
+            };
             let mut bridge = dummy_cpmm();
             bridge.base_mint = WSOL_MINT;
             bridge.quote_mint = stock;
@@ -1216,7 +1691,8 @@ fn offline_routed_market_helpers() {
                 client.prepare_sell_atas(&market, crate::SellTo::Sol),
             ] {
                 assert!(prepared.iter().any(|ix| ix.accounts[1].pubkey == stock_ata
-                    && ix.accounts[3].pubkey == stock && ix.accounts[5].pubkey == stock_program));
+                    && ix.accounts[3].pubkey == stock
+                    && ix.accounts[5].pubkey == stock_program));
             }
             let buy = client.buy_with_token(100_000, &market, stock).unwrap();
             let buy_route = buy.route.as_ref().unwrap();
@@ -1235,14 +1711,15 @@ fn offline_routed_market_helpers() {
             assert!(client.sell_to_token(100_000, &market, meme).is_err());
             for built in [buy, sell] {
                 let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    &built.into_instructions(),
+                    Some(&wallet.pubkey()),
+                    &[&wallet],
                     solana_sdk::hash::Hash::new_unique(),
                 );
                 tx.verify().unwrap();
             }
         }
     }
-
 }
 
 #[test]
@@ -1252,32 +1729,52 @@ fn offline_router_client_builds_pumpfun_buy() {
         .with_pool_guard(PoolGuardPolicy::disabled());
     let mut intent_params = None;
     for (dex, asset, market) in [
-        (sol_trade_sdk::trading::factory::DexType::PumpFun, sol_trade_sdk::TradeTokenType::SOL,
-            RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun()))),
-        (sol_trade_sdk::trading::factory::DexType::PumpSwap, sol_trade_sdk::TradeTokenType::WSOL,
-            RoutedMarket::pumpswap(dummy_pumpswap())),
+        (
+            sol_trade_sdk::trading::factory::DexType::PumpFun,
+            sol_trade_sdk::TradeTokenType::SOL,
+            RoutedMarket::new(Market::PumpFunInner(dummy_pumpfun())),
+        ),
+        (
+            sol_trade_sdk::trading::factory::DexType::PumpSwap,
+            sol_trade_sdk::TradeTokenType::WSOL,
+            RoutedMarket::pumpswap(dummy_pumpswap()),
+        ),
     ] {
         let mut params: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
-            dex, asset, market.meme_mint(),
-            sol_trade_sdk::BuyAmount::WithMaxInput { quote_amount: 10_000 },
+            dex,
+            asset,
+            market.meme_mint(),
+            sol_trade_sdk::BuyAmount::WithMaxInput {
+                quote_amount: 10_000,
+            },
             sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()),
-            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-        ).into(); // Metadata is unused: exercise sizing option conversion only.
+            solana_hash::Hash::new_unique(),
+            sol_trade_sdk::common::GasFeeStrategy::new(),
+        )
+        .into(); // Metadata is unused: exercise sizing option conversion only.
         assert_eq!(params.use_exact_sol_amount, Some(false));
-        assert!(crate::client::buy_opts_from_params(&params).err()
+        assert!(crate::client::buy_opts_from_params(&params)
+            .err()
             .expect("regular Pump buy intent was silently ignored")
-            .to_string().contains("use_exact_sol_amount=false"));
+            .to_string()
+            .contains("use_exact_sol_amount=false"));
         for exact in [None, Some(true)] {
             params.use_exact_sol_amount = exact;
-            let opts = crate::client::buy_opts_from_params(&params).unwrap().with_min_out(1);
+            let opts = crate::client::buy_opts_from_params(&params)
+                .unwrap()
+                .with_min_out(1);
             let built = intent_client.buy_with_opts(10_000, &market, opts).unwrap();
             let leg = crate::mainnet_sim::single_route_leg_for_direct_simulation(&built);
             let expected = if dex == sol_trade_sdk::trading::factory::DexType::PumpFun {
                 crate::constants::PUMPFUN_BUY_EXACT_SOL_IN
-            } else { crate::constants::PUMPSWAP_BUY_EXACT_QUOTE_IN };
+            } else {
+                crate::constants::PUMPSWAP_BUY_EXACT_QUOTE_IN
+            };
             assert_eq!(&leg.data[..8], &expected);
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                &built.into_instructions(),
+                Some(&wallet.pubkey()),
+                &[&wallet],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
@@ -1288,11 +1785,14 @@ fn offline_router_client_builds_pumpfun_buy() {
     params.use_exact_sol_amount = Some(false);
     params.fixed_output_token_amount = Some(1);
     let opts = crate::client::buy_opts_from_params(&params).unwrap();
-    let built = intent_client.buy_with_opts(10_000,
-        &RoutedMarket::pumpswap(dummy_pumpswap()), opts).unwrap();
+    let built = intent_client
+        .buy_with_opts(10_000, &RoutedMarket::pumpswap(dummy_pumpswap()), opts)
+        .unwrap();
     assert_eq!(built.route.as_ref().unwrap().data[17], 0x81);
     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+        &built.into_instructions(),
+        Some(&wallet.pubkey()),
+        &[&wallet],
         solana_sdk::hash::Hash::new_unique(),
     );
     tx.verify().unwrap();
@@ -1314,10 +1814,21 @@ fn offline_router_client_builds_pumpfun_buy() {
     let built = client
         .buy_with_opts(1_000_000, &market, TradeOpts::default().buy_with_sol())
         .expect("buy build");
-    let init = built.setup.iter().find(|ix| ix.program_id == crate::constants::PUMPFUN_PROGRAM).unwrap();
+    let init = built
+        .setup
+        .iter()
+        .find(|ix| ix.program_id == crate::constants::PUMPFUN_PROGRAM)
+        .unwrap();
     assert_eq!(init.data, [94, 6, 202, 115, 255, 96, 232, 183]);
-    assert_eq!(init.accounts[2].pubkey, crate::constants::pumpfun_user_volume_accumulator(&payer));
-    let prepare = built.setup.iter().find(|ix| ix.program_id == client.program_id && ix.data == [7]).unwrap();
+    assert_eq!(
+        init.accounts[2].pubkey,
+        crate::constants::pumpfun_user_volume_accumulator(&payer)
+    );
+    let prepare = built
+        .setup
+        .iter()
+        .find(|ix| ix.program_id == client.program_id && ix.data == [7])
+        .unwrap();
     assert_eq!(prepare.accounts[0].pubkey, payer);
     assert!(prepare.accounts[0].is_signer && prepare.accounts[0].is_writable);
     assert_eq!(prepare.accounts[1].pubkey, expected_curve);
@@ -1340,14 +1851,25 @@ fn offline_router_client_builds_pumpfun_buy() {
     let sell = client.sell_to_sol(2, &tiny).unwrap().route.unwrap();
     assert_eq!(u64::from_le_bytes(sell.data[9..17].try_into().unwrap()), 1);
     assert!(client.buy_with_sol(2, &tiny).is_err());
-    assert!(client.sell_to_sol(1, &tiny)
-        .unwrap_err().to_string().contains("zero output"));
+    assert!(client
+        .sell_to_sol(1, &tiny)
+        .unwrap_err()
+        .to_string()
+        .contains("zero output"));
     // Explicit thresholds remain authoritative, including a caller-selected zero.
     let explicit = client
-        .buy_with_opts(2, &tiny, TradeOpts::default().buy_with_sol().with_min_out(0))
+        .buy_with_opts(
+            2,
+            &tiny,
+            TradeOpts::default().buy_with_sol().with_min_out(0),
+        )
         .unwrap()
-        .route.unwrap();
-    assert_eq!(u64::from_le_bytes(explicit.data[9..17].try_into().unwrap()), 0);
+        .route
+        .unwrap();
+    assert_eq!(
+        u64::from_le_bytes(explicit.data[9..17].try_into().unwrap()),
+        0
+    );
 }
 
 #[test]
@@ -1369,8 +1891,13 @@ fn offline_router_client_builds_pumpswap_buy() {
 #[test]
 fn offline_classify_soft_vs_hard() {
     let setup_error = SimVerdict::Hard("InstructionError(1, InvalidArgument); logs=Program 11111111111111111111111111111111 invoke [1] | Program 11111111111111111111111111111111 failed: invalid argument".into());
-    assert!(std::panic::catch_unwind(|| crate::mainnet_router_tests::assert_bad_route_failure(
-        4, Some(setup_error))).is_err());
+    assert!(
+        std::panic::catch_unwind(|| crate::mainnet_router_tests::assert_bad_route_failure(
+            4,
+            Some(setup_error)
+        ))
+        .is_err()
+    );
     for verdict in [None, Some(SimVerdict::Ok), Some(SimVerdict::Hard("RPC unavailable".into())),
         Some(SimVerdict::Hard("InstructionError(4, InvalidInstructionData); logs=".into())),
         Some(SimVerdict::Hard(format!("InstructionError(4, InvalidInstructionData); logs=Program {RAYDIUM_CPMM_PROGRAM} invoke [1] | Program {RAYDIUM_CPMM_PROGRAM} failed: error"))),
@@ -1378,18 +1905,32 @@ fn offline_classify_soft_vs_hard() {
         assert!(std::panic::catch_unwind(|| crate::mainnet_router_tests::assert_bad_route_failure(
             4, verdict)).is_err());
     }
-    let logs = vec![format!("Program {} invoke [1]", crate::constants::SYSTEM_PROGRAM),
-        format!("Program {} failed: invalid instruction data", crate::constants::SYSTEM_PROGRAM)];
+    let logs = vec![
+        format!("Program {} invoke [1]", crate::constants::SYSTEM_PROGRAM),
+        format!(
+            "Program {} failed: invalid instruction data",
+            crate::constants::SYSTEM_PROGRAM
+        ),
+    ];
     let verdict = crate::mainnet_sim::classify_response(
-        Some(solana_sdk::transaction::TransactionError::InstructionError(4,
-            solana_sdk::instruction::InstructionError::InvalidInstructionData)), Some(logs));
+        Some(solana_sdk::transaction::TransactionError::InstructionError(
+            4,
+            solana_sdk::instruction::InstructionError::InvalidInstructionData,
+        )),
+        Some(logs),
+    );
     crate::mainnet_router_tests::assert_bad_route_failure(4, Some(verdict));
     let target = RAYDIUM_CPMM_PROGRAM;
     let other = crate::constants::ASSOCIATED_TOKEN_PROGRAM;
     let setup_failure = format!("InstructionError; logs=Program {other} invoke [1] | Program {other} failed: custom program error: 0x1");
-    assert!(std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_fault(
-        "setup_failure_is_not_dex_coverage", target, Some(SimVerdict::Hard(setup_failure))
-    )).is_err());
+    assert!(
+        std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_fault(
+            "setup_failure_is_not_dex_coverage",
+            target,
+            Some(SimVerdict::Hard(setup_failure))
+        ))
+        .is_err()
+    );
     for verdict in [None, Some(SimVerdict::Ok),
         Some(SimVerdict::Hard("RPC unavailable".into())),
         Some(SimVerdict::Soft(format!("error; logs=Program {target} invoke [1] | Program {target} success | Program {other} invoke [1] | Program {other} failed: error"))),
@@ -1402,22 +1943,52 @@ fn offline_classify_soft_vs_hard() {
     logs.extend((0..20).map(|i| format!("Program log: diagnostic {i}")));
     logs.push(format!("Program {other} invoke [2]"));
     logs.push(format!("Program {other} failed: custom program error: 0x1"));
-    logs.push(format!("Program {target} failed: custom program error: 0x1"));
+    logs.push(format!(
+        "Program {target} failed: custom program error: 0x1"
+    ));
     // Keep the DEX invocation even when more than 12 diagnostic lines follow.
     let verdict = crate::mainnet_sim::classify_response(Some("InstructionError"), Some(logs));
     crate::mainnet_sim_tests::assert_funded_fault("nested_dex_failure", target, Some(verdict));
     let logs = format!("error; logs=Program {target} invoke [1] | Program {target} failed: error");
-    crate::mainnet_sim_tests::assert_funded_fault("hard_dex_failure", target, Some(SimVerdict::Hard(logs)));
-    for verdict in [None, Some(SimVerdict::Ok), Some(SimVerdict::Hard("RPC unavailable".into())),
-        Some(SimVerdict::Soft(format!("error; logs=Program {target} invoke [1] | Program {target} failed: error"))),
-        Some(SimVerdict::Hard(format!("error; logs=Program {other} invoke [1] | Program {other} failed: error")))] {
-        assert!(std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_hard(
-            "hard_failure_needs_target", target, verdict)).is_err());
+    crate::mainnet_sim_tests::assert_funded_fault(
+        "hard_dex_failure",
+        target,
+        Some(SimVerdict::Hard(logs)),
+    );
+    for verdict in [
+        None,
+        Some(SimVerdict::Ok),
+        Some(SimVerdict::Hard("RPC unavailable".into())),
+        Some(SimVerdict::Soft(format!(
+            "error; logs=Program {target} invoke [1] | Program {target} failed: error"
+        ))),
+        Some(SimVerdict::Hard(format!(
+            "error; logs=Program {other} invoke [1] | Program {other} failed: error"
+        ))),
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| crate::mainnet_sim_tests::assert_funded_hard(
+                "hard_failure_needs_target",
+                target,
+                verdict
+            ))
+            .is_err()
+        );
     }
     let logs = format!("error; logs=Program {target} invoke [1] | Program {target} failed: error");
-    crate::mainnet_sim_tests::assert_funded_hard("hard_target_failure", target, Some(SimVerdict::Hard(logs)));
-    for verdict in [SimVerdict::Soft("insufficient funds".into()), SimVerdict::Hard("RPC error".into())] {
-        assert!(std::panic::catch_unwind(|| crate::mainnet_sim::assert_sim_ok("fund_only", verdict)).is_err());
+    crate::mainnet_sim_tests::assert_funded_hard(
+        "hard_target_failure",
+        target,
+        Some(SimVerdict::Hard(logs)),
+    );
+    for verdict in [
+        SimVerdict::Soft("insufficient funds".into()),
+        SimVerdict::Hard("RPC error".into()),
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| crate::mainnet_sim::assert_sim_ok("fund_only", verdict))
+                .is_err()
+        );
     }
     crate::mainnet_sim::assert_sim_ok("fund_only", SimVerdict::Ok);
     assert!(matches!(
@@ -1574,7 +2145,10 @@ fn offline_market_mint_helpers_cover_dexes() {
                 client.create_meme_ata(&market).accounts[3].pubkey,
                 crate::constants::USDC_MINT,
             );
-            assert_eq!(client.create_quote_ata(&market).accounts[3].pubkey, WSOL_MINT);
+            assert_eq!(
+                client.create_quote_ata(&market).accounts[3].pubkey,
+                WSOL_MINT
+            );
             for exact_out in [false, true] {
                 let opts = if exact_out {
                     TradeOpts::default().with_fixed_output(7)
@@ -1696,8 +2270,10 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
     assert_eq!(&route.data[19..51], meme.as_ref());
 
     // Parse current PoolState bytes, then preserve each side's actual token program.
-    use sol_parser_sdk::{accounts::{raydium_cpmm, token::AccountData},
-        core::events::EventMetadata};
+    use sol_parser_sdk::{
+        accounts::{raydium_cpmm, token::AccountData},
+        core::events::EventMetadata,
+    };
     let token_2022 = crate::constants::TOKEN_2022_PROGRAM;
     for (mint_0, mint_1, program_0, program_1) in [
         (meme, Pubkey::new_unique(), TOKEN_PROGRAM, TOKEN_PROGRAM),
@@ -1709,20 +2285,47 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
     ] {
         let mut data = vec![0; 8 + raydium_cpmm::POOL_STATE_SIZE];
         data[..8].copy_from_slice(raydium_cpmm::discriminators::POOL_STATE);
-        for (i, key) in [Pubkey::new_unique(), Pubkey::new_unique(),
-            Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(),
-            mint_0, mint_1, program_0, program_1, Pubkey::new_unique()]
-            .into_iter().enumerate() {
+        for (i, key) in [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            mint_0,
+            mint_1,
+            program_0,
+            program_1,
+            Pubkey::new_unique(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             data[8 + i * 32..8 + (i + 1) * 32].copy_from_slice(key.as_ref());
         }
-        let event = raydium_cpmm::parse_pool_state(&AccountData {
-            pubkey: Pubkey::new_unique(), executable: false, lamports: 1,
-            owner: RAYDIUM_CPMM_PROGRAM, rent_epoch: 0, data,
-        }, EventMetadata::default()).unwrap();
+        let event = raydium_cpmm::parse_pool_state(
+            &AccountData {
+                pubkey: Pubkey::new_unique(),
+                executable: false,
+                lamports: 1,
+                owner: RAYDIUM_CPMM_PROGRAM,
+                rent_epoch: 0,
+                data,
+            },
+            EventMetadata::default(),
+        )
+        .unwrap();
         let mut market = crate::parser::market_from_dex_event(&event).unwrap();
-        let Market::CpmmOuter(pool) = &mut market else { panic!("wrong parsed venue") };
-        assert_eq!(pool.base_token_program, program_0, "PoolState token-0 program discarded");
-        assert_eq!(pool.quote_token_program, program_1, "PoolState token-1 program discarded");
+        let Market::CpmmOuter(pool) = &mut market else {
+            panic!("wrong parsed venue")
+        };
+        assert_eq!(
+            pool.base_token_program, program_0,
+            "PoolState token-0 program discarded"
+        );
+        assert_eq!(
+            pool.quote_token_program, program_1,
+            "PoolState token-1 program discarded"
+        );
         assert!(!pool.fee_rates_known);
         assert_eq!((pool.base_reserve, pool.quote_reserve), (0, 0));
         // Account event lacks vault/config/mint-fee snapshots; supplement synthetic
@@ -1737,27 +2340,73 @@ fn offline_adapter_cpmm_and_route_ix_targets_router_program() {
         let target_ata = crate::ata::ata(&payer.pubkey(), &target, &routed.meme_token_program());
         let quote_ata = crate::ata::ata(&payer.pubkey(), &quote, &routed.quote_token_program());
         for (side, built) in [
-            client.buy_with_opts(10_000, &routed,
-                TradeOpts::default().buy_with_token(quote).with_min_out(1)).unwrap(),
-            client.sell_with_opts(10_000, &routed,
-                TradeOpts::default().sell_to_token(quote).with_min_out(1)).unwrap(),
-        ].into_iter().enumerate() {
+            client
+                .buy_with_opts(
+                    10_000,
+                    &routed,
+                    TradeOpts::default().buy_with_token(quote).with_min_out(1),
+                )
+                .unwrap(),
+            client
+                .sell_with_opts(
+                    10_000,
+                    &routed,
+                    TradeOpts::default().sell_to_token(quote).with_min_out(1),
+                )
+                .unwrap(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let route = built.route.as_ref().unwrap();
-            assert_eq!(route.accounts[3].pubkey, if side == 0 { quote_ata } else { target_ata });
-            assert_eq!(route.accounts[4].pubkey, if side == 0 { target_ata } else { quote_ata });
-            assert_eq!(&route.data[19..51], if side == 0 { target.as_ref() } else { quote.as_ref() });
+            assert_eq!(
+                route.accounts[3].pubkey,
+                if side == 0 { quote_ata } else { target_ata }
+            );
+            assert_eq!(
+                route.accounts[4].pubkey,
+                if side == 0 { target_ata } else { quote_ata }
+            );
+            assert_eq!(
+                &route.data[19..51],
+                if side == 0 {
+                    target.as_ref()
+                } else {
+                    quote.as_ref()
+                }
+            );
             assert_eq!(route.data[18], 1); // One CPMM CPI after six fixed Router accounts.
-            assert_eq!(route.accounts[6 + 4].pubkey, if side == 0 { quote_ata } else { target_ata });
-            assert_eq!(route.accounts[6 + 5].pubkey, if side == 0 { target_ata } else { quote_ata });
-            assert_eq!(route.accounts[6 + 8].pubkey, if side == 0 {
-                routed.quote_token_program() } else { routed.meme_token_program() });
-            assert_eq!(route.accounts[6 + 9].pubkey, if side == 0 {
-                routed.meme_token_program() } else { routed.quote_token_program() });
+            assert_eq!(
+                route.accounts[6 + 4].pubkey,
+                if side == 0 { quote_ata } else { target_ata }
+            );
+            assert_eq!(
+                route.accounts[6 + 5].pubkey,
+                if side == 0 { target_ata } else { quote_ata }
+            );
+            assert_eq!(
+                route.accounts[6 + 8].pubkey,
+                if side == 0 {
+                    routed.quote_token_program()
+                } else {
+                    routed.meme_token_program()
+                }
+            );
+            assert_eq!(
+                route.accounts[6 + 9].pubkey,
+                if side == 0 {
+                    routed.meme_token_program()
+                } else {
+                    routed.quote_token_program()
+                }
+            );
             for key in [target_ata, quote_ata, program_0, program_1] {
                 assert!(route.accounts.iter().any(|a| a.pubkey == key));
             }
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &built.into_instructions(), Some(&payer.pubkey()), &[&payer],
+                &built.into_instructions(),
+                Some(&payer.pubkey()),
+                &[&payer],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
@@ -1828,7 +2477,8 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
             for direct_token in [false, true] {
                 let mut opts = TradeOpts::default().with_min_out(0).with_fixed_output(77);
                 if direct_token {
-                    opts = opts.buy_with_token(market.market.quote_mint())
+                    opts = opts
+                        .buy_with_token(market.market.quote_mint())
                         .sell_to_token(market.market.quote_mint());
                 }
                 let result = if sell {
@@ -1837,16 +2487,29 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
                     client.buy_with_opts(1_000, &market, opts)
                 };
                 if !supported {
-                    assert!(result.unwrap_err().to_string().contains("fixed_output is unsupported"));
+                    assert!(result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("fixed_output is unsupported"));
                     continue;
                 }
                 let built = result.unwrap();
                 let route = built.route.as_ref().unwrap();
-                assert_eq!(u64::from_le_bytes(route.data[1..9].try_into().unwrap()), 1_000);
-                assert_eq!(u64::from_le_bytes(route.data[9..17].try_into().unwrap()), 77);
+                assert_eq!(
+                    u64::from_le_bytes(route.data[1..9].try_into().unwrap()),
+                    1_000
+                );
+                assert_eq!(
+                    u64::from_le_bytes(route.data[9..17].try_into().unwrap()),
+                    77
+                );
                 assert_ne!(route.data[17] & crate::route_ix::FEE_ASSET_EXACT_OUT, 0);
                 assert_eq!(route.data[18], 1);
-                let output = if sell { market.market.quote_mint() } else { market.meme_mint() };
+                let output = if sell {
+                    market.market.quote_mint()
+                } else {
+                    market.meme_mint()
+                };
                 assert_eq!(&route.data[19..51], output.as_ref());
                 // Official ABI amount ordering differs between these venues.
                 let mut expected = match index {
@@ -1856,15 +2519,29 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
                     3 => crate::constants::PUMPSWAP_BUY.to_vec(),
                     _ => unreachable!(),
                 };
-                let (first, second) = if index <= 1 { (990u64, 77u64) } else { (77u64, 990u64) };
+                let (first, second) = if index <= 1 {
+                    (990u64, 77u64)
+                } else {
+                    (77u64, 990u64)
+                };
                 expected.extend_from_slice(&first.to_le_bytes());
                 expected.extend_from_slice(&second.to_le_bytes());
-                if index == 2 { expected.push(crate::constants::METEORA_DAMM_V2_EXACT_OUT); }
-                assert!(route.data.windows(expected.len()).any(|data| data == expected),
-                    "venue={index} sell={sell} token={direct_token} payload={:?}", &route.data[86..]);
+                if index == 2 {
+                    expected.push(crate::constants::METEORA_DAMM_V2_EXACT_OUT);
+                }
+                assert!(
+                    route
+                        .data
+                        .windows(expected.len())
+                        .any(|data| data == expected),
+                    "venue={index} sell={sell} token={direct_token} payload={:?}",
+                    &route.data[86..]
+                );
                 // Sign the actual high-level route, including fee/ATA setup.
                 let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    &built.into_instructions(),
+                    Some(&wallet.pubkey()),
+                    &[&wallet],
                     solana_sdk::hash::Hash::new_unique(),
                 );
                 tx.verify().unwrap();
@@ -1890,13 +2567,23 @@ fn offline_route_exact_out_flag_sets_fee_asset_bit() {
     bridge.pc_mint = stock;
     let bridged = RoutedMarket::with_bridge(Market::CpmmOuter(target), bridge);
     let opts = TradeOpts::default().with_min_out(0).with_fixed_output(77);
-    assert!(client.buy_with_opts(1_000, &bridged, opts.clone()).unwrap_err()
-        .to_string().contains("fixed_output is unsupported"));
-    assert!(client.sell_with_opts(1_000, &bridged, opts.clone()).unwrap_err()
-        .to_string().contains("fixed_output is unsupported"));
+    assert!(client
+        .buy_with_opts(1_000, &bridged, opts.clone())
+        .unwrap_err()
+        .to_string()
+        .contains("fixed_output is unsupported"));
+    assert!(client
+        .sell_with_opts(1_000, &bridged, opts.clone())
+        .unwrap_err()
+        .to_string()
+        .contains("fixed_output is unsupported"));
     // An attached bridge does not prevent supported direct quote-token trades.
-    assert!(client.buy_with_opts(1_000, &bridged, opts.clone().buy_with_token(stock)).is_ok());
-    assert!(client.sell_with_opts(1_000, &bridged, opts.sell_to_token(stock)).is_ok());
+    assert!(client
+        .buy_with_opts(1_000, &bridged, opts.clone().buy_with_token(stock))
+        .is_ok());
+    assert!(client
+        .sell_with_opts(1_000, &bridged, opts.sell_to_token(stock))
+        .is_ok());
 }
 
 #[test]
@@ -1957,7 +2644,8 @@ fn offline_amm_v4_in_for_out_roundtrip() {
         small.swap_fee_numerator = numerator;
         for direction in [true, false] {
             for wanted in 1..=60 {
-                let input = crate::quote::raydium_amm_v4_in_for_out(&small, wanted, direction).unwrap();
+                let input =
+                    crate::quote::raydium_amm_v4_in_for_out(&small, wanted, direction).unwrap();
                 assert!(raydium_amm_v4_out(&small, input, direction).unwrap() >= wanted);
                 if input > 1 {
                     assert!(raydium_amm_v4_out(&small, input - 1, direction).unwrap() < wanted);
@@ -1998,24 +2686,41 @@ fn offline_via_sol_amm_v4_bridge_builds_route() {
         let mut target_cpmm = dummy_cpmm();
         target_cpmm.quote_mint = stock;
         target_cpmm.quote_token_program = target_program;
-        for target in [Market::LaunchLabInner(launch), Market::CpmmOuter(target_cpmm)] {
+        for target in [
+            Market::LaunchLabInner(launch),
+            Market::CpmmOuter(target_cpmm),
+        ] {
             for reversed in [false, true] {
                 let mut bridge_cpmm = dummy_cpmm();
                 bridge_cpmm.base_mint = stock;
                 bridge_cpmm.base_token_program = target_program;
                 if reversed {
                     std::mem::swap(&mut bridge_cpmm.base_mint, &mut bridge_cpmm.quote_mint);
-                    std::mem::swap(&mut bridge_cpmm.base_token_program, &mut bridge_cpmm.quote_token_program);
+                    std::mem::swap(
+                        &mut bridge_cpmm.base_token_program,
+                        &mut bridge_cpmm.quote_token_program,
+                    );
                     std::mem::swap(&mut bridge_cpmm.base_vault, &mut bridge_cpmm.quote_vault);
-                    std::mem::swap(&mut bridge_cpmm.base_reserve, &mut bridge_cpmm.quote_reserve);
+                    std::mem::swap(
+                        &mut bridge_cpmm.base_reserve,
+                        &mut bridge_cpmm.quote_reserve,
+                    );
                 }
                 let mut mismatched = bridge_cpmm.clone();
                 let wrong = if target_program == TOKEN_PROGRAM {
-                    crate::constants::TOKEN_2022_PROGRAM } else { TOKEN_PROGRAM };
-                if reversed { mismatched.quote_token_program = wrong; }
-                else { mismatched.base_token_program = wrong; }
-                let mut bridges = vec![(crate::market::BridgePool::Cpmm(bridge_cpmm), true),
-                    (crate::market::BridgePool::Cpmm(mismatched), false)];
+                    crate::constants::TOKEN_2022_PROGRAM
+                } else {
+                    TOKEN_PROGRAM
+                };
+                if reversed {
+                    mismatched.quote_token_program = wrong;
+                } else {
+                    mismatched.base_token_program = wrong;
+                }
+                let mut bridges = vec![
+                    (crate::market::BridgePool::Cpmm(bridge_cpmm), true),
+                    (crate::market::BridgePool::Cpmm(mismatched), false),
+                ];
                 let mut amm = dummy_amm_v4();
                 amm.pc_mint = stock;
                 if reversed {
@@ -2023,17 +2728,31 @@ fn offline_via_sol_amm_v4_bridge_builds_route() {
                     std::mem::swap(&mut amm.token_coin, &mut amm.token_pc);
                     std::mem::swap(&mut amm.coin_reserve, &mut amm.pc_reserve);
                 }
-                bridges.push((crate::market::BridgePool::AmmV4(amm.clone()), target_program == TOKEN_PROGRAM));
+                bridges.push((
+                    crate::market::BridgePool::AmmV4(amm.clone()),
+                    target_program == TOKEN_PROGRAM,
+                ));
                 amm.token_program = Pubkey::default(); // Existing AMM V4 legacy fallback is classic SPL.
-                bridges.push((crate::market::BridgePool::AmmV4(amm), target_program == TOKEN_PROGRAM));
+                bridges.push((
+                    crate::market::BridgePool::AmmV4(amm),
+                    target_program == TOKEN_PROGRAM,
+                ));
                 for (bridge, valid) in bridges {
                     let market = RoutedMarket::with_bridge(target.clone(), bridge);
                     let opts = TradeOpts::default().with_min_out(1);
-                    for (side, result) in [client.buy_with_opts(100_000, &market, opts.clone()),
-                        client.sell_with_opts(100_000, &market, opts)].into_iter().enumerate() {
+                    for (side, result) in [
+                        client.buy_with_opts(100_000, &market, opts.clone()),
+                        client.sell_with_opts(100_000, &market, opts),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
                         if !valid {
-                            assert!(result.err().expect("bridge accepted inconsistent quote token programs")
-                                .to_string().contains("quote token program"));
+                            assert!(result
+                                .err()
+                                .expect("bridge accepted inconsistent quote token programs")
+                                .to_string()
+                                .contains("quote token program"));
                             continue;
                         }
                         let built = result.unwrap();
@@ -2044,27 +2763,43 @@ fn offline_via_sol_amm_v4_bridge_builds_route() {
                             Market::CpmmOuter(_) => (13, if sell { 5 } else { 4 }),
                             _ => unreachable!(),
                         };
-                        let (bridge_len, bridge_quote_slot) = match market.bridge.as_ref().unwrap() {
+                        let (bridge_len, bridge_quote_slot) = match market.bridge.as_ref().unwrap()
+                        {
                             crate::market::BridgePool::Cpmm(_) => (13, if sell { 4 } else { 5 }),
                             crate::market::BridgePool::AmmV4(_) => (8, if sell { 5 } else { 6 }),
                         };
-                        let (target_start, bridge_start) = if sell { (6, 6 + target_len) }
-                            else { (6 + bridge_len, 6) };
+                        let (target_start, bridge_start) = if sell {
+                            (6, 6 + target_len)
+                        } else {
+                            (6 + bridge_len, 6)
+                        };
                         let accounts = &built.route.as_ref().unwrap().accounts;
                         assert_eq!(accounts[target_start + target_quote_slot].pubkey, quote_ata);
                         assert_eq!(accounts[bridge_start + bridge_quote_slot].pubkey, quote_ata);
                         let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                            &built.into_instructions(), Some(&payer), &[&wallet],
+                            &built.into_instructions(),
+                            Some(&payer),
+                            &[&wallet],
                             solana_sdk::hash::Hash::new_unique(),
                         );
                         tx.verify().unwrap();
                     }
                     // Direct quote settlement does not use the attached bridge.
                     if !valid {
-                        assert!(client.buy_with_opts(100_000, &market,
-                            TradeOpts::default().buy_with_token(stock).with_min_out(1)).is_ok());
-                        assert!(client.sell_with_opts(100_000, &market,
-                            TradeOpts::default().sell_to_token(stock).with_min_out(1)).is_ok());
+                        assert!(client
+                            .buy_with_opts(
+                                100_000,
+                                &market,
+                                TradeOpts::default().buy_with_token(stock).with_min_out(1)
+                            )
+                            .is_ok());
+                        assert!(client
+                            .sell_with_opts(
+                                100_000,
+                                &market,
+                                TradeOpts::default().sell_to_token(stock).with_min_out(1)
+                            )
+                            .is_ok());
                     }
                 }
             }
@@ -2116,36 +2851,80 @@ fn offline_all_exact_out_and_reverse_legs() {
         .with_pool_guard(PoolGuardPolicy::disabled());
     let build_legs = |pool: &CpmmPool, reverse: bool| {
         let (input, output, input_program, output_program) = if reverse {
-            (pool.quote_mint, pool.base_mint, pool.quote_token_program, pool.base_token_program)
+            (
+                pool.quote_mint,
+                pool.base_mint,
+                pool.quote_token_program,
+                pool.base_token_program,
+            )
         } else {
-            (pool.base_mint, pool.quote_mint, pool.base_token_program, pool.quote_token_program)
+            (
+                pool.base_mint,
+                pool.quote_mint,
+                pool.base_token_program,
+                pool.quote_token_program,
+            )
         };
         let input_ata = crate::ata::ata(&wallet.pubkey(), &input, &input_program);
         let output_ata = crate::ata::ata(&wallet.pubkey(), &output, &output_program);
-        [cpmm_swap_leg(&wallet.pubkey(), pool, 10_000, 1, input, output, input_ata, output_ata),
-            cpmm_swap_exact_out_leg(&wallet.pubkey(), pool, 10_000, 1,
-                input, output, input_ata, output_ata)]
+        [
+            cpmm_swap_leg(
+                &wallet.pubkey(),
+                pool,
+                10_000,
+                1,
+                input,
+                output,
+                input_ata,
+                output_ata,
+            ),
+            cpmm_swap_exact_out_leg(
+                &wallet.pubkey(),
+                pool,
+                10_000,
+                1,
+                input,
+                output,
+                input_ata,
+                output_ata,
+            ),
+        ]
     };
     for invalid in [Pubkey::default(), Pubkey::new_unique()] {
         for base_side in [false, true] {
             let mut pool = cpmm.clone();
-            if base_side { pool.base_token_program = invalid; }
-            else { pool.quote_token_program = invalid; }
+            if base_side {
+                pool.base_token_program = invalid;
+            } else {
+                pool.quote_token_program = invalid;
+            }
             for reverse in [false, true] {
                 for result in build_legs(&pool, reverse) {
-                    assert!(result.err().expect("CPMM accepted an invalid token program")
-                        .to_string().contains("token program"));
+                    assert!(result
+                        .err()
+                        .expect("CPMM accepted an invalid token program")
+                        .to_string()
+                        .contains("token program"));
                 }
             }
             let market = RoutedMarket::new(Market::CpmmOuter(pool));
             for result in [
-                router.buy_with_opts(10_000, &market,
-                    TradeOpts::default().buy_with_wsol().with_min_out(1)),
-                router.sell_with_opts(10_000, &market,
-                    TradeOpts::default().sell_to_wsol().with_min_out(1)),
+                router.buy_with_opts(
+                    10_000,
+                    &market,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1),
+                ),
+                router.sell_with_opts(
+                    10_000,
+                    &market,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1),
+                ),
             ] {
-                assert!(result.err().expect("Router accepted an invalid CPMM token program")
-                    .to_string().contains("token program"));
+                assert!(result
+                    .err()
+                    .expect("Router accepted an invalid CPMM token program")
+                    .to_string()
+                    .contains("token program"));
             }
         }
     }
@@ -2159,13 +2938,21 @@ fn offline_all_exact_out_and_reverse_legs() {
                 for result in build_legs(&pool, reverse) {
                     let leg = result.unwrap();
                     let (input_program, output_program) = if reverse {
-                        (quote_program, base_program) } else { (base_program, quote_program) };
+                        (quote_program, base_program)
+                    } else {
+                        (base_program, quote_program)
+                    };
                     assert_eq!(leg.accounts[8].pubkey, input_program);
                     assert_eq!(leg.accounts[9].pubkey, output_program);
                     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
                         &[solana_sdk::instruction::Instruction {
-                            program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
-                        }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+                            program_id: leg.program_id,
+                            accounts: leg.accounts,
+                            data: leg.data,
+                        }],
+                        Some(&wallet.pubkey()),
+                        &[&wallet],
+                        solana_sdk::hash::Hash::new_unique(),
                     );
                     tx.verify().unwrap();
                 }
@@ -2289,26 +3076,46 @@ fn offline_fee_reduces_route_amount_in() {
     let market = RoutedMarket::new(Market::CpmmOuter(dummy_cpmm()));
     let amount = 1_000_000u64;
     for bps in [1_001, 9_999, 10_000, u16::MAX] {
-        let invalid = RouterClient::new(payer, fee_recv, bps)
-            .with_pool_guard(PoolGuardPolicy::disabled());
+        let invalid =
+            RouterClient::new(payer, fee_recv, bps).with_pool_guard(PoolGuardPolicy::disabled());
         for input in [1, amount] {
             for result in [
-                invalid.buy_with_opts(input, &market,
-                    TradeOpts::default().buy_with_wsol().with_min_out(1)),
-                invalid.sell_with_opts(input, &market,
-                    TradeOpts::default().sell_to_wsol().with_min_out(1)),
+                invalid.buy_with_opts(
+                    input,
+                    &market,
+                    TradeOpts::default().buy_with_wsol().with_min_out(1),
+                ),
+                invalid.sell_with_opts(
+                    input,
+                    &market,
+                    TradeOpts::default().sell_to_wsol().with_min_out(1),
+                ),
             ] {
-                assert!(result.err().expect("invalid router fee accepted").to_string().contains("router fee"));
+                assert!(result
+                    .err()
+                    .expect("invalid router fee accepted")
+                    .to_string()
+                    .contains("router fee"));
             }
         }
     }
     for bps in [0, 1_000] {
-        let valid = RouterClient::new(payer, fee_recv, bps)
-            .with_pool_guard(PoolGuardPolicy::disabled());
-        assert!(valid.buy_with_opts(amount, &market,
-            TradeOpts::default().buy_with_wsol().with_min_out(1)).is_ok());
-        assert!(valid.sell_with_opts(amount, &market,
-            TradeOpts::default().sell_to_wsol().with_min_out(1)).is_ok());
+        let valid =
+            RouterClient::new(payer, fee_recv, bps).with_pool_guard(PoolGuardPolicy::disabled());
+        assert!(valid
+            .buy_with_opts(
+                amount,
+                &market,
+                TradeOpts::default().buy_with_wsol().with_min_out(1)
+            )
+            .is_ok());
+        assert!(valid
+            .sell_with_opts(
+                amount,
+                &market,
+                TradeOpts::default().sell_to_wsol().with_min_out(1)
+            )
+            .is_ok());
     }
     let built = client
         .buy_with_opts(amount, &market, TradeOpts::default().buy_with_wsol())
@@ -2327,8 +3134,8 @@ fn offline_fee_reduces_route_amount_in() {
     );
     assert!(crate::quote::fee_amount(amount, 500) > 0);
 
-    let client = RouterClient::new(payer, fee_recv, 100)
-        .with_pool_guard(PoolGuardPolicy::disabled());
+    let client =
+        RouterClient::new(payer, fee_recv, 100).with_pool_guard(PoolGuardPolicy::disabled());
     let mut launch = dummy_launchlab();
     launch.virtual_base = 1_100;
     launch.virtual_quote = 1_000;
@@ -2338,15 +3145,27 @@ fn offline_fee_reduces_route_amount_in() {
     launch.trade_fee_rate = 0;
     let quote = crate::quote::launchlab_buy_quote(&launch, 990, 0).unwrap();
     assert_eq!(quote.amount_in, 100);
-    let clamped = client.buy_with_opts(
-        1_000, &RoutedMarket::new(Market::LaunchLabInner(launch)),
-        TradeOpts::default().buy_with_wsol(),
-    ).unwrap().route.unwrap();
+    let clamped = client
+        .buy_with_opts(
+            1_000,
+            &RoutedMarket::new(Market::LaunchLabInner(launch)),
+            TradeOpts::default().buy_with_wsol(),
+        )
+        .unwrap()
+        .route
+        .unwrap();
     let budget = u64::from_le_bytes(clamped.data[1..9].try_into().unwrap());
     let charged = crate::quote::fee_amount(budget, 100);
     assert_eq!(budget, 101);
-    assert_eq!(u64::from_le_bytes(clamped.data[94..102].try_into().unwrap()), quote.amount_in);
-    assert_eq!(budget, quote.amount_in + charged, "exact-in route must spend its declared budget");
+    assert_eq!(
+        u64::from_le_bytes(clamped.data[94..102].try_into().unwrap()),
+        quote.amount_in
+    );
+    assert_eq!(
+        budget,
+        quote.amount_in + charged,
+        "exact-in route must spend its declared budget"
+    );
 }
 
 #[test]
@@ -2413,59 +3232,115 @@ fn offline_adapter_amm_v4_and_cpmm_from_params() {
     let wallet = std::sync::Arc::new(Keypair::new());
     let infrastructure = std::sync::Arc::new(sol_trade_sdk::TradingInfrastructure {
         rpc: std::sync::Arc::new(sol_trade_sdk::common::SolanaRpcClient::new(
-            "https://example.invalid".into())),
+            "https://example.invalid".into(),
+        )),
         swqos_clients: std::sync::Arc::new(Vec::new()),
         config: sol_trade_sdk::common::InfrastructureConfig::new(
-            "https://example.invalid".into(), Vec::new(),
-            solana_commitment_config::CommitmentConfig::processed()),
-        max_sender_concurrency: 1, effective_core_ids: std::sync::Arc::new(Vec::new()),
+            "https://example.invalid".into(),
+            Vec::new(),
+            solana_commitment_config::CommitmentConfig::processed(),
+        ),
+        max_sender_concurrency: 1,
+        effective_core_ids: std::sync::Arc::new(Vec::new()),
     });
     let client = crate::TradingClient::from_infrastructure(
-        wallet.clone(), infrastructure, Pubkey::new_unique(), 100, false)
-        .with_pool_guard(PoolGuardPolicy::disabled());
+        wallet.clone(),
+        infrastructure,
+        Pubkey::new_unique(),
+        100,
+        false,
+    )
+    .with_pool_guard(PoolGuardPolicy::disabled());
     use sol_trade_sdk::trading::{core::params::DexParamEnum, factory::DexType};
     for (dex, extension, mint) in [
-        (DexType::RaydiumAmmV4, DexParamEnum::RaydiumAmmV4(p), amm.pc_mint),
-        (DexType::RaydiumCpmm, DexParamEnum::RaydiumCpmm(cp), cpmm.base_mint),
+        (
+            DexType::RaydiumAmmV4,
+            DexParamEnum::RaydiumAmmV4(p),
+            amm.pc_mint,
+        ),
+        (
+            DexType::RaydiumCpmm,
+            DexParamEnum::RaydiumCpmm(cp),
+            cpmm.base_mint,
+        ),
     ] {
         let buy: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
-            dex, sol_trade_sdk::TradeTokenType::WSOL, mint,
-            sol_trade_sdk::BuyAmount::ExactInput(10_000), extension.clone(),
-            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-        ).into();
+            dex,
+            sol_trade_sdk::TradeTokenType::WSOL,
+            mint,
+            sol_trade_sdk::BuyAmount::ExactInput(10_000),
+            extension.clone(),
+            solana_hash::Hash::new_unique(),
+            sol_trade_sdk::common::GasFeeStrategy::new(),
+        )
+        .into();
         let sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
-            dex, sol_trade_sdk::TradeTokenType::WSOL, mint,
-            sol_trade_sdk::SellAmount::ExactInput(10_000), extension.clone(),
-            solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-        ).into();
+            dex,
+            sol_trade_sdk::TradeTokenType::WSOL,
+            mint,
+            sol_trade_sdk::SellAmount::ExactInput(10_000),
+            extension.clone(),
+            solana_hash::Hash::new_unique(),
+            sol_trade_sdk::common::GasFeeStrategy::new(),
+        )
+        .into();
         for wrong_mint in [Pubkey::new_unique(), WSOL_MINT] {
             let mut wrong_buy = buy.clone();
             wrong_buy.mint = wrong_mint;
             let mut wrong_sell = sell.clone();
             wrong_sell.mint = wrong_mint;
-            for result in [client.build_buy_instructions(&wrong_buy),
-                client.build_sell_instructions(&wrong_sell)] {
-                assert!(result.err().expect("requested mint was ignored")
-                    .to_string().contains("requested mint"));
+            for result in [
+                client.build_buy_instructions(&wrong_buy),
+                client.build_sell_instructions(&wrong_sell),
+            ] {
+                assert!(result
+                    .err()
+                    .expect("requested mint was ignored")
+                    .to_string()
+                    .contains("requested mint"));
             }
         }
         let mut wrong_buy = buy.clone();
         wrong_buy.dex_type = DexType::PumpFun;
         let mut wrong_sell = sell.clone();
         wrong_sell.dex_type = DexType::PumpFun;
-        for result in [client.build_buy_instructions(&wrong_buy),
-            client.build_sell_instructions(&wrong_sell)] {
-            assert!(result.err().expect("protocol type was ignored")
-                .to_string().contains("Invalid protocol params"));
+        for result in [
+            client.build_buy_instructions(&wrong_buy),
+            client.build_sell_instructions(&wrong_sell),
+        ] {
+            assert!(result
+                .err()
+                .expect("protocol type was ignored")
+                .to_string()
+                .contains("Invalid protocol params"));
         }
-        for (side, instructions) in [client.build_buy_instructions(&buy).unwrap(),
-            client.build_sell_instructions(&sell).unwrap()].into_iter().enumerate() {
-            let route = instructions.iter().find(|ix| ix.program_id == client.router.program_id).unwrap();
-            assert_eq!(route.accounts[if side == 0 { 4 } else { 3 }].pubkey,
-                crate::ata::ata(&wallet.pubkey(), &mint, &TOKEN_PROGRAM));
-            assert_eq!(&route.data[19..51], if side == 0 { mint.as_ref() } else { WSOL_MINT.as_ref() });
+        for (side, instructions) in [
+            client.build_buy_instructions(&buy).unwrap(),
+            client.build_sell_instructions(&sell).unwrap(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let route = instructions
+                .iter()
+                .find(|ix| ix.program_id == client.router.program_id)
+                .unwrap();
+            assert_eq!(
+                route.accounts[if side == 0 { 4 } else { 3 }].pubkey,
+                crate::ata::ata(&wallet.pubkey(), &mint, &TOKEN_PROGRAM)
+            );
+            assert_eq!(
+                &route.data[19..51],
+                if side == 0 {
+                    mint.as_ref()
+                } else {
+                    WSOL_MINT.as_ref()
+                }
+            );
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &instructions, Some(&wallet.pubkey()), &[wallet.as_ref()],
+                &instructions,
+                Some(&wallet.pubkey()),
+                &[wallet.as_ref()],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
@@ -2487,21 +3362,42 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
             let expected_curve = fixture.bonding_curve;
             let expected_vault = fixture.creator_vault;
             let market = RoutedMarket::pumpfun(fixture);
-            let sell = client.sell_with_opts(1_000, &market,
-                TradeOpts::default().sell_to_sol().with_min_out(1)).unwrap();
-            let prepare = sell.setup.iter().find(|ix| ix.program_id == client.program_id
-                && ix.data == [crate::route_ix::TAG_PREPARE_PUMPFUN]).unwrap();
+            let sell = client
+                .sell_with_opts(
+                    1_000,
+                    &market,
+                    TradeOpts::default().sell_to_sol().with_min_out(1),
+                )
+                .unwrap();
+            let prepare = sell
+                .setup
+                .iter()
+                .find(|ix| {
+                    ix.program_id == client.program_id
+                        && ix.data == [crate::route_ix::TAG_PREPARE_PUMPFUN]
+                })
+                .unwrap();
             assert_eq!(prepare.accounts[1].pubkey, expected_curve);
             assert_eq!(prepare.accounts[2].pubkey, expected_vault);
-            let volume = sell.setup.iter().filter(|ix| ix.program_id == crate::constants::PUMPFUN_PROGRAM
-                && ix.data == [94, 6, 202, 115, 255, 96, 232, 183]).collect::<Vec<_>>();
+            let volume = sell
+                .setup
+                .iter()
+                .filter(|ix| {
+                    ix.program_id == crate::constants::PUMPFUN_PROGRAM
+                        && ix.data == [94, 6, 202, 115, 255, 96, 232, 183]
+                })
+                .collect::<Vec<_>>();
             assert_eq!(volume.len(), usize::from(cashback));
             if cashback {
-                assert_eq!(volume[0].accounts[2].pubkey,
-                    crate::constants::pumpfun_user_volume_accumulator(&wallet.pubkey()));
+                assert_eq!(
+                    volume[0].accounts[2].pubkey,
+                    crate::constants::pumpfun_user_volume_accumulator(&wallet.pubkey())
+                );
             }
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &sell.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                &sell.into_instructions(),
+                Some(&wallet.pubkey()),
+                &[&wallet],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
@@ -2511,27 +3407,52 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
         let mut fixture = dummy_pumpfun();
         fixture.use_v2 = use_v2;
         let market = RoutedMarket::new(Market::PumpFunInner(fixture));
-        assert!(client.prepare_buy_atas(&market, crate::BuyWith::Sol).is_empty());
-        assert_eq!(client.prepare_sell_atas(&market, crate::SellTo::Sol).len(), 1);
+        assert!(client
+            .prepare_buy_atas(&market, crate::BuyWith::Sol)
+            .is_empty());
+        assert_eq!(
+            client.prepare_sell_atas(&market, crate::SellTo::Sol).len(),
+            1
+        );
         if use_v2 {
             let buy = client.prepare_buy_atas(&market, crate::BuyWith::Wsol);
             assert_eq!(buy.len(), 2);
             assert_eq!(buy[0].accounts[1].pubkey, wsol);
-            assert_eq!(buy[1].accounts[1].pubkey,
-                crate::ata::ata(&client.fee_recipient, &WSOL_MINT, &TOKEN_PROGRAM));
+            assert_eq!(
+                buy[1].accounts[1].pubkey,
+                crate::ata::ata(&client.fee_recipient, &WSOL_MINT, &TOKEN_PROGRAM)
+            );
             let sell = client.prepare_sell_atas(&market, crate::SellTo::Wsol);
             assert_eq!(sell.len(), 2);
             assert_eq!(sell[1].accounts[1].pubkey, wsol);
             for built in [
-                client.buy_with_opts(1_000, &market,
-                    TradeOpts::default().buy_with_wsol().with_min_out(1)).unwrap(),
-                client.sell_with_opts(1_000, &market,
-                    TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap(),
+                client
+                    .buy_with_opts(
+                        1_000,
+                        &market,
+                        TradeOpts::default().buy_with_wsol().with_min_out(1),
+                    )
+                    .unwrap(),
+                client
+                    .sell_with_opts(
+                        1_000,
+                        &market,
+                        TradeOpts::default().sell_to_wsol().with_min_out(1),
+                    )
+                    .unwrap(),
             ] {
                 assert!(built.cleanup.is_empty());
-                assert!(built.route.as_ref().unwrap().accounts.iter().any(|a| a.pubkey == wsol));
+                assert!(built
+                    .route
+                    .as_ref()
+                    .unwrap()
+                    .accounts
+                    .iter()
+                    .any(|a| a.pubkey == wsol));
                 let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                    &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                    &built.into_instructions(),
+                    Some(&wallet.pubkey()),
+                    &[&wallet],
                     solana_sdk::hash::Hash::new_unique(),
                 );
                 tx.verify().unwrap();
@@ -2547,28 +3468,41 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
         let opts = match path {
             0 => TradeOpts::default(),
             1 => TradeOpts::default().buy_with_wsol().sell_to_wsol(),
-            _ => TradeOpts::default().buy_with_token(quote).sell_to_token(quote),
-        }.with_min_out(1);
-        [client.buy_with_opts(1_000, &market, opts.clone()),
-            client.sell_with_opts(1_000, &market, opts)]
+            _ => TradeOpts::default()
+                .buy_with_token(quote)
+                .sell_to_token(quote),
+        }
+        .with_min_out(1);
+        [
+            client.buy_with_opts(1_000, &market, opts.clone()),
+            client.sell_with_opts(1_000, &market, opts),
+        ]
     };
     for path in 0..3 {
         let mut fixture = dummy_pumpfun();
         fixture.use_v2 = path != 0;
-        if path == 2 { fixture.quote_mint = Pubkey::new_unique(); }
+        if path == 2 {
+            fixture.quote_mint = Pubkey::new_unique();
+        }
         for invalid in [Pubkey::default(), Pubkey::new_unique()] {
             let mut bad = fixture.clone();
             bad.mint_token_program = invalid;
             for result in build_pair(bad, path) {
-                assert!(result.err().expect("Pump accepted unsupported base token program")
-                    .to_string().contains("token program"));
+                assert!(result
+                    .err()
+                    .expect("Pump accepted unsupported base token program")
+                    .to_string()
+                    .contains("token program"));
             }
             if path != 0 {
                 let mut bad = fixture.clone();
                 bad.quote_token_program = invalid;
                 for result in build_pair(bad, path) {
-                    assert!(result.err().expect("Pump accepted unsupported quote token program")
-                        .to_string().contains("token program"));
+                    assert!(result
+                        .err()
+                        .expect("Pump accepted unsupported quote token program")
+                        .to_string()
+                        .contains("token program"));
                 }
             }
         }
@@ -2576,24 +3510,36 @@ fn offline_pumpfun_uses_v2_and_sell_v2_leg() {
             let mut bad = fixture.clone();
             bad.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
             for result in build_pair(bad, path) {
-                assert!(result.err().expect("Token-2022 WSOL quote accepted").to_string()
+                assert!(result
+                    .err()
+                    .expect("Token-2022 WSOL quote accepted")
+                    .to_string()
                     .contains("classic WSOL"));
             }
         }
         for base in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
-            for quote in if path == 0 { vec![Pubkey::default(), Pubkey::new_unique()] }
-                else if path == 1 { vec![TOKEN_PROGRAM] }
-                else { vec![TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] } {
+            for quote in if path == 0 {
+                vec![Pubkey::default(), Pubkey::new_unique()]
+            } else if path == 1 {
+                vec![TOKEN_PROGRAM]
+            } else {
+                vec![TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM]
+            } {
                 let mut valid = fixture.clone();
                 valid.mint_token_program = base;
                 valid.quote_token_program = quote;
                 let mint_ata = crate::ata::ata(&wallet.pubkey(), &valid.mint, &base);
                 for (side, result) in build_pair(valid, path).into_iter().enumerate() {
                     let built = result.unwrap();
-                    assert_eq!(built.route.as_ref().unwrap().accounts[if side == 0 { 4 } else { 3 }].pubkey,
-                        mint_ata);
+                    assert_eq!(
+                        built.route.as_ref().unwrap().accounts[if side == 0 { 4 } else { 3 }]
+                            .pubkey,
+                        mint_ata
+                    );
                     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                        &built.into_instructions(),
+                        Some(&wallet.pubkey()),
+                        &[&wallet],
                         solana_sdk::hash::Hash::new_unique(),
                     );
                     tx.verify().unwrap();
@@ -2638,18 +3584,30 @@ fn offline_launchlab_sell_leg_builds() {
     liquidity.trade_fee_rate = 100_000;
     let sell_quote = crate::quote::launchlab_sell_quote_out;
     assert_eq!(sell_quote(&liquidity, 100).unwrap(), 18);
-    assert!(sell_quote(&liquidity, 101).is_err(), "cannot reverse more base than sold");
+    assert!(
+        sell_quote(&liquidity, 101).is_err(),
+        "cannot reverse more base than sold"
+    );
     // Keep pricing reserves at 200. User proceeds (18) fit in 19, but the
     // pre-fee output (20) also funds accrued fees and exceeds real liquidity.
     liquidity.virtual_quote = 181;
     liquidity.real_quote = 19;
-    assert!(sell_quote(&liquidity, 100).is_err(), "gross output must fit real quote");
+    assert!(
+        sell_quote(&liquidity, 100).is_err(),
+        "gross output must fit real quote"
+    );
     liquidity.virtual_quote = 180;
     liquidity.real_quote = 20;
-    liquidity.base_transfer_fee = TokenTransferFee { basis_points: 1_000, maximum_fee: 100 };
+    liquidity.base_transfer_fee = TokenTransferFee {
+        basis_points: 1_000,
+        maximum_fee: 100,
+    };
     assert_eq!(sell_quote(&liquidity, 112).unwrap(), 18); // net base 100
     assert!(sell_quote(&liquidity, 113).is_err()); // net base 101
-    liquidity.quote_transfer_fee = TokenTransferFee { basis_points: 1_000, maximum_fee: 100 };
+    liquidity.quote_transfer_fee = TokenTransferFee {
+        basis_points: 1_000,
+        maximum_fee: 100,
+    };
     assert_eq!(sell_quote(&liquidity, 112).unwrap(), 16);
     liquidity.real_base = 0;
     assert!(sell_quote(&liquidity, 112).is_err());
@@ -2671,11 +3629,18 @@ fn offline_launchlab_sell_leg_builds() {
     liquidity.quote_transfer_fee = TokenTransferFee::default();
     liquidity.real_quote = 20;
     liquidity.virtual_quote = 180;
-    for opts in [TradeOpts::default(), TradeOpts::default().sell_to_wsol(),
-        TradeOpts::default().sell_to_token(WSOL_MINT)] {
+    for opts in [
+        TradeOpts::default(),
+        TradeOpts::default().sell_to_wsol(),
+        TradeOpts::default().sell_to_token(WSOL_MINT),
+    ] {
         let market = RoutedMarket::new(Market::LaunchLabInner(liquidity.clone()));
-        assert!(zero_fee_client.sell_with_opts(100, &market, opts.clone()).is_ok());
-        assert!(zero_fee_client.sell_with_opts(101, &market, opts.clone()).is_err());
+        assert!(zero_fee_client
+            .sell_with_opts(100, &market, opts.clone())
+            .is_ok());
+        assert!(zero_fee_client
+            .sell_with_opts(101, &market, opts.clone())
+            .is_err());
         liquidity.real_quote = 19;
         liquidity.virtual_quote = 181;
         let market = RoutedMarket::new(Market::LaunchLabInner(liquidity.clone()));
@@ -2689,30 +3654,46 @@ fn offline_launchlab_sell_leg_builds() {
         let opts = match path {
             0 => TradeOpts::default(),
             1 => TradeOpts::default().buy_with_wsol().sell_to_wsol(),
-            _ => TradeOpts::default().buy_with_token(quote).sell_to_token(quote),
-        }.with_min_out(1);
-        [client.buy_with_opts(1_000, &market, opts.clone()),
-            client.sell_with_opts(1_000, &market, opts)]
+            _ => TradeOpts::default()
+                .buy_with_token(quote)
+                .sell_to_token(quote),
+        }
+        .with_min_out(1);
+        [
+            client.buy_with_opts(1_000, &market, opts.clone()),
+            client.sell_with_opts(1_000, &market, opts),
+        ]
     };
     let mut bad = dummy_launchlab();
     bad.base_mint = WSOL_MINT;
     bad.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
     bad.quote_mint = Pubkey::new_unique();
     for result in build_pair(bad, 2) {
-        assert!(result.err().expect("LaunchLab accepted Token-2022 canonical WSOL base")
-            .to_string().contains("classic WSOL"));
+        assert!(result
+            .err()
+            .expect("LaunchLab accepted Token-2022 canonical WSOL base")
+            .to_string()
+            .contains("classic WSOL"));
     }
     for path in 0..3 {
         let mut fixture = dummy_launchlab();
-        if path == 2 { fixture.quote_mint = Pubkey::new_unique(); }
+        if path == 2 {
+            fixture.quote_mint = Pubkey::new_unique();
+        }
         for invalid in [Pubkey::default(), Pubkey::new_unique()] {
             for base_side in [true, false] {
                 let mut bad = fixture.clone();
-                if base_side { bad.base_token_program = invalid; }
-                else { bad.quote_token_program = invalid; }
+                if base_side {
+                    bad.base_token_program = invalid;
+                } else {
+                    bad.quote_token_program = invalid;
+                }
                 for result in build_pair(bad, path) {
-                    assert!(result.err().expect("LaunchLab accepted unsupported token program")
-                        .to_string().contains("token program"));
+                    assert!(result
+                        .err()
+                        .expect("LaunchLab accepted unsupported token program")
+                        .to_string()
+                        .contains("token program"));
                 }
             }
         }
@@ -2720,19 +3701,25 @@ fn offline_launchlab_sell_leg_builds() {
             let mut bad = fixture.clone();
             bad.quote_token_program = crate::constants::TOKEN_2022_PROGRAM;
             for result in build_pair(bad, path) {
-                assert!(result.err().expect("LaunchLab accepted Token-2022 WSOL")
-                    .to_string().contains("classic WSOL"));
+                assert!(result
+                    .err()
+                    .expect("LaunchLab accepted Token-2022 WSOL")
+                    .to_string()
+                    .contains("classic WSOL"));
             }
         }
         for base_program in [TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM] {
             for quote_program in if path == 2 {
                 vec![TOKEN_PROGRAM, crate::constants::TOKEN_2022_PROGRAM]
-            } else { vec![TOKEN_PROGRAM] } {
+            } else {
+                vec![TOKEN_PROGRAM]
+            } {
                 let mut valid = fixture.clone();
                 valid.base_token_program = base_program;
                 valid.quote_token_program = quote_program;
                 let base_ata = crate::ata::ata(&wallet.pubkey(), &valid.base_mint, &base_program);
-                let quote_ata = crate::ata::ata(&wallet.pubkey(), &valid.quote_mint, &quote_program);
+                let quote_ata =
+                    crate::ata::ata(&wallet.pubkey(), &valid.quote_mint, &quote_program);
                 for result in build_pair(valid, path) {
                     let built = result.unwrap();
                     let route = built.route.as_ref().unwrap();
@@ -2742,7 +3729,9 @@ fn offline_launchlab_sell_leg_builds() {
                     assert_eq!(accounts[11].pubkey, base_program);
                     assert_eq!(accounts[12].pubkey, quote_program);
                     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                        &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                        &built.into_instructions(),
+                        Some(&wallet.pubkey()),
+                        &[&wallet],
                         solana_sdk::hash::Hash::new_unique(),
                     );
                     tx.verify().unwrap();
@@ -2807,35 +3796,60 @@ fn offline_transfer_fee_and_ata_policy() {
     // Honor explicit native-SOL input cleanup only when the route touches WSOL.
     for create in [false, true] {
         for close in [false, true] {
-            for market in [RoutedMarket::new(Market::CpmmOuter(dummy_cpmm())),
-                RoutedMarket::pumpfun(dummy_pumpfun())] {
+            for market in [
+                RoutedMarket::new(Market::CpmmOuter(dummy_cpmm())),
+                RoutedMarket::pumpfun(dummy_pumpfun()),
+            ] {
                 let mut buy: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
                     sol_trade_sdk::trading::factory::DexType::Bonk,
-                    sol_trade_sdk::TradeTokenType::SOL, market.meme_mint(),
+                    sol_trade_sdk::TradeTokenType::SOL,
+                    market.meme_mint(),
                     sol_trade_sdk::BuyAmount::ExactInput(10_000),
                     sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()),
-                    solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-                ).into(); // Only option conversion is under test; market supplies actual topology.
+                    solana_hash::Hash::new_unique(),
+                    sol_trade_sdk::common::GasFeeStrategy::new(),
+                )
+                .into(); // Only option conversion is under test; market supplies actual topology.
                 buy.create_input_token_ata = create;
                 buy.close_input_token_ata = close;
-                let built = client.buy_with_opts(10_000, &market,
-                    crate::client::buy_opts_from_params(&buy).unwrap().with_min_out(1)).unwrap();
+                let built = client
+                    .buy_with_opts(
+                        10_000,
+                        &market,
+                        crate::client::buy_opts_from_params(&buy)
+                            .unwrap()
+                            .with_min_out(1),
+                    )
+                    .unwrap();
                 let wraps = matches!(market.market, Market::CpmmOuter(_));
-                assert_eq!(built.setup.iter().any(|ix|
-                    ix.program_id == crate::constants::ASSOCIATED_TOKEN_PROGRAM
-                        && ix.accounts[1].pubkey == wsol_ata), wraps && create);
-                assert_eq!(built.cleanup.len(), usize::from(wraps && close),
-                    "native SOL buy ignored explicit input cleanup");
+                assert_eq!(
+                    built.setup.iter().any(|ix| ix.program_id
+                        == crate::constants::ASSOCIATED_TOKEN_PROGRAM
+                        && ix.accounts[1].pubkey == wsol_ata),
+                    wraps && create
+                );
+                assert_eq!(
+                    built.cleanup.len(),
+                    usize::from(wraps && close),
+                    "native SOL buy ignored explicit input cleanup"
+                );
                 if wraps && close {
-                    assert_eq!(built.cleanup[0], crate::ata::close_wsol_ata(&wallet.pubkey()));
+                    assert_eq!(
+                        built.cleanup[0],
+                        crate::ata::close_wsol_ata(&wallet.pubkey())
+                    );
                 }
                 let instructions = built.into_instructions();
                 if wraps && close {
-                    assert_eq!(instructions.last().unwrap(),
-                        &crate::ata::close_wsol_ata(&wallet.pubkey()));
+                    assert_eq!(
+                        instructions.last().unwrap(),
+                        &crate::ata::close_wsol_ata(&wallet.pubkey())
+                    );
                 }
                 let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                    &instructions, Some(&wallet.pubkey()), &[&wallet],
+                    &instructions,
+                    Some(&wallet.pubkey()),
+                    &[&wallet],
                     solana_sdk::hash::Hash::new_unique(),
                 );
                 tx.verify().unwrap();
@@ -2848,18 +3862,30 @@ fn offline_transfer_fee_and_ata_policy() {
         for close in [false, true] {
             let mut sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
                 sol_trade_sdk::trading::factory::DexType::Bonk,
-                sol_trade_sdk::TradeTokenType::SOL, market.meme_mint(),
+                sol_trade_sdk::TradeTokenType::SOL,
+                market.meme_mint(),
                 sol_trade_sdk::SellAmount::ExactInput(10_000),
                 sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()),
-                solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-            ).into();
+                solana_hash::Hash::new_unique(),
+                sol_trade_sdk::common::GasFeeStrategy::new(),
+            )
+            .into();
             sell.create_output_token_ata = create;
             sell.close_output_token_ata = close;
-            let built = client.sell_with_opts(10_000, &market,
-                crate::client::sell_opts_from_params(&sell).unwrap().with_min_out(1)).unwrap();
+            let built = client
+                .sell_with_opts(
+                    10_000,
+                    &market,
+                    crate::client::sell_opts_from_params(&sell)
+                        .unwrap()
+                        .with_min_out(1),
+                )
+                .unwrap();
             assert_eq!(built.cleanup.len(), usize::from(close));
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                &built.into_instructions(),
+                Some(&wallet.pubkey()),
+                &[&wallet],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
@@ -2868,38 +3894,70 @@ fn offline_transfer_fee_and_ata_policy() {
     for create in [false, true] {
         for close in [false, true] {
             let mut expected = None;
-            for asset in [sol_trade_sdk::TradeTokenType::WSOL,
-                sol_trade_sdk::TradeTokenType::Token(WSOL_MINT)] {
-                let extension = sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(
-                    Default::default()); // Only option conversion is under test here.
+            for asset in [
+                sol_trade_sdk::TradeTokenType::WSOL,
+                sol_trade_sdk::TradeTokenType::Token(WSOL_MINT),
+            ] {
+                let extension =
+                    sol_trade_sdk::trading::core::params::DexParamEnum::Bonk(Default::default()); // Only option conversion is under test here.
                 let mut buy: sol_trade_sdk::TradeBuyParams = sol_trade_sdk::SimpleBuyParams::new(
-                    sol_trade_sdk::trading::factory::DexType::Bonk, asset, market.meme_mint(),
-                    sol_trade_sdk::BuyAmount::ExactInput(10_000), extension.clone(),
-                    solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-                ).into();
+                    sol_trade_sdk::trading::factory::DexType::Bonk,
+                    asset,
+                    market.meme_mint(),
+                    sol_trade_sdk::BuyAmount::ExactInput(10_000),
+                    extension.clone(),
+                    solana_hash::Hash::new_unique(),
+                    sol_trade_sdk::common::GasFeeStrategy::new(),
+                )
+                .into();
                 buy.create_input_token_ata = create;
                 buy.close_input_token_ata = close;
-                let mut sell: sol_trade_sdk::TradeSellParams = sol_trade_sdk::SimpleSellParams::new(
-                    sol_trade_sdk::trading::factory::DexType::Bonk, asset, market.meme_mint(),
-                    sol_trade_sdk::SellAmount::ExactInput(10_000), extension,
-                    solana_hash::Hash::new_unique(), sol_trade_sdk::common::GasFeeStrategy::new(),
-                ).into();
+                let mut sell: sol_trade_sdk::TradeSellParams =
+                    sol_trade_sdk::SimpleSellParams::new(
+                        sol_trade_sdk::trading::factory::DexType::Bonk,
+                        asset,
+                        market.meme_mint(),
+                        sol_trade_sdk::SellAmount::ExactInput(10_000),
+                        extension,
+                        solana_hash::Hash::new_unique(),
+                        sol_trade_sdk::common::GasFeeStrategy::new(),
+                    )
+                    .into();
                 sell.create_output_token_ata = create;
                 sell.close_output_token_ata = close;
                 let mut bundles = Vec::new();
                 for built in [
-                    client.buy_with_opts(10_000, &market,
-                        crate::client::buy_opts_from_params(&buy).unwrap().with_min_out(1)).unwrap(),
-                    client.sell_with_opts(10_000, &market,
-                        crate::client::sell_opts_from_params(&sell).unwrap().with_min_out(1)).unwrap(),
+                    client
+                        .buy_with_opts(
+                            10_000,
+                            &market,
+                            crate::client::buy_opts_from_params(&buy)
+                                .unwrap()
+                                .with_min_out(1),
+                        )
+                        .unwrap(),
+                    client
+                        .sell_with_opts(
+                            10_000,
+                            &market,
+                            crate::client::sell_opts_from_params(&sell)
+                                .unwrap()
+                                .with_min_out(1),
+                        )
+                        .unwrap(),
                 ] {
-                    assert_eq!(built.setup.iter().any(|ix|
-                        ix.program_id == crate::constants::ASSOCIATED_TOKEN_PROGRAM
-                            && ix.accounts[1].pubkey == wsol_ata), create);
+                    assert_eq!(
+                        built.setup.iter().any(|ix| ix.program_id
+                            == crate::constants::ASSOCIATED_TOKEN_PROGRAM
+                            && ix.accounts[1].pubkey == wsol_ata),
+                        create
+                    );
                     assert_eq!(built.cleanup.len(), usize::from(close));
                     let instructions = built.into_instructions();
                     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                        &instructions, Some(&wallet.pubkey()), &[&wallet],
+                        &instructions,
+                        Some(&wallet.pubkey()),
+                        &[&wallet],
                         solana_sdk::hash::Hash::new_unique(),
                     );
                     tx.verify().unwrap();
@@ -2927,29 +3985,35 @@ fn offline_transfer_fee_and_ata_policy() {
             sol.clone().sell_to_wsol(),
             sol.clone().sell_to_token(WSOL_MINT),
         ] {
-            let built = client.sell_with_opts(1_000, &market, wrapped.clone()).unwrap();
+            let built = client
+                .sell_with_opts(1_000, &market, wrapped.clone())
+                .unwrap();
             let route = built.route.as_ref().unwrap();
             assert_eq!(route.accounts[4].pubkey, wsol_ata);
             assert_eq!(&route.data[19..51], WSOL_MINT.as_ref());
             assert!(built.cleanup.is_empty());
             assert!(!wrapped.ata.close_wsol);
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &built.into_instructions(), Some(&wallet.pubkey()), &[&wallet],
+                &built.into_instructions(),
+                Some(&wallet.pubkey()),
+                &[&wallet],
                 solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
 
             // The last explicit policy override still wins.
-            let close = client.sell_with_opts(
-                1_000, &market, wrapped.clone().close_wsol(true),
-            ).unwrap();
+            let close = client
+                .sell_with_opts(1_000, &market, wrapped.clone().close_wsol(true))
+                .unwrap();
             assert_eq!(close.cleanup.len(), 1);
-            let back_to_sol = client.sell_with_opts(
-                1_000, &market, wrapped.sell_to_sol(),
-            ).unwrap();
+            let back_to_sol = client
+                .sell_with_opts(1_000, &market, wrapped.sell_to_sol())
+                .unwrap();
             assert_eq!(back_to_sol.cleanup.len(), 1);
         }
-        let keep = client.sell_with_opts(1_000, &market, sol.close_wsol(false)).unwrap();
+        let keep = client
+            .sell_with_opts(1_000, &market, sol.close_wsol(false))
+            .unwrap();
         assert!(keep.cleanup.is_empty());
     }
 }
@@ -3043,19 +4107,39 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
                 let mut bad = pool.clone();
                 bad.base_token_program = invalid;
                 assert!(crate::build_dynamic_quote_buy(
-                    &crate::PROGRAM_ID, &payer, &fee_recipient, 500_000_000, 500_000_000,
-                    1_000, 10, bridge, &Market::LaunchLabInner(bad),
-                ).err().expect("dynamic LaunchLab accepted unsupported base token program")
-                    .to_string().contains("token program"));
+                    &crate::PROGRAM_ID,
+                    &payer,
+                    &fee_recipient,
+                    500_000_000,
+                    500_000_000,
+                    1_000,
+                    10,
+                    bridge,
+                    &Market::LaunchLabInner(bad),
+                )
+                .err()
+                .expect("dynamic LaunchLab accepted unsupported base token program")
+                .to_string()
+                .contains("token program"));
             }
             let mut bad = pool.clone();
             bad.base_mint = WSOL_MINT;
             bad.base_token_program = crate::constants::TOKEN_2022_PROGRAM;
             assert!(crate::build_dynamic_quote_buy(
-                &crate::PROGRAM_ID, &payer, &fee_recipient, 500_000_000, 500_000_000,
-                1_000, 10, bridge, &Market::LaunchLabInner(bad),
-            ).err().expect("dynamic LaunchLab accepted Token-2022 canonical WSOL")
-                .to_string().contains("classic WSOL"));
+                &crate::PROGRAM_ID,
+                &payer,
+                &fee_recipient,
+                500_000_000,
+                500_000_000,
+                1_000,
+                10,
+                bridge,
+                &Market::LaunchLabInner(bad),
+            )
+            .err()
+            .expect("dynamic LaunchLab accepted Token-2022 canonical WSOL")
+            .to_string()
+            .contains("classic WSOL"));
         }
         let mut token_2022 = match &targets[0] {
             Market::LaunchLabInner(pool) => pool.clone(),
@@ -3093,15 +4177,28 @@ fn offline_dynamic_quote_buy_builds_every_first_hop_for_both_targets() {
             );
             let base_program = target_pool.base_token_program();
             assert_eq!(built.output_token_program, base_program);
-            assert_eq!(built.output_ata, crate::ata::ata(&payer, &target, &base_program));
+            assert_eq!(
+                built.output_ata,
+                crate::ata::ata(&payer, &target, &base_program)
+            );
             if let Market::LaunchLabInner(pool) = target_pool {
-                let slot = built.instruction.accounts.iter()
-                    .position(|account| account.pubkey == pool.pool_state).unwrap();
-                assert_eq!(built.instruction.accounts[slot + 1].pubkey, built.output_ata);
+                let slot = built
+                    .instruction
+                    .accounts
+                    .iter()
+                    .position(|account| account.pubkey == pool.pool_state)
+                    .unwrap();
+                assert_eq!(
+                    built.instruction.accounts[slot + 1].pubkey,
+                    built.output_ata
+                );
                 assert_eq!(built.instruction.accounts[slot + 7].pubkey, base_program);
             }
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-                &[built.instruction], Some(&payer), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+                &[built.instruction],
+                Some(&payer),
+                &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
             let restored: solana_sdk::transaction::Transaction =
@@ -3216,8 +4313,10 @@ fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
     // raw quote balance minus protocol/creator sweep buckets.
     pool.virtual_quote_reserves = 0;
     pool.quote_fee_reserves = Some(1_999_000);
-    assert!(pumpswap_sell_quote_out(&pool, 10_000).is_err(),
-        "reserved protocol/creator fees cannot fund a sell");
+    assert!(
+        pumpswap_sell_quote_out(&pool, 10_000).is_err(),
+        "reserved protocol/creator fees cannot fund a sell"
+    );
     // Exact spendable-reserve threshold uses gross minus LP fees, not just
     // the smaller user proceeds after protocol and creator fees.
     pool.quote_fee_reserves = Some(2_000_000 - 19_761);
@@ -3234,11 +4333,20 @@ fn offline_pumpswap_signed_reserves_match_current_quote_calculator() {
         .with_pool_guard(PoolGuardPolicy::disabled());
     pool.quote_fee_reserves = None;
     let market = RoutedMarket::new(Market::PumpSwapOuter(pool.clone()));
-    assert!(client.sell_with_opts(10_000, &market, TradeOpts::default().sell_to_wsol()).is_err());
-    let built = client.sell_with_opts(10_000, &market,
-        TradeOpts::default().sell_to_wsol().with_min_out(1)).unwrap();
-    assert_eq!(built.route.unwrap().accounts[4].pubkey,
-        crate::ata::ata(&client.payer, &WSOL_MINT, &TOKEN_PROGRAM));
+    assert!(client
+        .sell_with_opts(10_000, &market, TradeOpts::default().sell_to_wsol())
+        .is_err());
+    let built = client
+        .sell_with_opts(
+            10_000,
+            &market,
+            TradeOpts::default().sell_to_wsol().with_min_out(1),
+        )
+        .unwrap();
+    assert_eq!(
+        built.route.unwrap().accounts[4].pubkey,
+        crate::ata::ata(&client.payer, &WSOL_MINT, &TOKEN_PROGRAM)
+    );
     pool.quote_fee_reserves = Some(0);
     pool.virtual_quote_reserves = -2_000_000;
     assert!(pumpswap_buy_base_out(&pool, 10_000).is_err());
@@ -3378,11 +4486,15 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     bind_pumpswap_creator(&mut pool);
     assert_eq!(pool.quote_fee_reserves, None);
     let mut state = sol_trade_sdk::instruction::utils::pumpswap_types::Pool {
-        base_mint:pool.base_mint, quote_mint:pool.quote_mint,
-        pool_base_token_account:pool.pool_base_token_account,
-        pool_quote_token_account:pool.pool_quote_token_account,
-        virtual_quote_reserves:pool.virtual_quote_reserves, coin_creator:pool.coin_creator,
-        is_cashback_coin:pool.is_cashback_coin, protocol_fees:800_000, creator_fees:200_000,
+        base_mint: pool.base_mint,
+        quote_mint: pool.quote_mint,
+        pool_base_token_account: pool.pool_base_token_account,
+        pool_quote_token_account: pool.pool_quote_token_account,
+        virtual_quote_reserves: pool.virtual_quote_reserves,
+        coin_creator: pool.coin_creator,
+        is_cashback_coin: pool.is_cashback_coin,
+        protocol_fees: 800_000,
+        creator_fees: 200_000,
         ..Default::default()
     };
     pool.apply_pool_fee_reserves(&state).unwrap();
@@ -3405,7 +4517,8 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
         assert!(pool.apply_pool_fee_reserves(&invalid).is_err());
         assert_eq!(pool.quote_fee_reserves, Some(1_000_000));
     }
-    state.protocol_fees = 0; state.creator_fees = 0;
+    state.protocol_fees = 0;
+    state.creator_fees = 0;
     pool.apply_pool_fee_reserves(&state).unwrap();
     assert_eq!(pool.quote_fee_reserves, Some(0));
     assert_eq!(
@@ -3423,8 +4536,14 @@ fn offline_pumpswap_adapter_preserves_current_recipients_and_cashback_bucket() {
     event.coin_creator_fee_basis_points = 30;
     event.cashback_fee_basis_points = 7;
     assert_eq!(crate::parser::pumpswap_from_buy(&event).creator_fee_bps, 37);
-    assert_eq!(crate::parser::pumpswap_from_buy(&event).quote_fee_reserves, None);
-    assert_eq!(crate::parser::pumpswap_from_sell(&Default::default()).quote_fee_reserves, None);
+    assert_eq!(
+        crate::parser::pumpswap_from_buy(&event).quote_fee_reserves,
+        None
+    );
+    assert_eq!(
+        crate::parser::pumpswap_from_sell(&Default::default()).quote_fee_reserves,
+        None
+    );
 }
 
 #[test]
@@ -3585,20 +4704,28 @@ fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
     update.tick_arrays = (0..3).map(|_| Pubkey::new_unique()).collect();
     update.amm_config = Pubkey::new_unique();
     update.observation_state = Pubkey::new_unique();
-    update.tick_array_bitmap_extension =
-        Some(crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state));
+    update.tick_array_bitmap_extension = Some(
+        crate::constants::raydium_clmm_tick_array_bitmap_extension(&pool.pool_state),
+    );
     update.amount_0 = 100;
     for key in [Pubkey::new_unique(), Pubkey::default()] {
         update.pool_state = key;
         crate::parser::merge_clmm_swap(&mut pool, &update);
-        assert_eq!(format!("{pool:?}"), before, "foreign CLMM event mutated snapshot");
+        assert_eq!(
+            format!("{pool:?}"),
+            before,
+            "foreign CLMM event mutated snapshot"
+        );
     }
     update.pool_state = pool.pool_state;
     crate::parser::merge_clmm_swap(&mut pool, &update);
     assert_eq!(pool.tick_arrays, update.tick_arrays);
     assert_eq!(pool.amm_config, update.amm_config);
     assert_eq!(pool.observation_state, update.observation_state);
-    assert_eq!(pool.tick_array_bitmap_extension, update.tick_array_bitmap_extension);
+    assert_eq!(
+        pool.tick_array_bitmap_extension,
+        update.tick_array_bitmap_extension
+    );
     assert_eq!(pool.quoted_amount_in, Some(100));
     assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
     let wallet = Keypair::new();
@@ -3606,8 +4733,13 @@ fn offline_clmm_unknown_mint_owner_needs_overlay_even_without_transfer_fees() {
         let leg = raydium_clmm_swap_leg(&wallet.pubkey(), &pool, 100, 1, input).unwrap();
         let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
             &[solana_sdk::instruction::Instruction {
-                program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
-            }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+                program_id: leg.program_id,
+                accounts: leg.accounts,
+                data: leg.data,
+            }],
+            Some(&wallet.pubkey()),
+            &[&wallet],
+            solana_sdk::hash::Hash::new_unique(),
         );
         tx.verify().unwrap();
     }
@@ -3638,11 +4770,18 @@ fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
     for key in [Pubkey::new_unique(), Pubkey::default()] {
         event.whirlpool = key;
         crate::parser::merge_whirlpool_swap(&mut pool, &event);
-        assert_eq!(format!("{pool:?}"), before, "foreign Whirlpool event mutated snapshot");
+        assert_eq!(
+            format!("{pool:?}"),
+            before,
+            "foreign Whirlpool event mutated snapshot"
+        );
     }
     event.whirlpool = pool.whirlpool;
     crate::parser::merge_whirlpool_swap(&mut pool, &event);
-    assert_eq!(pool.tick_arrays, [event.tick_array_0, event.tick_array_1, event.tick_array_2]);
+    assert_eq!(
+        pool.tick_arrays,
+        [event.tick_array_0, event.tick_array_1, event.tick_array_2]
+    );
     assert_eq!(pool.quoted_amount_in, Some(100));
     assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
     assert_eq!(pool.token_program_a, TOKEN_PROGRAM);
@@ -3652,17 +4791,33 @@ fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
     let verify_merged_legs = |pool: &WhirlpoolPool| {
         for input in [pool.mint_a, pool.mint_b] {
             let leg = whirlpool_swap_leg(&wallet.pubkey(), pool, 100, 1, input).unwrap();
-            for (index, key) in [(0, pool.token_program_a), (1, pool.token_program_b),
-                (4, pool.whirlpool), (5, pool.mint_a), (6, pool.mint_b),
-                (8, pool.vault_a), (10, pool.vault_b)] {
+            for (index, key) in [
+                (0, pool.token_program_a),
+                (1, pool.token_program_b),
+                (4, pool.whirlpool),
+                (5, pool.mint_a),
+                (6, pool.mint_b),
+                (8, pool.vault_a),
+                (10, pool.vault_b),
+            ] {
                 assert_eq!(leg.accounts[index].pubkey, key);
             }
-            assert_eq!(leg.accounts[11..14].iter().map(|meta| meta.pubkey).collect::<Vec<_>>(),
-                pool.tick_arrays);
+            assert_eq!(
+                leg.accounts[11..14]
+                    .iter()
+                    .map(|meta| meta.pubkey)
+                    .collect::<Vec<_>>(),
+                pool.tick_arrays
+            );
             let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
                 &[solana_sdk::instruction::Instruction {
-                    program_id: leg.program_id, accounts: leg.accounts, data: leg.data,
-                }], Some(&wallet.pubkey()), &[&wallet], solana_sdk::hash::Hash::new_unique(),
+                    program_id: leg.program_id,
+                    accounts: leg.accounts,
+                    data: leg.data,
+                }],
+                Some(&wallet.pubkey()),
+                &[&wallet],
+                solana_sdk::hash::Hash::new_unique(),
             );
             tx.verify().unwrap();
         }
@@ -3685,23 +4840,40 @@ fn offline_whirlpool_owner_overlay_preserves_independently_known_side() {
             partial.token_vault_b = complete.vault_b;
         }
         crate::parser::merge_whirlpool_swap(&mut pool, &partial);
-        assert_eq!((pool.mint_a, pool.mint_b), (complete.mint_a, complete.mint_b),
-            "partial mint overlay lost the other side or ignored this side");
-        assert_eq!((pool.vault_a, pool.vault_b), (complete.vault_a, complete.vault_b),
-            "partial vault overlay lost the other side or ignored this side");
+        assert_eq!(
+            (pool.mint_a, pool.mint_b),
+            (complete.mint_a, complete.mint_b),
+            "partial mint overlay lost the other side or ignored this side"
+        );
+        assert_eq!(
+            (pool.vault_a, pool.vault_b),
+            (complete.vault_a, complete.vault_b),
+            "partial vault overlay lost the other side or ignored this side"
+        );
         verify_merged_legs(&pool);
     }
     // A partial tick triplet cannot replace the coherent cached sequence.
     for missing in 0..3 {
         let mut partial = event.clone();
-        let mut ticks = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
+        let mut ticks = [
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ];
         ticks[missing] = Pubkey::default();
-        [partial.tick_array_0, partial.tick_array_1, partial.tick_array_2] = ticks;
+        [
+            partial.tick_array_0,
+            partial.tick_array_1,
+            partial.tick_array_2,
+        ] = ticks;
         pool = complete.clone();
         pool.expected_out = Some(50);
         pool.quoted_input_mint = Some(pool.mint_a);
         crate::parser::merge_whirlpool_swap(&mut pool, &partial);
-        assert_eq!(pool.tick_arrays, complete.tick_arrays, "partial tick overlay replaced valid cache");
+        assert_eq!(
+            pool.tick_arrays, complete.tick_arrays,
+            "partial tick overlay replaced valid cache"
+        );
         assert_eq!((pool.expected_out, pool.quoted_input_mint), (None, None));
         verify_merged_legs(&pool);
     }
@@ -3768,4 +4940,17 @@ fn offline_dynamic_route_accepts_whirlpool_supplemental_ticks_as_following_hop()
         &missing
     )
     .is_err());
+}
+
+#[test]
+fn shared_stock_catalog_and_routing_defaults_agree() {
+    let catalog = crate::stock_prices::StockTokenCatalog::screened_defaults();
+    let routing = crate::PumpSwapRoutingConfig::default();
+    assert_eq!((catalog.tokens.len(), catalog.pools.len()), (34, 63));
+    assert_eq!(routing.conversion_pools.len(), catalog.pools.len() + 1);
+    for pool in catalog.pools {
+        assert!(routing.conversion_pools.iter().any(|h| h.pool == pool.pool
+            && h.input_mint == pool.quote_mint
+            && h.output_mint == pool.mint));
+    }
 }

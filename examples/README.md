@@ -4,6 +4,13 @@
 
 Run from the repository root: `cargo run -p <name>`.
 
+The examples below use explicit router market builders, not the trade SDK client's
+global Pump.fun version. For V3 use `PumpFunV3Pool` and its quote/build methods;
+`to_routed_market` rejects V2/V3 versioned trade parameters rather than silently
+downgrading them to legacy. Multi-pool quote routes require explicit router legs.
+Unresolved Shred candidates (`parse_status=Unresolved`) are not executable pool
+snapshots, even when `third_program` references Pump.fun.
+
 Ultra-low-latency layout (same as sol-trade-sdk):
 
 1. Warm client + **durable nonce pool** (or blockhash fallback) **before** subscribe (`examples/common`)

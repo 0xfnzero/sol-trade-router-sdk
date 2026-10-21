@@ -1,83 +1,73 @@
 <div align="center">
-    <h1>🔀 Sol Trade Router SDK</h1>
-    <h3><em>Pinocchio on-chain multi-hop router + ultra-low-latency client SDK</em></h3>
+    <h1>Sol Trade Router SDK</h1>
+    <p>Pinocchio on-chain multi-hop routing and Rust client SDK</p>
+    <a href="https://crates.io/crates/sol-trade-router-sdk"><img src="https://img.shields.io/crates/v/sol-trade-router-sdk.svg" alt="sol-trade-router-sdk"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </div>
 
 <p align="center">
-    <strong>Same trading surface as <a href="https://github.com/0xfnzero/sol-trade-sdk">sol-trade-sdk</a> — SWQoS, durable nonce, SimpleBuy/Sell, ViaSol — but every swap is packed through this repo’s Pinocchio <code>Route</code> CPI (platform fee + multi-hop). Pool snapshots come from <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> events / local cache: <em>no RPC on the hot path</em>.</strong>
+    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
+    <a href="examples/README.md">Examples</a> ·
+    <a href="docs/LOW_LATENCY_BOTS.md">Documentation</a> ·
+    <a href="RELEASE_NOTES.md">Release and migration</a> ·
+    <a href="#related-sdks">Related SDKs</a>
 </p>
 
-<p align="center">
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/LICENSE">
-        <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
-    </a>
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk">
-        <img src="https://img.shields.io/github/stars/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub stars">
-    </a>
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/network">
-        <img src="https://img.shields.io/github/forks/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub forks">
-    </a>
-</p>
+Compose DEX trades and platform fees through Route CPI, using parsed events and cached pool state. Deploy the matching Router program and configure its program ID before use.
 
-<p align="center">
-    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
-    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
-    <img src="https://img.shields.io/badge/Pinocchio-0A7B83?style=for-the-badge&logo=solana&logoColor=white" alt="Pinocchio">
-    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Trading">
-</p>
+Current version: **0.3.0**.
 
-<p align="center">
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README_CN.md">中文</a> |
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README.md">English</a> |
-    <a href="https://fnzero.dev/">Website</a> |
-    <a href="https://t.me/fnzero_group">Telegram</a> |
-    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
-</p>
+## Contents
 
+- [Related SDKs](#related-sdks)
+- [Installation](#installation)
+- [Features](#features)
+- [Use the SDK](#use-the-sdk)
+- [Documentation](#documentation)
+- [Examples](#examples)
+- [Deploy the Router program](#deploy-the-router-program)
+- [Build and test](#build-test)
 
-## PumpSwap and parser synchronization (0.2.0)
+<a id="related-sdks"></a>
 
-This release pins `sol-trade-sdk =6.0.2` and `sol-parser-sdk =0.7.14`.
-PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
-ATA against the actual quote mint/token program before constructing CPI accounts.
-Missing token programs or fee recipients are rejected instead of guessed. Exact-output
-Buy includes the volume flag; protocol recipients and global volume stay readonly.
+## Related SDKs
 
-Use `LoadMarketRequest::PumpSwapPool { pool }` to cold-load an explicit pool address,
-including non-WSOL quote pools. For SOL-funded trades, prepare the resolved bridge
-and target snapshots, then call `build_dynamic_quote_buy` for WSOL → quote → target.
-PumpSwap can be either hop, with buy/sell chosen by the actual mint direction.
-The matching Router program spends only each preceding hop's newly credited output.
-Set up the required ATAs and fund/sync WSOL before the route; the builder does no RPC.
-The high-level pool guard still requires explicitly trusting noncanonical pools.
+Repositories are versioned independently; follow each SDK’s installation guide for compatible dependencies.
 
-A trade SDK `PumpSwapQuoteRoute` may contain splits and merges and cannot be converted
-to one `RoutedMarket`; use explicit Router legs and the two/three-hop builders.
-Parser `PumpRouteIntent` events describe instructions before execution and are not
-converted into trade/reserve snapshots. Use executed trade events plus current pool
-state for those snapshots.
+| Language | Repository | Purpose | Version |
+|----------|------------|-------------|---------|
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX transaction and account event parsing | `v0.9.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX transaction and account event parsing | `v0.9.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX transaction and account event parsing | `v0.9.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX transaction and account event parsing | `v0.9.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | Raw shred decoding and ShredStream instruction events | `v6.0.0` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream subscriptions and event streaming | `v5.0.0` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | On-chain multi-hop router and client SDK | `v0.3.0` |
 
-Build and deploy the matching Router source to use dynamic PumpSwap buys. Publishing
-the SDK does not change an existing on-chain deployment.
+<a id="installation"></a>
 
-## 📋 Table of Contents
+## 📦 Installation
 
-- [✨ Features](#-features)
-- [📚 Documentation](#-documentation)
-- [📦 Installation](#-installation)
-- [🆚 vs sol-trade-sdk](#-vs-sol-trade-sdk)
-- [🛠️ Use the SDK](#️-use-the-sdk)
-- [🚀 Deploy the Router program](#-deploy-the-router-program)
-- [📚 Examples](#-examples)
-- [⚡ Low latency](#-low-latency)
-- [📦 Workspace & markets](#-workspace--markets)
-- [📁 Project Structure](#-project-structure)
-- [🔨 Build & test](#-build--test)
-- [📄 License](#-license)
-- [💬 Contact](#-contact)
-- [⚠️ Important Notes](#️-important-notes)
+Install the complete client release **0.3.0** from crates.io:
 
----
+```toml
+[dependencies]
+sol-trade-router-sdk = "=0.3.0"
+# Streaming bots only, if importing parser types directly:
+sol-parser-sdk = "=0.9.0"
+```
+
+Dependencies use published **sol-trade-sdk 9.0.0** and **sol-parser-sdk 0.9.0**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
+
+See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
+
+Do **not** add `sol-trade-sdk` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
+
+<a id="features"></a>
 
 ## ✨ Features
 
@@ -90,58 +80,7 @@ the SDK does not change an existing on-chain deployment.
 7. **Spend / output integrity** — exact-in spend == `amount_in` (fee + swap); exact-out spend stays within budget; expected output mint / native SOL and `min_out` are checked
 8. **Pool guard** — optional PDA / allowlist / `stonk_strict`
 
-## 📚 Documentation
-
-| Guide | Purpose |
-|-------|---------|
-| [Low-Latency Bot Integration](docs/LOW_LATENCY_BOTS.md) | Warm / hot path, RiskGate, submit timing |
-| [Durable Nonce](docs/NONCE_CACHE.md) | Preferred clock for multi-SWQoS / MEV |
-| [examples/README.md](examples/README.md) | gRPC / Shred sniper & copy templates |
-| [keys/README.md](keys/README.md) | Local deploy keypair (never commit) |
-
-Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Trading Parameters, Gas Fee, ALT, SWQoS) apply the same way — only the swap instruction program changes.
-
-## 📦 Installation
-
-Install the complete client release **0.2.0** from crates.io:
-
-```toml
-[dependencies]
-sol-trade-router-sdk = "=0.2.0"
-# Streaming bots only, if importing parser types directly:
-sol-parser-sdk = "=0.7.14"
-```
-
-Dependencies use published **sol-trade-sdk 6.0.2** and **sol-parser-sdk 0.7.14**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
-
-See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
-
-Do **not** add `sol-trade-sdk` unless you need a symbol that is not re-exported — trading types are available from `sol_trade_router_sdk::*`.
-
-## 🆚 vs sol-trade-sdk
-
-| | sol-trade-sdk | sol-trade-router-sdk |
-|--|---------------|----------------------|
-| Client API | `TradingClient` / SimpleBuy\|Sell | Same names & params |
-| Swap ix | Direct DEX program | Pinocchio **Route** CPI + platform fee |
-| Hot path | Durable nonce / blockhash, no RPC | Same |
-| Streaming | Use sol-parser-sdk | Same |
-| On-chain | None | Deploy + `initialize` this router |
-
-Migration: keep `TradeBuyParams` / `DexParamEnum` / SWQoS config; construct `sol_trade_router_sdk::TradingClient` with `RouterTradeConfig` (optional `fee_recipient` + `fee_bps`).
-
-### Platform fee (optional / reserved)
-
-If you deploy the Router yourself, you **do not have to charge a platform fee**:
-
-| Field | Role | Self-deploy suggestion |
-|-------|------|------------------------|
-| `fee_bps` | Platform fee in basis points | **`0` = no fee** (on-chain skips transfer) |
-| `fee_recipient` | Always stored in config | Use your own wallet as a placeholder; enable later via `update_config` |
-
-- On-chain: when `fee_bps == 0`, `Route` takes **no** platform fee and does not validate the fee destination.
-- SDK / examples: unset `FEE_BPS` defaults to `0`; unset `FEE_RECIPIENT` defaults to the payer.
-- Later, if you want to charge: keep the reserved recipient (or change it) and set e.g. `fee_bps = 50` (0.50%) with `update_config`.
+<a id="use-the-sdk"></a>
 
 ## 🛠️ Use the SDK
 
@@ -284,6 +223,75 @@ let ix = initialize_config(&PROGRAM_ID, &authority, &authority, 0);
 let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 ```
 
+<a id="pumpswap-and-parser-synchronization-020"></a>
+
+## PumpSwap and parser synchronization (0.3.0)
+
+This release pins `sol-trade-sdk =9.0.0` and `sol-parser-sdk =0.9.0`.
+PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
+ATA against the actual quote mint/token program before constructing CPI accounts.
+Missing token programs or fee recipients are rejected instead of guessed. Exact-output
+Buy includes the volume flag; protocol recipients and global volume stay readonly.
+
+Use `LoadMarketRequest::PumpSwapPool { pool }` to cold-load an explicit pool address,
+including non-WSOL quote pools. For SOL-funded trades, prepare the resolved bridge
+and target snapshots, then call `build_dynamic_quote_buy` for WSOL → quote → target.
+PumpSwap can be either hop, with buy/sell chosen by the actual mint direction.
+The matching Router program spends only each preceding hop's newly credited output.
+Set up the required ATAs and fund/sync WSOL before the route; the builder does no RPC.
+The high-level pool guard still requires explicitly trusting noncanonical pools.
+
+A trade SDK `PumpSwapQuoteRoute` may contain splits and merges and cannot be converted
+to one `RoutedMarket`; use explicit Router legs and the two/three-hop builders.
+Unresolved parser candidates with `third_program` are not trade/reserve snapshots.
+Use executed trade events plus current pool state for those snapshots; the old
+`PumpRouteIntent` callback has been removed.
+
+Build and deploy the matching Router source to use dynamic PumpSwap buys. Publishing
+the SDK does not change an existing on-chain deployment.
+
+<a id="documentation"></a>
+
+## 📚 Documentation
+
+| Guide | Purpose |
+|-------|---------|
+| [Low-Latency Bot Integration](docs/LOW_LATENCY_BOTS.md) | Warm / hot path, RiskGate, submit timing |
+| [Durable Nonce](docs/NONCE_CACHE.md) | Preferred clock for multi-SWQoS / MEV |
+| [examples/README.md](examples/README.md) | gRPC / Shred sniper & copy templates |
+| [keys/README.md](keys/README.md) | Local deploy keypair (never commit) |
+
+Related: [sol-trade-sdk docs](https://github.com/0xfnzero/sol-trade-sdk) (Trading Parameters, Gas Fee, ALT, SWQoS) apply the same way — only the swap instruction program changes.
+
+<a id="vs-sol-trade-sdk"></a>
+
+## 🆚 vs sol-trade-sdk
+
+| | sol-trade-sdk | sol-trade-router-sdk |
+|--|---------------|----------------------|
+| Client API | `TradingClient` / SimpleBuy\|Sell | Same names & params |
+| Swap ix | Direct DEX program | Pinocchio **Route** CPI + platform fee |
+| Hot path | Durable nonce / blockhash, no RPC | Same |
+| Streaming | Use sol-parser-sdk | Same |
+| On-chain | None | Deploy + `initialize` this router |
+
+Migration: keep `TradeBuyParams` / `DexParamEnum` / SWQoS config; construct `sol_trade_router_sdk::TradingClient` with `RouterTradeConfig` (optional `fee_recipient` + `fee_bps`).
+
+### Platform fee (optional / reserved)
+
+If you deploy the Router yourself, you **do not have to charge a platform fee**:
+
+| Field | Role | Self-deploy suggestion |
+|-------|------|------------------------|
+| `fee_bps` | Platform fee in basis points | **`0` = no fee** (on-chain skips transfer) |
+| `fee_recipient` | Always stored in config | Use your own wallet as a placeholder; enable later via `update_config` |
+
+- On-chain: when `fee_bps == 0`, `Route` takes **no** platform fee and does not validate the fee destination.
+- SDK / examples: unset `FEE_BPS` defaults to `0`; unset `FEE_RECIPIENT` defaults to the payer.
+- Later, if you want to charge: keep the reserved recipient (or change it) and set e.g. `fee_bps = 50` (0.50%) with `update_config`.
+
+<a id="deploy-the-router-program"></a>
+
 ## 🚀 Deploy the Router program
 
 You must deploy the on-chain program and call `initialize` before live Route trades. Client SDK alone is not enough.
@@ -338,8 +346,8 @@ use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
 // authority must sign; pays for config PDA rent
 ```
 
-- `fee_bps = 0` → no platform fee on trades  
-- `fee_recipient` is still stored (reserved); enable charging later with `update_config`  
+- `fee_bps = 0` → no platform fee on trades
+- `fee_recipient` is still stored (reserved); enable charging later with `update_config`
 
 ### Step 5 — Point the bot at the program
 
@@ -358,6 +366,8 @@ Bot `fee_bps` / `fee_recipient` should match on-chain intent (for self-deploy: b
 - [ ] `initialize` sent (you own config authority)
 - [ ] Self-deploy: `fee_bps = 0` (or intentional fee); if charging, bot matches on-chain rate/recipient
 - [ ] Durable nonce accounts created for the trading payer ([NONCE_CACHE.md](docs/NONCE_CACHE.md))
+
+<a id="examples"></a>
 
 ## 📚 Examples
 
@@ -383,6 +393,8 @@ cargo run -p pumpfun_sniper_trading
 
 Warm helper: `examples/common` (`warm_router_client` + `take_tx_clock`). Full notes: [examples/README.md](./examples/README.md).
 
+<a id="low-latency"></a>
+
 ## ⚡ Low latency
 
 ```text
@@ -395,6 +407,8 @@ hot: filter → map event → take_tx_clock → buy/sell → submit
 - Default examples use `wait_tx_confirmed=false`
 
 → [docs/LOW_LATENCY_BOTS.md](./docs/LOW_LATENCY_BOTS.md) · [docs/NONCE_CACHE.md](./docs/NONCE_CACHE.md)
+
+<a id="workspace-markets"></a>
 
 ## 📦 Workspace & markets
 
@@ -412,6 +426,8 @@ hot: filter → map event → take_tx_clock → buy/sell → submit
 | Orca Whirlpool | |
 | Meteora DLMM / DAMM V2 | |
 
+<a id="project-structure"></a>
+
 ## 📁 Project Structure
 
 ```text
@@ -427,6 +443,8 @@ sol-trade-router-sdk/
 └── README_CN.md
 ```
 
+<a id="build-test"></a>
+
 ## 🔨 Build & test
 
 ```bash
@@ -440,16 +458,7 @@ RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_ -- --nocaptu
 ./scripts/build-program.sh
 ```
 
-## 📄 License
-
-MIT License
-
-## 💬 Contact
-
-- Website: https://fnzero.dev/
-- Repo: https://github.com/0xfnzero/sol-trade-router-sdk
-- Telegram: https://t.me/fnzero_group
-- Discord: https://discord.gg/vuazbGkqQE
+<a id="important-notes"></a>
 
 ## ⚠️ Important Notes
 
@@ -459,3 +468,22 @@ MIT License
 4. Keep `declare_id!` and SDK `PROGRAM_ID` in sync
 5. Durable nonce ≠ quote validity — refresh pool state from events
 6. Comply with applicable laws and regulations
+
+
+<a id="license"></a>
+
+## 📄 License
+
+MIT License
+
+<a id="contact"></a>
+
+## 💬 Contact
+
+- Website: https://fnzero.dev/
+- Repo: https://github.com/0xfnzero/sol-trade-router-sdk
+- Telegram: https://t.me/fnzero_group
+- Discord: https://discord.gg/vuazbGkqQE
+
+
+Shared stock bridges: 34 official stock/ETF mints and 63 pools. See [eleven-SDK catalog and routing alignment](docs/STOCK_BRIDGE_SYNC.md) for configuration, USDC routing and cache-only boundaries.

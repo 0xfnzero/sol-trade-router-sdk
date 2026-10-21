@@ -1,5 +1,10 @@
 # sol-trade-router-sdk 示例
 
+这些示例使用显式 Router 市场构建器，不继承交易 SDK 客户端的全局 Pump.fun 版本。
+V3 请使用 `PumpFunV3Pool` 的报价和构建方法；`to_routed_market` 会拒绝 V2/V3
+版本参数，避免静默降级为旧版。多池路由需要显式构建各跳。
+`parse_status=Unresolved` 的 Shred 候选不是可执行池快照，不能据此直接交易。
+
 [English](README.md)
 
 仓库根目录：`cargo run -p <name>`。

@@ -1,77 +1,73 @@
 <div align="center">
-    <h1>🔀 Sol Trade Router SDK</h1>
-    <h3><em>Pinocchio 链上多跳 Router + 超低延迟客户端 SDK</em></h3>
+    <h1>Sol Trade Router SDK</h1>
+    <p>Pinocchio 链上多跳路由与 Rust 客户端 SDK</p>
+    <a href="https://crates.io/crates/sol-trade-router-sdk"><img src="https://img.shields.io/crates/v/sol-trade-router-sdk.svg" alt="sol-trade-router-sdk"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </div>
 
 <p align="center">
-    <strong>交易能力对齐 <a href="https://github.com/0xfnzero/sol-trade-sdk">sol-trade-sdk</a>（SWQoS、durable nonce、SimpleBuy/Sell、ViaSol），但每笔成交经本仓库 Pinocchio <code>Route</code> CPI（平台费 + 多跳）。池子快照来自 <a href="https://github.com/0xfnzero/sol-parser-sdk">sol-parser-sdk</a> 事件 / 本地缓存：<em>热路径无 RPC</em>。</strong>
+    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
+    <a href="examples/README.md">示例</a> ·
+    <a href="docs/LOW_LATENCY_BOTS.md">文档</a> ·
+    <a href="RELEASE_NOTES.md">发布与迁移</a> ·
+    <a href="#related-sdks">相关 SDK</a>
 </p>
 
-<p align="center">
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/LICENSE">
-        <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
-    </a>
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk">
-        <img src="https://img.shields.io/github/stars/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub stars">
-    </a>
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/network">
-        <img src="https://img.shields.io/github/forks/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub forks">
-    </a>
-</p>
+通过 Route CPI 组合 DEX 交易与平台费；池状态来自解析事件及本地缓存。使用前需部署匹配的 Router 合约并配置 program ID。
 
-<p align="center">
-    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
-    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
-    <img src="https://img.shields.io/badge/Pinocchio-0A7B83?style=for-the-badge&logo=solana&logoColor=white" alt="Pinocchio">
-    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Trading">
-</p>
+当前版本：**0.3.0**。
 
-<p align="center">
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README_CN.md">中文</a> |
-    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README.md">English</a> |
-    <a href="https://fnzero.dev/">Website</a> |
-    <a href="https://t.me/fnzero_group">Telegram</a> |
-    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
-</p>
+## 目录
 
+- [相关 SDK](#related-sdks)
+- [安装](#安装)
+- [项目特性](#项目特性)
+- [如何使用 SDK](#如何使用-sdk)
+- [文档](#文档)
+- [示例](#示例)
+- [部署 Router 合约](#部署-router-合约)
+- [构建与测试](#构建与测试)
 
-## PumpSwap 与 parser 同步（0.2.0）
+<a id="related-sdks"></a>
 
-依赖固定为 `sol-trade-sdk =6.0.2` 和 `sol-parser-sdk =0.7.14`。
-PumpSwap 买入、定量输出买入和卖出，在构建 CPI 前校验 creator vault authority、ATA
-与实际 quote mint/token program 的一致性。缺失的 token program 或 fee recipient
-会直接报错。定量输出 Buy 补齐 volume 标志；协议收款人和全局 volume 账户保持只读。
+## 相关 SDK
 
-使用 `LoadMarketRequest::PumpSwapPool { pool }` 按明确池地址冷加载，包括非 WSOL 报价池。
-用 SOL 买入时，先准备完整的桥接池和目标池快照，再调用 `build_dynamic_quote_buy`
-构建 WSOL → 报价币 → 目标币。PumpSwap 可作为第一跳或目标跳，按实际 mint 方向买入或卖出；
-配套 Router 仅消费上一跳新增到账余额。调用前需创建必要 ATA 并注资/sync WSOL，构建热路径不调用 RPC。
-高级交易接口的池校验仍要求显式信任非标准池。
+各仓库版本独立，依赖兼容要求以对应 SDK 的安装说明为准。
 
-trade SDK 的 `PumpSwapQuoteRoute` 可包含分支及合流，不能缩成一个 `RoutedMarket`；
-应使用明确的 Router legs 和两跳/三跳构建器。parser 的 `PumpRouteIntent` 是执行前意图，
-不会当作成交或储备快照使用；这类快照应来自已执行交易事件和当前池状态。
+| 语言 | 仓库 | 用途 | 版本 |
+|----------|------------|-------------|---------|
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | 原始 Shred 解码与 ShredStream 指令事件 | `v6.0.0` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream 订阅与事件流封装 | `v5.0.0` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | 链上多跳 Router 与客户端 SDK | `v0.3.0` |
 
-动态 PumpSwap 买入需要部署本版本配套的 Router 合约；发布 SDK 不会升级已有链上部署。
+<a id="安装"></a>
 
-## 📋 目录
+## 📦 安装
 
-- [✨ 项目特性](#-项目特性)
-- [📚 文档](#-文档)
-- [📦 安装](#-安装)
-- [🆚 与 sol-trade-sdk 的差异](#-与-sol-trade-sdk-的差异)
-- [🛠️ 如何使用 SDK](#️-如何使用-sdk)
-- [🚀 部署 Router 合约](#-部署-router-合约)
-- [📚 示例](#-示例)
-- [⚡ 低延迟](#-低延迟)
-- [📦 Workspace 与市场](#-workspace-与市场)
-- [📁 项目结构](#-项目结构)
-- [🔨 构建与测试](#-构建与测试)
-- [📄 许可证](#-许可证)
-- [💬 联系方式](#-联系方式)
-- [⚠️ 重要注意事项](#️-重要注意事项)
+从 crates.io 安装完整客户端版本 **0.3.0**：
 
----
+```toml
+[dependencies]
+sol-trade-router-sdk = "=0.3.0"
+# 仅直接导入解析器类型的订阅程序需要：
+sol-parser-sdk = "=0.9.0"
+```
+
+依赖使用已发布的 **sol-trade-sdk 9.0.0** 和 **sol-parser-sdk 0.9.0**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
+
+详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
+
+一般**不必**额外依赖 `sol-trade-sdk`，交易类型已经从 `sol_trade_router_sdk::*` 导出。
+
+<a id="项目特性"></a>
 
 ## ✨ 项目特性
 
@@ -84,60 +80,7 @@ trade SDK 的 `PumpSwapQuoteRoute` 可包含分支及合流，不能缩成一个
 7. **花费 / 产出完整性** — exact-in 总花费必须等于 `amount_in`；exact-out 不超过预算；校验目标 mint / 原生 SOL 与最低到账量
 8. **Pool guard** — 可选 PDA / 白名单 / `stonk_strict`
 
-## 📚 文档
-
-| 指南 | 用途 |
-|------|------|
-| [低延迟 Bot 接入](docs/LOW_LATENCY_BOTS_CN.md) | 冷/热路径、RiskGate、提交计时 |
-| [动态两跳买卖](docs/DYNAMIC_TWO_HOP_CN.md) | 首跳实际到账全额作为第二跳输入；动态末跳支持 LaunchLab 买入及现有 Raydium/Meteora/Orca 精确输入池 |
-| [动态三跳买卖](docs/DYNAMIC_THREE_HOP_CN.md) | WSOL ↔ USDC ↔ quote ↔ LaunchLab；Raydium/Meteora/Orca 精确输入池可用作动态中间跳或末跳 |
-| [Durable Nonce](docs/NONCE_CACHE_CN.md) | 多 SWQoS / MEV 推荐时钟 |
-| [examples/README_CN.md](examples/README_CN.md) | gRPC / Shred 狙击与跟单模板 |
-| [keys/README.md](keys/README.md) | 本地部署 keypair（勿提交） |
-
-相关：[sol-trade-sdk 文档](https://github.com/0xfnzero/sol-trade-sdk)（Trading Parameters、Gas Fee、ALT、SWQoS）同样适用，仅成交指令程序不同。
-
-## 📦 安装
-
-从 crates.io 安装完整客户端版本 **0.2.0**：
-
-```toml
-[dependencies]
-sol-trade-router-sdk = "=0.2.0"
-# 仅直接导入解析器类型的订阅程序需要：
-sol-parser-sdk = "=0.7.14"
-```
-
-依赖使用已发布的 **sol-trade-sdk 6.0.2** 和 **sol-parser-sdk 0.7.14**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
-
-详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
-
-一般**不必**额外依赖 `sol-trade-sdk`，交易类型已经从 `sol_trade_router_sdk::*` 导出。
-
-## 🆚 与 sol-trade-sdk 的差异
-
-| | sol-trade-sdk | sol-trade-router-sdk |
-|--|---------------|----------------------|
-| 客户端 API | `TradingClient` / SimpleBuy\|Sell | 同名同参 |
-| 成交指令 | 直调 DEX | Pinocchio **Route** CPI + 平台费 |
-| 热路径 | durable nonce / blockhash，无 RPC | 相同 |
-| 事件流 | sol-parser-sdk | 相同 |
-| 链上程序 | 无 | 需部署并 `initialize` 本 Router |
-
-迁移：保留 `TradeBuyParams` / `DexParamEnum` / SWQoS；改用 `sol_trade_router_sdk::TradingClient` + `RouterTradeConfig`（增加可选的 `fee_recipient`、`fee_bps`）。
-
-### 平台手续费（可选 / 可预留）
-
-自部署 Router 时**不必收手续费**：
-
-| 字段 | 作用 | 自部署建议 |
-|------|------|------------|
-| `fee_bps` | 平台费率（万分比） | **`0` = 不扣费**（链上跳过转账） |
-| `fee_recipient` | 收款地址（config 里常驻） | 可填自己的钱包作占位；以后要用再 `update_config` |
-
-- 链上：`fee_bps == 0` 时 `Route` **不转任何平台费**，也不校验收款账户。
-- SDK / 示例：未设 `FEE_BPS` 时默认 `0`；未设 `FEE_RECIPIENT` 时默认用 payer。
-- 你以后自己部署并想收费：`initialize` 时仍可先 `fee_bps = 0`，之后用 `update_config` 改成例如 `50`（0.50%）并指定收款地址。
+<a id="如何使用-sdk"></a>
 
 ## 🛠️ 如何使用 SDK
 
@@ -277,6 +220,71 @@ let ix = initialize_config(&PROGRAM_ID, &authority, &authority, 0);
 let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 ```
 
+<a id="pumpswap-与-parser-同步020"></a>
+
+## PumpSwap 与 parser 同步（0.3.0）
+
+依赖固定为 `sol-trade-sdk =9.0.0` 和 `sol-parser-sdk =0.9.0`。
+PumpSwap 买入、定量输出买入和卖出，在构建 CPI 前校验 creator vault authority、ATA
+与实际 quote mint/token program 的一致性。缺失的 token program 或 fee recipient
+会直接报错。定量输出 Buy 补齐 volume 标志；协议收款人和全局 volume 账户保持只读。
+
+使用 `LoadMarketRequest::PumpSwapPool { pool }` 按明确池地址冷加载，包括非 WSOL 报价池。
+用 SOL 买入时，先准备完整的桥接池和目标池快照，再调用 `build_dynamic_quote_buy`
+构建 WSOL → 报价币 → 目标币。PumpSwap 可作为第一跳或目标跳，按实际 mint 方向买入或卖出；
+配套 Router 仅消费上一跳新增到账余额。调用前需创建必要 ATA 并注资/sync WSOL，构建热路径不调用 RPC。
+高级交易接口的池校验仍要求显式信任非标准池。
+
+trade SDK 的 `PumpSwapQuoteRoute` 可包含分支及合流，不能缩成一个 `RoutedMarket`；
+应使用明确的 Router legs 和两跳/三跳构建器。带 `third_program` 的未解析候选不能当作
+成交或储备快照；这类快照应来自已执行交易事件和当前池状态。旧 `PumpRouteIntent` 回调已移除。
+
+动态 PumpSwap 买入需要部署本版本配套的 Router 合约；发布 SDK 不会升级已有链上部署。
+
+<a id="文档"></a>
+
+## 📚 文档
+
+| 指南 | 用途 |
+|------|------|
+| [低延迟 Bot 接入](docs/LOW_LATENCY_BOTS_CN.md) | 冷/热路径、RiskGate、提交计时 |
+| [动态两跳买卖](docs/DYNAMIC_TWO_HOP_CN.md) | 首跳实际到账全额作为第二跳输入；动态末跳支持 LaunchLab 买入及现有 Raydium/Meteora/Orca 精确输入池 |
+| [动态三跳买卖](docs/DYNAMIC_THREE_HOP_CN.md) | WSOL ↔ USDC ↔ quote ↔ LaunchLab；Raydium/Meteora/Orca 精确输入池可用作动态中间跳或末跳 |
+| [Durable Nonce](docs/NONCE_CACHE_CN.md) | 多 SWQoS / MEV 推荐时钟 |
+| [examples/README_CN.md](examples/README_CN.md) | gRPC / Shred 狙击与跟单模板 |
+| [keys/README.md](keys/README.md) | 本地部署 keypair（勿提交） |
+
+相关：[sol-trade-sdk 文档](https://github.com/0xfnzero/sol-trade-sdk)（Trading Parameters、Gas Fee、ALT、SWQoS）同样适用，仅成交指令程序不同。
+
+<a id="与-sol-trade-sdk-的差异"></a>
+
+## 🆚 与 sol-trade-sdk 的差异
+
+| | sol-trade-sdk | sol-trade-router-sdk |
+|--|---------------|----------------------|
+| 客户端 API | `TradingClient` / SimpleBuy\|Sell | 同名同参 |
+| 成交指令 | 直调 DEX | Pinocchio **Route** CPI + 平台费 |
+| 热路径 | durable nonce / blockhash，无 RPC | 相同 |
+| 事件流 | sol-parser-sdk | 相同 |
+| 链上程序 | 无 | 需部署并 `initialize` 本 Router |
+
+迁移：保留 `TradeBuyParams` / `DexParamEnum` / SWQoS；改用 `sol_trade_router_sdk::TradingClient` + `RouterTradeConfig`（增加可选的 `fee_recipient`、`fee_bps`）。
+
+### 平台手续费（可选 / 可预留）
+
+自部署 Router 时**不必收手续费**：
+
+| 字段 | 作用 | 自部署建议 |
+|------|------|------------|
+| `fee_bps` | 平台费率（万分比） | **`0` = 不扣费**（链上跳过转账） |
+| `fee_recipient` | 收款地址（config 里常驻） | 可填自己的钱包作占位；以后要用再 `update_config` |
+
+- 链上：`fee_bps == 0` 时 `Route` **不转任何平台费**，也不校验收款账户。
+- SDK / 示例：未设 `FEE_BPS` 时默认 `0`；未设 `FEE_RECIPIENT` 时默认用 payer。
+- 你以后自己部署并想收费：`initialize` 时仍可先 `fee_bps = 0`，之后用 `update_config` 改成例如 `50`（0.50%）并指定收款地址。
+
+<a id="部署-router-合约"></a>
+
 ## 🚀 部署 Router 合约
 
 上线 Route 交易前，必须部署链上程序并调用 `initialize`。仅有客户端 SDK 不够。
@@ -330,8 +338,8 @@ use sol_trade_router_sdk::{initialize_config, PROGRAM_ID};
 // initialize_config(&PROGRAM_ID, &authority_pubkey, &authority_pubkey, 0)
 ```
 
-- `fee_bps = 0` → 交易不收平台费  
-- `fee_recipient` 仍写入 config（预留）；以后收费用 `update_config` 改 `fee_bps` / 收款地址  
+- `fee_bps = 0` → 交易不收平台费
+- `fee_recipient` 仍写入 config（预留）；以后收费用 `update_config` 改 `fee_bps` / 收款地址
 
 ### 步骤 5 — Bot 指向该程序
 
@@ -350,6 +358,8 @@ Bot 的 `fee_bps` / `fee_recipient` 应与链上 config **意图一致**（自�
 - [ ] 已发送 `initialize`（你拥有 config authority）
 - [ ] 自部署：`fee_bps = 0`（或不收费）；若收费则 Bot 与链上费率/收款一致
 - [ ] 交易 payer 已准备 durable nonce 账户（[NONCE_CACHE_CN.md](docs/NONCE_CACHE_CN.md)）
+
+<a id="示例"></a>
 
 ## 📚 示例
 
@@ -375,6 +385,8 @@ cargo run -p pumpfun_sniper_trading
 
 预热辅助：`examples/common`（`warm_router_client` + `take_tx_clock`）。详见 [examples/README_CN.md](./examples/README_CN.md)。
 
+<a id="低延迟"></a>
+
 ## ⚡ 低延迟
 
 ```text
@@ -387,6 +399,8 @@ cargo run -p pumpfun_sniper_trading
 - 示例默认 `wait_tx_confirmed=false`
 
 → [docs/LOW_LATENCY_BOTS_CN.md](./docs/LOW_LATENCY_BOTS_CN.md) · [docs/NONCE_CACHE_CN.md](./docs/NONCE_CACHE_CN.md)
+
+<a id="workspace-与市场"></a>
 
 ## 📦 Workspace 与市场
 
@@ -404,6 +418,8 @@ cargo run -p pumpfun_sniper_trading
 | Orca Whirlpool | |
 | Meteora DLMM / DAMM V2 | |
 
+<a id="项目结构"></a>
+
 ## 📁 项目结构
 
 ```text
@@ -419,6 +435,8 @@ sol-trade-router-sdk/
 └── README_CN.md
 ```
 
+<a id="构建与测试"></a>
+
 ## 🔨 构建与测试
 
 ```bash
@@ -432,16 +450,7 @@ RUN_MAINNET_SIM=1 cargo test -p sol-trade-router-sdk --lib mainnet_ -- --nocaptu
 ./scripts/build-program.sh
 ```
 
-## 📄 许可证
-
-MIT License
-
-## 💬 联系方式
-
-- 官网：https://fnzero.dev/
-- 仓库：https://github.com/0xfnzero/sol-trade-router-sdk
-- Telegram：https://t.me/fnzero_group
-- Discord：https://discord.gg/vuazbGkqQE
+<a id="重要注意事项"></a>
 
 ## ⚠️ 重要注意事项
 
@@ -451,3 +460,22 @@ MIT License
 4. 保持 `declare_id!` 与 SDK `PROGRAM_ID` 同步
 5. Durable nonce ≠ 报价有效期 — 池状态仍要从事件刷新
 6. 请遵守当地法律法规
+
+
+<a id="许可证"></a>
+
+## 📄 许可证
+
+MIT License
+
+<a id="联系方式"></a>
+
+## 💬 联系方式
+
+- 官网：https://fnzero.dev/
+- 仓库：https://github.com/0xfnzero/sol-trade-router-sdk
+- Telegram：https://t.me/fnzero_group
+- Discord：https://discord.gg/vuazbGkqQE
+
+
+股票池同步：34 种官方股票/ETF、63 个股票池；配置扩展、USDC 起点、缓存选路与使用边界见 [11 SDK 同步说明](docs/STOCK_BRIDGE_SYNC.md)。
