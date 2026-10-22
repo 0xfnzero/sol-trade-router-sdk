@@ -1,19 +1,39 @@
 <div align="center">
-    <h1>Sol Trade Router SDK</h1>
-    <p>Pinocchio 链上多跳路由与 Rust 客户端 SDK</p>
-    <a href="https://crates.io/crates/sol-trade-router-sdk"><img src="https://img.shields.io/crates/v/sol-trade-router-sdk.svg" alt="sol-trade-router-sdk"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+    <h1>🔀 Sol Trade Router SDK</h1>
+    <h3><em>Pinocchio 链上多跳 Router + 超低延迟客户端 SDK</em></h3>
 </div>
 
 <p align="center">
-    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
-    <a href="examples/README.md">示例</a> ·
-    <a href="docs/LOW_LATENCY_BOTS.md">文档</a> ·
-    <a href="RELEASE_NOTES.md">发布与迁移</a> ·
-    <a href="#related-sdks">相关 SDK</a>
+    <strong>通过 Route CPI 组合 DEX 交易与平台费；池状态来自解析事件及本地缓存。使用前需部署匹配的 Router 合约并配置 program ID。</strong>
 </p>
 
-通过 Route CPI 组合 DEX 交易与平台费；池状态来自解析事件及本地缓存。使用前需部署匹配的 Router 合约并配置 program ID。
+<p align="center">
+    <a href="https://crates.io/crates/sol-trade-router-sdk"><img src="https://img.shields.io/crates/v/sol-trade-router-sdk.svg" alt="sol-trade-router-sdk"></a>
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/LICENSE">
+        <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+    </a>
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk">
+        <img src="https://img.shields.io/github/stars/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub stars">
+    </a>
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/network">
+        <img src="https://img.shields.io/github/forks/0xfnzero/sol-trade-router-sdk?style=social" alt="GitHub forks">
+    </a>
+</p>
+
+<p align="center">
+    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
+    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
+    <img src="https://img.shields.io/badge/Pinocchio-0A7B83?style=for-the-badge&logo=solana&logoColor=white" alt="Pinocchio">
+    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Trading">
+</p>
+
+<p align="center">
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README_CN.md">中文</a> |
+    <a href="https://github.com/0xfnzero/sol-trade-router-sdk/blob/main/README.md">English</a> |
+    <a href="https://fnzero.dev/">Website</a> |
+    <a href="https://t.me/fnzero_group">Telegram</a> |
+    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
+</p>
 
 当前版本：**0.3.0**。
 
