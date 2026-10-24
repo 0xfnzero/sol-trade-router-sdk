@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/programs/sol-trade-router/Cargo.toml"
+cd "$ROOT"
 
 echo "==> building sol-trade-router (SBF)"
 cargo build-sbf --manifest-path "$MANIFEST" --features bpf-entrypoint
