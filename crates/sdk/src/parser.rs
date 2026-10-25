@@ -6,11 +6,10 @@
 //! swap instruction remaining accounts (or a local cache merge).
 
 use sol_parser_sdk::core::events::{
-    normalize_pumpfun_quote_mint, DexEvent, MeteoraDammV2SwapEvent, MeteoraDlmmSwapEvent,
-    OrcaWhirlpoolAccountEvent, OrcaWhirlpoolSwapEvent, PumpFunTradeEvent, PumpSwapBuyEvent,
-    PumpSwapSellEvent, RaydiumAmmV4SwapEvent, RaydiumClmmPoolStateAccountEvent,
-    RaydiumClmmSwapEvent, RaydiumCpmmPoolStateAccountEvent, RaydiumCpmmSwapEvent,
-    RaydiumLaunchlabTradeEvent,
+    DexEvent, MeteoraDammV2SwapEvent, MeteoraDlmmSwapEvent, OrcaWhirlpoolAccountEvent,
+    OrcaWhirlpoolSwapEvent, PumpFunTradeEvent, PumpSwapBuyEvent, PumpSwapSellEvent,
+    RaydiumAmmV4SwapEvent, RaydiumClmmPoolStateAccountEvent, RaydiumClmmSwapEvent,
+    RaydiumCpmmPoolStateAccountEvent, RaydiumCpmmSwapEvent, RaydiumLaunchlabTradeEvent,
 };
 use solana_sdk::pubkey::Pubkey;
 
@@ -41,13 +40,12 @@ pub fn market_from_dex_event(event: &DexEvent) -> Option<Market> {
         DexEvent::PumpFunTrade(e)
         | DexEvent::PumpFunBuy(e)
         | DexEvent::PumpFunSell(e)
-        | DexEvent::PumpFunBuyExactSolIn(e) => {
-            if e.ix_name.ends_with("_v3") { return None; }
-            Some(Market::PumpFunInner(pumpfun_from_trade(e)))
-        },
+        | DexEvent::PumpFunBuyExactSolIn(e) => try_pumpfun_from_trade(e).map(Market::PumpFunInner),
         DexEvent::PumpSwapBuy(e) => Some(Market::PumpSwapOuter(pumpswap_from_buy(e))),
         DexEvent::PumpSwapSell(e) => Some(Market::PumpSwapOuter(pumpswap_from_sell(e))),
-        DexEvent::RaydiumLaunchlabTrade(e) => Some(Market::LaunchLabInner(launchlab_from_trade(e)?)),
+        DexEvent::RaydiumLaunchlabTrade(e) => {
+            Some(Market::LaunchLabInner(launchlab_from_trade(e)?))
+        }
         DexEvent::RaydiumCpmmSwap(e) => Some(Market::CpmmOuter(cpmm_from_swap(e)?)),
         DexEvent::RaydiumCpmmPoolStateAccount(e) => {
             Some(Market::CpmmOuter(cpmm_from_pool_state(e)))
@@ -89,15 +87,41 @@ fn tp_or_spl(pk: Pubkey) -> Pubkey {
     or_default(pk, TOKEN_PROGRAM)
 }
 
+/// A V1/V2 market usable by the router's quote/build path. Input-only route
+/// callbacks and unresolved ALT accounts require a current cached snapshot.
+/// V3 uses the explicit `PumpFunV3Pool` API instead of a legacy market.
+pub fn try_pumpfun_from_trade(e: &PumpFunTradeEvent) -> Option<PumpFunPool> {
+    if e.parse_status == sol_parser_sdk::core::events::TradeParseStatus::Unresolved
+        || !matches!(
+            e.ix_name.as_str(),
+            "buy" | "sell" | "buy_exact_sol_in" | "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
+        )
+        || [
+            e.mint,
+            e.quote_mint,
+            e.bonding_curve,
+            e.associated_bonding_curve,
+            e.creator_vault,
+            e.fee_recipient,
+            e.token_program,
+        ]
+        .contains(&Pubkey::default())
+        || (e.ix_name.ends_with("_v2") && e.quote_token_program == Pubkey::default())
+    {
+        return None;
+    }
+    let pool = pumpfun_from_trade(e);
+    (pool.virtual_token_reserves > 0 && pool.virtual_sol_reserves > 0).then_some(pool)
+}
+
+/// Unchecked field conversion. Prefer [`try_pumpfun_from_trade`] for events
+/// received directly from a subscription; zero fields remain incomplete.
 pub fn pumpfun_from_trade(e: &PumpFunTradeEvent) -> PumpFunPool {
-    let quote_mint = {
-        let q = normalize_pumpfun_quote_mint(e.quote_mint);
-        // Solscan sentinel → WSOL for router native-SOL settlement.
-        if q.to_string() == "So11111111111111111111111111111111111111111" {
-            WSOL_MINT
-        } else {
-            q
-        }
+    let quote_mint = if e.quote_mint == sol_parser_sdk::core::events::PUMPFUN_SOLSCAN_SOL_QUOTE_MINT
+    {
+        WSOL_MINT
+    } else {
+        e.quote_mint
     };
     let use_v2 = matches!(
         e.ix_name.as_str(),
@@ -110,9 +134,15 @@ pub fn pumpfun_from_trade(e: &PumpFunTradeEvent) -> PumpFunPool {
     };
     PumpFunPool {
         mint: e.mint,
-        mint_token_program: tp_or_spl(e.token_program),
+        mint_token_program: e.token_program,
         quote_mint,
-        quote_token_program: tp_or_spl(e.quote_token_program),
+        quote_token_program: if matches!(e.ix_name.as_str(), "buy" | "sell" | "buy_exact_sol_in")
+            && quote_mint == WSOL_MINT
+        {
+            tp_or_spl(e.quote_token_program)
+        } else {
+            e.quote_token_program
+        },
         use_v2,
         bonding_curve: e.bonding_curve,
         associated_bonding_curve: e.associated_bonding_curve,
@@ -135,7 +165,10 @@ pub fn pumpfun_from_trade(e: &PumpFunTradeEvent) -> PumpFunPool {
         real_token_reserves: e.real_token_reserves,
         protocol_fee_bps: e.fee_basis_points,
         creator_fee_bps: e.creator_fee_basis_points,
-        fee_rates_known: !e.ix_name.ends_with("_v3"),
+        fee_rates_known: e.parse_status
+            != sol_parser_sdk::core::events::TradeParseStatus::Unresolved
+            && !e.ix_name.ends_with("_v3")
+            && e.ix_name != "multi_hop_swap",
         has_creator: e.creator != Pubkey::default(),
         is_cashback_coin: e.is_cashback_coin || e.cashback_fee_basis_points > 0,
     }
@@ -159,7 +192,9 @@ pub fn pumpswap_from_buy(e: &PumpSwapBuyEvent) -> PumpSwapPool {
         quote_fee_reserves: None,
         lp_fee_bps: e.lp_fee_basis_points,
         protocol_fee_bps: e.protocol_fee_basis_points,
-        creator_fee_bps: e.coin_creator_fee_basis_points.saturating_add(e.cashback_fee_basis_points),
+        creator_fee_bps: e
+            .coin_creator_fee_basis_points
+            .saturating_add(e.cashback_fee_basis_points),
         is_cashback_coin: e.cashback_fee_basis_points > 0,
         protocol_fee_recipient: e.protocol_fee_recipient,
         buyback_fee_recipient: or_default(e.fee_recipient, PUMPFUN_BUYBACK_FEE_RECIPIENT),
@@ -184,7 +219,9 @@ pub fn pumpswap_from_sell(e: &PumpSwapSellEvent) -> PumpSwapPool {
         quote_fee_reserves: None,
         lp_fee_bps: e.lp_fee_basis_points,
         protocol_fee_bps: e.protocol_fee_basis_points,
-        creator_fee_bps: e.coin_creator_fee_basis_points.saturating_add(e.cashback_fee_basis_points),
+        creator_fee_bps: e
+            .coin_creator_fee_basis_points
+            .saturating_add(e.cashback_fee_basis_points),
         is_cashback_coin: e.cashback_fee_basis_points > 0,
         protocol_fee_recipient: e.protocol_fee_recipient,
         buyback_fee_recipient: or_default(e.fee_recipient, PUMPFUN_BUYBACK_FEE_RECIPIENT),
@@ -272,7 +309,10 @@ pub fn cpmm_from_pool_state(e: &RaydiumCpmmPoolStateAccountEvent) -> CpmmPool {
 /// Classic quote mints have known owners; an unknown mint stays unresolved.
 #[inline]
 pub fn known_mint_token_program(mint: Pubkey) -> Pubkey {
-    if matches!(mint, WSOL_MINT | crate::constants::USDC_MINT | crate::constants::USDT_MINT) {
+    if matches!(
+        mint,
+        WSOL_MINT | crate::constants::USDC_MINT | crate::constants::USDT_MINT
+    ) {
         TOKEN_PROGRAM
     } else {
         Pubkey::default()
@@ -299,7 +339,11 @@ pub fn clmm_from_swap(e: &RaydiumClmmSwapEvent) -> Option<RaydiumClmmPool> {
     } else {
         (e.output_mint, e.input_mint, e.output_vault, e.input_vault)
     };
-    let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
+    let amount_in = if e.zero_for_one {
+        e.amount_0
+    } else {
+        e.amount_1
+    };
     // CLMM swap events do not carry per-mint token programs. Heuristic: a non-zero
     // transfer_fee on a side strongly implies Token-2022 for that mint; otherwise
     // leave unknown owners unresolved. Supply an authoritative mint-owner overlay.
@@ -451,7 +495,11 @@ pub fn merge_clmm_swap(pool: &mut RaydiumClmmPool, e: &RaydiumClmmSwapEvent) {
     if e.observation_state != Pubkey::default() {
         pool.observation_state = e.observation_state;
     }
-    let amount_in = if e.zero_for_one { e.amount_0 } else { e.amount_1 };
+    let amount_in = if e.zero_for_one {
+        e.amount_0
+    } else {
+        e.amount_1
+    };
     pool.expected_out = None;
     pool.quoted_input_mint = None;
     if amount_in > 0 {

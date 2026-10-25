@@ -72,8 +72,8 @@ pub use parser::{
     amm_v4_from_swap, clmm_apply_token_programs, clmm_from_pool_state, clmm_from_swap,
     cpmm_from_pool_state, cpmm_from_swap, damm_v2_from_swap, dlmm_from_swap, launchlab_from_trade,
     market_from_dex_event, market_from_dex_event_checked, merge_clmm_swap, merge_whirlpool_swap,
-    pumpfun_from_trade, pumpswap_from_buy, pumpswap_from_sell, whirlpool_from_account,
-    whirlpool_from_swap,
+    pumpfun_from_trade, pumpswap_from_buy, pumpswap_from_sell, try_pumpfun_from_trade,
+    whirlpool_from_account, whirlpool_from_swap,
 };
 pub use pool_guard::{
     assert_cpmm_ok, assert_launchlab_ok, assert_market_ok, assert_pumpfun_ok, assert_pumpswap_ok,

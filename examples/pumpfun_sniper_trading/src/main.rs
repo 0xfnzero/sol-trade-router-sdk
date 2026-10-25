@@ -67,7 +67,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(event) = queue.pop() {
             let run = match &event {
                 DexEvent::PumpFunBuy(e) | DexEvent::PumpFunBuyExactSolIn(e) => {
-                    if e.is_created_buy && !ALREADY_EXECUTED.swap(true, Ordering::SeqCst) {
+                    if e.is_created_buy
+                        && e.is_buy
+                        && sol_trade_router_sdk::try_pumpfun_from_trade(e)
+                            .is_some_and(|pool| pool.quote_mint == sol_trade_router_sdk::WSOL_MINT)
+                        && !ALREADY_EXECUTED.swap(true, Ordering::SeqCst)
+                    {
                         Some(e.clone())
                     } else {
                         None

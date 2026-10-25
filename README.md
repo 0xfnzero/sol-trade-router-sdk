@@ -35,7 +35,7 @@
     <a href="https://discord.gg/vuazbGkqQE">Discord</a>
 </p>
 
-Current version: **0.3.0**.
+Current version: **0.4.0**.
 
 ## Contents
 
@@ -56,32 +56,32 @@ Repositories are versioned independently; follow each SDK’s installation guide
 
 | Language | Repository | Purpose | Version |
 |----------|------------|-------------|---------|
-| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX transaction and account event parsing | `v0.9.1` |
-| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX transaction and account event parsing | `v0.9.1` |
-| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX transaction and account event parsing | `v0.9.1` |
-| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX transaction and account event parsing | `v0.9.1` |
-| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Transaction building, signing and multi-channel submission | `v9.0.1` |
-| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | Transaction building, signing and multi-channel submission | `v9.0.1` |
-| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Transaction building, signing and multi-channel submission | `v9.0.1` |
-| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Transaction building, signing and multi-channel submission | `v9.0.1` |
-| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | Raw shred decoding and ShredStream instruction events | `v6.0.1` |
-| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream subscriptions and event streaming | `v5.0.0` |
-| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | On-chain multi-hop router and client SDK | `v0.3.0` |
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX transaction and account event parsing | `v0.10.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX transaction and account event parsing | `v0.10.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX transaction and account event parsing | `v0.10.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX transaction and account event parsing | `v0.10.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Transaction building, signing and multi-channel submission | `v10.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | Transaction building, signing and multi-channel submission | `v10.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Transaction building, signing and multi-channel submission | `v10.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Transaction building, signing and multi-channel submission | `v10.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | Raw shred decoding and ShredStream instruction events | `v6.0.2` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream subscriptions and event streaming | `v5.0.1` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | On-chain multi-hop router and client SDK | `v0.4.0` |
 
 <a id="installation"></a>
 
 ## 📦 Installation
 
-Install the complete client release **0.3.0** from crates.io:
+Install the complete client release **0.4.0** from crates.io:
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = "=0.3.0"
+sol-trade-router-sdk = "=0.4.0"
 # Streaming bots only, if importing parser types directly:
-sol-parser-sdk = "=0.9.1"
+sol-parser-sdk = "=0.10.0"
 ```
 
-Dependencies use published **sol-trade-sdk 9.0.1** and **sol-parser-sdk 0.9.1**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
+Dependencies use published **sol-trade-sdk 10.0.0** and **sol-parser-sdk 0.10.0**. No consuming-workspace patches or local checkouts are required. Deploy the matching Router source yourself and configure its ID with `with_program_id(your_id)`; examples require `ROUTER_PROGRAM_ID`. The historical default ID is not a compatible target for these repaired instruction formats. Source merge and SDK publication do not deploy or upgrade a program.
 
 See [release checks and self-deployment compatibility](docs/RELEASE_0.2.0.md). Current pinned Yellowstone dependencies have an upstream Windows import limitation; release checks target Unix.
 
@@ -197,6 +197,10 @@ if let Some(market) = market_from_dex_event(&event) { /* ... */ }
 let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```
 
+`market_from_dex_event` and `try_pumpfun_from_trade` require complete Pump.fun V1/V2 accounts and reserves. Unresolved wrappers, partial ALT inputs and official `multi_hop_swap` callbacks return `None`; they remain observable parser events, not ready-to-trade snapshots. V3 uses `PumpFunV3Pool`. The SOL copy/sniper examples also require a SOL quote and skip incomplete snapshots before consuming a nonce. Merge a current subscription cache before trading Shred inputs.
+
+For the official PumpSwap single-instruction route through Pump.fun curves or migrated pools, see the [Rust multi-hop example](https://github.com/0xfnzero/sol-trade-sdk/blob/main/examples/pump_multi_hop.rs). That instruction calls PumpSwap directly and is separate from this SDK's router CPI route. The trade SDK's Auto / Official / Sequential selector applies to its explicit quote routes; it does not change this router's CPI execution.
+
 ### 4. ATA strategy
 
 | Kind | Cold path | In trade | Close |
@@ -245,9 +249,9 @@ let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 
 <a id="pumpswap-and-parser-synchronization-020"></a>
 
-## PumpSwap and parser synchronization (0.3.0)
+## PumpSwap and parser synchronization (0.4.0)
 
-This release pins `sol-trade-sdk =9.0.1` and `sol-parser-sdk =0.9.1`.
+This release pins `sol-trade-sdk =10.0.0` and `sol-parser-sdk =0.10.0`.
 PumpSwap buy, exact-output buy and sell legs validate creator vault authority and
 ATA against the actual quote mint/token program before constructing CPI accounts.
 Missing token programs or fee recipients are rejected instead of guessed. Exact-output

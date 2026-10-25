@@ -35,7 +35,7 @@
     <a href="https://discord.gg/vuazbGkqQE">Discord</a>
 </p>
 
-当前版本：**0.3.0**。
+当前版本：**0.4.0**。
 
 ## 目录
 
@@ -56,32 +56,32 @@
 
 | 语言 | 仓库 | 用途 | 版本 |
 |----------|------------|-------------|---------|
-| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX 交易与账户事件解析 | `v0.9.1` |
-| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX 交易与账户事件解析 | `v0.9.1` |
-| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX 交易与账户事件解析 | `v0.9.1` |
-| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX 交易与账户事件解析 | `v0.9.1` |
-| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | 交易构建、签名与多通道提交 | `v9.0.1` |
-| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | 交易构建、签名与多通道提交 | `v9.0.1` |
-| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | 交易构建、签名与多通道提交 | `v9.0.1` |
-| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | 交易构建、签名与多通道提交 | `v9.0.1` |
-| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | 原始 Shred 解码与 ShredStream 指令事件 | `v6.0.1` |
-| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream 订阅与事件流封装 | `v5.0.0` |
-| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | 链上多跳 Router 与客户端 SDK | `v0.3.0` |
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX 交易与账户事件解析 | `v0.10.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX 交易与账户事件解析 | `v0.10.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX 交易与账户事件解析 | `v0.10.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX 交易与账户事件解析 | `v0.10.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | 交易构建、签名与多通道提交 | `v10.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | 交易构建、签名与多通道提交 | `v10.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | 交易构建、签名与多通道提交 | `v10.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | 交易构建、签名与多通道提交 | `v10.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | 原始 Shred 解码与 ShredStream 指令事件 | `v6.0.2` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream 订阅与事件流封装 | `v5.0.1` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | 链上多跳 Router 与客户端 SDK | `v0.4.0` |
 
 <a id="安装"></a>
 
 ## 📦 安装
 
-从 crates.io 安装完整客户端版本 **0.3.0**：
+从 crates.io 安装完整客户端版本 **0.4.0**：
 
 ```toml
 [dependencies]
-sol-trade-router-sdk = "=0.3.0"
+sol-trade-router-sdk = "=0.4.0"
 # 仅直接导入解析器类型的订阅程序需要：
-sol-parser-sdk = "=0.9.1"
+sol-parser-sdk = "=0.10.0"
 ```
 
-依赖使用已发布的 **sol-trade-sdk 9.0.1** 和 **sol-parser-sdk 0.9.1**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
+依赖使用已发布的 **sol-trade-sdk 10.0.0** 和 **sol-parser-sdk 0.10.0**，不再需要使用方添加 Git 补丁或本地源码路径。请自行部署本仓库配套的 Router 合约，并通过 `with_program_id(your_id)` 配置地址；示例要求设置 `ROUTER_PROGRAM_ID`。历史默认地址不支持修复后的指令格式，合并源码和发布 SDK 不会部署或升级合约。
 
 详见[发布验证与自部署兼容性](docs/RELEASE_0.2.0.md)。固定版本的 Yellowstone 依赖仍存在上游 Windows 导入限制，本次发布验证面向 Unix。
 
@@ -195,6 +195,10 @@ if let Some(market) = market_from_dex_event(&event) { /* ... */ }
 let routed = to_routed_market(&DexParamEnum::PumpFun(params), mint)?;
 ```
 
+`market_from_dex_event` 和 `try_pumpfun_from_trade` 要求 Pump.fun V1/V2 的账户和储备完整。未知包装、ALT 不完整或官方 `multi_hop_swap` 回调返回 `None`；这些事件仍可用于监控，但不能直接当作可交易池快照。V3 使用 `PumpFunV3Pool`。SOL 跟单／狙击示例还要求 SOL 报价，在领取 nonce 前跳过不完整快照；Shred 输入需先合并当前订阅缓存。
+
+官方 PumpSwap 单指令多跳可经过 Pump.fun 内盘和迁移外盘，参考 [Rust 多跳示例](https://github.com/0xfnzero/sol-trade-sdk/blob/main/examples/pump_multi_hop.rs)。它直接调用 PumpSwap，与本 SDK 的 router CPI 路由是两种入口。 交易 SDK 的 Auto / Official / Sequential 控制其显式 quote route，不会改变本 Router 的 CPI 执行。
+
 ### 4. ATA 策略
 
 | 类型 | 冷路径 | 交易内 | 关闭 |
@@ -242,9 +246,9 @@ let ix = update_config(&PROGRAM_ID, &authority, 50, false, Some(fee_recipient));
 
 <a id="pumpswap-与-parser-同步020"></a>
 
-## PumpSwap 与 parser 同步（0.3.0）
+## PumpSwap 与 parser 同步（0.4.0）
 
-依赖固定为 `sol-trade-sdk =9.0.1` 和 `sol-parser-sdk =0.9.1`。
+依赖固定为 `sol-trade-sdk =10.0.0` 和 `sol-parser-sdk =0.10.0`。
 PumpSwap 买入、定量输出买入和卖出，在构建 CPI 前校验 creator vault authority、ATA
 与实际 quote mint/token program 的一致性。缺失的 token program 或 fee recipient
 会直接报错。定量输出 Buy 补齐 volume 标志；协议收款人和全局 volume 账户保持只读。

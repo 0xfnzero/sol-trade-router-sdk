@@ -66,7 +66,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | DexEvent::PumpFunSell(e)
                 | DexEvent::PumpFunBuyExactSolIn(e)
                 | DexEvent::PumpFunTrade(e) => {
-                    if !ALREADY_EXECUTED.swap(true, Ordering::SeqCst) {
+                    if sol_trade_router_sdk::try_pumpfun_from_trade(e)
+                        .is_some_and(|pool| pool.quote_mint == sol_trade_router_sdk::WSOL_MINT)
+                        && !ALREADY_EXECUTED.swap(true, Ordering::SeqCst)
+                    {
                         Some(e.clone())
                     } else {
                         None

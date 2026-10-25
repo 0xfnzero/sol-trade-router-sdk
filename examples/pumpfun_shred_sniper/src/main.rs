@@ -26,8 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let warm = Arc::new(warm_router_client().await?);
 
-    let endpoint = std::env::var("SHRED_ENDPOINT")
-        .unwrap_or_else(|_| "http://127.0.0.1:10800".to_string());
+    let endpoint =
+        std::env::var("SHRED_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:10800".to_string());
     let shred = ShredStreamClient::new_with_config(
         &endpoint,
         ShredStreamConfig {
@@ -58,7 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 DexEvent::PumpFunBuy(e)
                 | DexEvent::PumpFunBuyExactSolIn(e)
                 | DexEvent::PumpFunTrade(e) => {
-                    if e.is_created_buy && e.is_buy && !ALREADY_EXECUTED.swap(true, Ordering::SeqCst)
+                    if e.is_created_buy
+                        && e.is_buy
+                        && sol_trade_router_sdk::try_pumpfun_from_trade(e)
+                            .is_some_and(|pool| pool.quote_mint == sol_trade_router_sdk::WSOL_MINT)
+                        && !ALREADY_EXECUTED.swap(true, Ordering::SeqCst)
                     {
                         Some(e.clone())
                     } else {

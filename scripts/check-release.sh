@@ -18,7 +18,8 @@ PACKAGE_ARGS=()
 if [[ ${1:-} == "--allow-dirty" ]]; then PACKAGE_ARGS+=(--allow-dirty); fi
 cargo package -p sol-trade-router-sdk "${PACKAGE_ARGS[@]}"
 # The extracted registry package must run its tests without repository fixtures.
-cargo test --manifest-path target/package/sol-trade-router-sdk-0.2.0/Cargo.toml --locked
+PACKAGE_MANIFEST="$(cargo metadata --no-deps --format-version 1 | "$VM_PYTHON" -c 'import json, pathlib, sys; m = json.load(sys.stdin); p = next(p for p in m["packages"] if p["name"] == "sol-trade-router-sdk"); print(pathlib.Path(m["target_directory"]) / "package" / (p["name"] + "-" + p["version"]) / "Cargo.toml")')"
+cargo test --manifest-path "$PACKAGE_MANIFEST" --locked
 cargo build-sbf --tools-version v1.53 --manifest-path programs/sol-trade-router/Cargo.toml --features bpf-entrypoint
 cargo build-sbf --tools-version v1.53 --manifest-path scripts/mock-dex/Cargo.toml
 "$VM_PYTHON" scripts/test-router-security.py target/deploy/sol_trade_router.so

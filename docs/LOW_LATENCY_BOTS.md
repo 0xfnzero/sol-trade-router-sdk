@@ -29,7 +29,7 @@ Reference warm helper: `examples/common` (`warm_router_client` + `take_tx_clock`
 ## Hot path
 
 - Prefer **`durable_nonce`** from a prefetched pool (multi-SWQoS); else cached `recent_blockhash`
-- Map `DexEvent` → `PumpFunParams::from_dev_trade` / `from_trade` / `market_from_dex_event`
+- Validate a complete snapshot with `try_pumpfun_from_trade` before mapping Pump.fun events to trade parameters or taking a nonce. Official multi-hop and incomplete ALT inputs need a current local cache; their callback defaults are not quotes. SOL examples skip non-SOL quote mints. V3 uses `PumpFunV3Pool`.
 - Set `grpc_recv_us` from event metadata for end-to-end timing
 - Prefer `wait_tx_confirmed=false`; monitor signatures externally
 - Buy: `create_input_token_ata=false` when WSOL is pre-warmed; meme ATA may still be created in-tx for unknown mints
