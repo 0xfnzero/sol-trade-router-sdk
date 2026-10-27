@@ -31,7 +31,8 @@ thiserror = "2"
 solana-sdk = "4.0.1"
 solana-system-interface = { version = "3.0.0", features = ["bincode"] }
 solana-commitment-config = { version = "3.1.1", features = ["serde"] }
-sol-parser-sdk = { version = "=0.10.0", default-features = false, features = ["parse-borsh"] }
+# Unreleased parser API; replace the Git pin with the next registry release before publishing.
+sol-parser-sdk = { version = "=0.10.0", git = "https://github.com/0xfnzero/sol-parser-sdk", rev = "0e32287e4056113ff047e2199dc1b5e8289e8f98", default-features = false, features = ["parse-borsh"] }
 sol-trade-sdk = { version = "=10.0.0", default-features = false }
 tokio = { version = "1.42.0", features = ["full", "rt-multi-thread"] }
 solana-hash = "4.4.0"
