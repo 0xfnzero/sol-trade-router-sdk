@@ -35,7 +35,7 @@ use crate::transfer_fee::TokenTransferFee;
 
 #[test]
 fn pumpfun_event_conversion_requires_a_complete_known_market() {
-    use sol_parser_sdk::core::events::{PumpFunTradeEvent, TradeParseStatus};
+    use sol_parser_sdk::core::events::PumpFunTradeEvent;
     let mut event = PumpFunTradeEvent {
         ix_name: "buy".into(),
         mint: Pubkey::new_unique(),
@@ -81,7 +81,7 @@ fn pumpfun_event_conversion_requires_a_complete_known_market() {
         "input-only amounts are not reserves"
     );
     event.virtual_token_reserves = 1000;
-    event.parse_status = TradeParseStatus::Unresolved;
+    event.ix_name.clear();
     assert!(crate::try_pumpfun_from_trade(&event).is_none());
 }
 

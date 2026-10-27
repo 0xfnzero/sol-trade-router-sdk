@@ -91,21 +91,19 @@ fn tp_or_spl(pk: Pubkey) -> Pubkey {
 /// callbacks and unresolved ALT accounts require a current cached snapshot.
 /// V3 uses the explicit `PumpFunV3Pool` API instead of a legacy market.
 pub fn try_pumpfun_from_trade(e: &PumpFunTradeEvent) -> Option<PumpFunPool> {
-    if e.parse_status == sol_parser_sdk::core::events::TradeParseStatus::Unresolved
-        || !matches!(
-            e.ix_name.as_str(),
-            "buy" | "sell" | "buy_exact_sol_in" | "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
-        )
-        || [
-            e.mint,
-            e.quote_mint,
-            e.bonding_curve,
-            e.associated_bonding_curve,
-            e.creator_vault,
-            e.fee_recipient,
-            e.token_program,
-        ]
-        .contains(&Pubkey::default())
+    if !matches!(
+        e.ix_name.as_str(),
+        "buy" | "sell" | "buy_exact_sol_in" | "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
+    ) || [
+        e.mint,
+        e.quote_mint,
+        e.bonding_curve,
+        e.associated_bonding_curve,
+        e.creator_vault,
+        e.fee_recipient,
+        e.token_program,
+    ]
+    .contains(&Pubkey::default())
         || (e.ix_name.ends_with("_v2") && e.quote_token_program == Pubkey::default())
     {
         return None;
@@ -165,10 +163,10 @@ pub fn pumpfun_from_trade(e: &PumpFunTradeEvent) -> PumpFunPool {
         real_token_reserves: e.real_token_reserves,
         protocol_fee_bps: e.fee_basis_points,
         creator_fee_bps: e.creator_fee_basis_points,
-        fee_rates_known: e.parse_status
-            != sol_parser_sdk::core::events::TradeParseStatus::Unresolved
-            && !e.ix_name.ends_with("_v3")
-            && e.ix_name != "multi_hop_swap",
+        fee_rates_known: matches!(
+            e.ix_name.as_str(),
+            "buy" | "sell" | "buy_exact_sol_in" | "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
+        ),
         has_creator: e.creator != Pubkey::default(),
         is_cashback_coin: e.is_cashback_coin || e.cashback_fee_basis_points > 0,
     }
