@@ -31,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shred = ShredStreamClient::new_with_config(
         &endpoint,
         ShredStreamConfig {
+            auth_token: std::env::var("SHREDSTREAM_X_TOKEN").ok(),
             connection_timeout_ms: 5000,
             request_timeout_ms: 30000,
             max_decoding_message_size: 1024 * 1024 * 1024,

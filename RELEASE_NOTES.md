@@ -1,11 +1,15 @@
-# sol-trade-router-sdk v0.4.0
+# sol-trade-router-sdk v0.5.0
 
-Released 2026-10-26.
+Released November 3, 2026.
 
-Require complete verified Pump.fun V1/V2 market snapshots before router quote/build or copy/sniper nonce consumption. Preserve unknown fields instead of inventing mint owners or quote mints. Official multi-hop and unresolved wrappers remain observable parser events requiring cache enrichment; V3 uses its explicit pool API. Update parser/trade dependencies and routing documentation.
+## Changes
 
-Router 报价构建及跟单/狙击领取 nonce 前校验完整市场快照；未知字段不猜测。官方多跳和未知包装回调需缓存补全，V3 使用专用池接口，并同步依赖与文档。
+Use published sol-parser-sdk 0.11.0 and sol-trade-sdk 11.0.1 instead of development Git pins. Adapt examples to status-field removal while preserving verified-market requirements for quote/build and nonce consumption. Refresh installation and SDK navigation versions. The Shred sniper example accepts SHREDSTREAM_X_TOKEN with the updated parser configuration.
 
-## Validation / 验证
+## Migration
 
-Native-language regression suites and replay/build checks passed for the synchronized changes. Four trade implementations completed curve buy/sell and pool buy/sell unsigned mainnet simulations (16 successful simulations); these small-amount interface checks do not replace fresh production quotes. No transaction was broadcast.
+Use matching parser/trade versions when passing events or snapshots to router APIs. Remove obsolete parse_status references. This publishes the client SDK only; the on-chain router is not deployed or upgraded.
+
+## Validation
+
+Offline native router regressions and package checks passed. Online simulation tests remain opt-in; no transaction was broadcast.

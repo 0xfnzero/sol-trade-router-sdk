@@ -8,6 +8,8 @@
 export PRIVATE_KEY=...
 export RPC_URL=https://your-rpc.example
 export SHRED_ENDPOINT=http://127.0.0.1:10800
+# 服务商要求认证时配置：
+# export SHREDSTREAM_X_TOKEN=your-token
 cargo run -p pumpfun_shred_sniper
 ```
 
